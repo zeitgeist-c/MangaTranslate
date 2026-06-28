@@ -460,6 +460,7 @@ async function translateSinglePage(targetEl, pageId) {
   var cellCaptureH = Math.floor(elH / GRID_ROWS);
 
   var cells = [];
+  var chunkIndex = 0;
   for (var row = 0; row < GRID_ROWS; row++) {
     for (var col = 0; col < GRID_COLS; col++) {
       var cx = elX + col * cellCaptureW;
@@ -473,22 +474,26 @@ async function translateSinglePage(targetEl, pageId) {
       if (cy + ch > elY + elH) ch = (elY + elH) - cy;
       if (cw < 10 || ch < 10) continue;
       cells.push({
+        chunkIndex: chunkIndex++,
         row: row, col: col,
-        // Capture koordinatlari (gercek piksel)
+        // Capture koordinatlari (gercek piksel, chunk-local origin)
         px: cx, py: cy, pw: cw, ph: ch,
+        // Page (img) capture metadata — viewport içindeki offset + boyut
+        pageCaptureX: elX, pageCaptureY: elY,
+        pageCaptureW: elW, pageCaptureH: elH,
       });
     }
   }
-  console.log('[MangaLens-v2.2]', cells.length, 'hucre (capture koordinatinda)');
+  console.log('[MangaLens-v2.4]', cells.length, 'hucre (capture koordinatinda)');
 
   // 5. Her hucre icin AI cagirisi (cache + rate limit)
-  var allBubbles = [];
+  var allGlobalBubbles = [];
   var errors = 0;
   for (var i = 0; i < cells.length; i++) {
     var cell = cells[i];
 
     // PageId + cell koordinatlari = unique cache key
-    var cacheKey = await sha256Hex(pageId + '|cell|' + cell.px + ',' + cell.py + ',' + cell.pw + 'x' + cell.ph);
+    var cacheKey = await sha256Hex(pageId + '|chunk|' + cell.px + ',' + cell.py + ',' + cell.pw + 'x' + cell.ph);
 
     // Once cache kontrol
     var bubbles = null;
@@ -496,7 +501,7 @@ async function translateSinglePage(targetEl, pageId) {
       var cacheResp = await chrome.runtime.sendMessage({ type: 'GET_CACHED_CELL', cacheKey: cacheKey });
       if (cacheResp && cacheResp.success && cacheResp.bubbles) {
         bubbles = cacheResp.bubbles;
-        console.log('[MangaLens-v2.2] cell', i, 'cache HIT,', bubbles.length, 'balon');
+        console.log('[MangaLens-v2.4] cell', i, 'cache HIT,', bubbles.length, 'balon');
       }
     } catch (e) { /* cache miss */ }
 
@@ -534,31 +539,100 @@ async function translateSinglePage(targetEl, pageId) {
     }
 
     if (bubbles && bubbles.length > 0) {
-      // Capture koordinatindan viewport CSS koordinatina cevir
-      var cssBubbles = bubbles.map(function(b) {
-        return {
-          text: b.text,
-          x: b.x / dpr,         // capture piksel → CSS piksel
-          y: b.y / dpr,
-          width:  b.width  / dpr,
-          height: b.height / dpr,
-        };
+      // Faz B: chunk-local bbox → page-global (capture koordinatinda)
+      var globalBubbles = bubbles.map(function(b) {
+        return chunkLocalToPageGlobal(b, cell);
       });
-      allBubbles = allBubbles.concat(cssBubbles);
+      // Faz C: capture piksel → viewport CSS piksel (img coordinate olur)
+      // Henuz img.left/top yok, sonra showOverlayOnImage img.parent ile esleyecek
+      var cssBubbles = globalBubbles.map(function(b) {
+        return captureToViewportCSS(b, dpr);
+      });
+      // Debug log (her bbox icin)
+      cssBubbles.forEach(function(b, idx) {
+        console.log('[MangaLens-v2.4] bbox-map', {
+          pageId: pageId,
+          chunkIndex: cell.chunkIndex,
+          chunkMeta: { px: cell.px, py: cell.py, pw: cell.pw, ph: cell.ph },
+          rawBox: bubbles[idx],
+          globalBox: globalBubbles[idx],
+          cssBox: b,
+          pageCaptureW: cell.pageCaptureW,
+          pageCaptureH: cell.pageCaptureH,
+          dpr: dpr,
+        });
+      });
+      allGlobalBubbles = allGlobalBubbles.concat(cssBubbles);
     }
   }
 
-  console.log('[MangaLens-v2.2] sayfa', pageId, ':', allBubbles.length, 'balon,', errors, 'hata');
+  // Faz D: overlap'ten dolayi ayni balon iki kez olabilir → dedupe
+  var dedupedBubbles = dedupeBubbles(allGlobalBubbles, GRID_OVERLAP);
+
+  console.log('[MangaLens-v2.4] sayfa', pageId, ':', allGlobalBubbles.length, '→', dedupedBubbles.length, 'balon (dedupe),', errors, 'hata');
 
   // 6. Overlay'i hedef img'nin parent'ina bas
-  if (allBubbles.length > 0) {
-    var captureW = img.naturalWidth;
-    var captureH = img.naturalHeight;
-    showOverlayOnImage(allBubbles, { width: window.innerWidth, height: window.innerHeight },
-                       captureW, captureH, pageId, targetEl);
+  if (dedupedBubbles.length > 0) {
+    // Faz E: capture artik SADECE img capture boyutu (tüm viewport degil)
+    showOverlayOnImage(dedupedBubbles, { width: window.innerWidth, height: window.innerHeight },
+                       elW, elH, pageId, targetEl);
   }
 
-  return { ok: true, bubbles: allBubbles.length, errors: errors };
+  return { ok: true, bubbles: dedupedBubbles.length, errors: errors };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  v2.4: Koordinat Donusum Helpers
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Faz B: AI'dan gelen bbox chunk-local (her chunk 0,0'dan baslar).
+ * Page-global capture koordinatina cevir (chunk offset eklenir).
+ */
+function chunkLocalToPageGlobal(bbox, chunk) {
+  return {
+    text:        bbox.text,
+    x:           chunk.px + bbox.x,
+    y:           chunk.py + bbox.y,
+    width:       bbox.width,
+    height:      bbox.height,
+    chunkIndex:  chunk.chunkIndex,
+  };
+}
+
+/**
+ * Faz C: capture piksel → viewport CSS piksel (/dpr).
+ * Artik sonuc viewport koordinatinda, img-relative degil.
+ */
+function captureToViewportCSS(bbox, dpr) {
+  return {
+    text:        bbox.text,
+    x:           bbox.x / dpr,
+    y:           bbox.y / dpr,
+    width:       bbox.width  / dpr,
+    height:      bbox.height / dpr,
+    chunkIndex:  bbox.chunkIndex,
+  };
+}
+
+/**
+ * Faz D: Overlap'ten dolayi ayni balon iki chunk'ta tespit edilmis olabilir.
+ * Text + merkez yakinligina gore tekil tut.
+ */
+function dedupeBubbles(boxes, overlapPx) {
+  if (!boxes || boxes.length <= 1) return boxes;
+  var seen = [];
+  boxes.forEach(function(b) {
+    var dup = seen.find(function(s) {
+      var dx = Math.abs((s.x + s.width/2)  - (b.x + b.width/2));
+      var dy = Math.abs((s.y + s.height/2) - (b.y + b.height/2));
+      var sameText = (s.text || '').trim() === (b.text || '').trim() && (s.text || '').trim().length > 0;
+      return dx < overlapPx && dy < overlapPx && sameText;
+    });
+    if (!dup) seen.push(b);
+  });
+  console.log('[MangaLens-v2.4] dedupe:', boxes.length, '→', seen.length, '(', boxes.length - seen.length, 'duplicate silindi)');
+  return seen;
 }
 
 // Capture koordinatinda (gercek piksel) crop
@@ -677,15 +751,15 @@ function ensureRelativeParent(img) {
 /**
  * Overlay'i manga img parent'ina ekler, bbox'lari img koordinat sistemine cevirir.
  *
- * captureVisibleTab viewport koordinati verir. Img parent'i relative ise,
- * viewport koordinati → img koordinati = bbox - img.rect.left/top.
- * Scroll offset gerekmez cunku parent relative.
+ * v2.4: allBubbles artik viewport CSS koordinatinda (capture piksel / dpr).
+ * captureW/H = img capture boyutu (gercek piksel, viewport icindeki).
  *
- * pageId + targetEl opsiyonel: spesifik sayfa icin (v2.2 translateSinglePage)
- * Belirtilmezse en buyuk gorunur img secilir (v1 selection mode fallback)
+ * Donusum zinciri:
+ *   viewport CSS (b.x) → img-relative CSS ((b.x - imgRect.left))
+ *   → scaleX (imgRect.width / (captureW / dpr))
  */
 function showOverlayOnImage(allBubbles, viewport, captureW, captureH, pageId, targetEl) {
-  console.log('[MangaLens-v2.2] showOverlayOnImage:', allBubbles.length, 'balon,',
+  console.log('[MangaLens-v2.4] showOverlayOnImage:', allBubbles.length, 'balon,',
               'pageId:', pageId || '(yok)', 'targetEl:', targetEl ? targetEl.tagName : '(yok)');
 
   // Eski ayni sayfanın overlay'ini temizle (yenisi yerine)
@@ -698,34 +772,45 @@ function showOverlayOnImage(allBubbles, viewport, captureW, captureH, pageId, ta
   }
 
   var img = targetEl || findMangaImage();
-  if (!img || img.tagName === 'CANVAS' && !img.parentElement) {
-    console.warn('[MangaLens-v2.2] hedef img bulunamadi, viewport fixed fallback');
+  if (!img) {
+    console.warn('[MangaLens-v2.4] hedef img bulunamadi, viewport fixed fallback');
     showFixedOverlayFallback(allBubbles, viewport);
     return;
   }
 
-  console.log('[MangaLens-v2.2] hedef img bulundu:',
+  console.log('[MangaLens-v2.4] hedef img bulundu:',
               (img.src || img.currentSrc || '').slice(0, 80),
               'natural:', img.naturalWidth, 'x', img.naturalHeight);
 
   var imgRect = img.getBoundingClientRect();
   var renderedW = imgRect.width;
   var renderedH = imgRect.height;
-  var captureW_safe = captureW || viewport.width;
-  var captureH_safe = captureH || viewport.height;
 
-  // scaleX / scaleY: capture (gercek piksel) → rendered (CSS piksel)
-  var scaleX = renderedW / captureW_safe;
-  var scaleY = renderedH / captureH_safe;
+  // captureW/H parametrik gelir (gercek piksel). CSS karşılığı.
+  var dpr = window.devicePixelRatio || 1;
+  var captureCssW = (captureW || viewport.width  * dpr) / dpr;
+  var captureCssH = (captureH || viewport.height * dpr) / dpr;
 
-  console.log('[MangaLens-v2.2] capture:', captureW_safe, 'x', captureH_safe,
+  // Img'nin viewport'taki gerçek capture alani
+  var captureLeft  = (typeof captureW !== 'undefined') ? (window.innerWidth  - captureCssW) / 2 : 0;
+  var captureTop   = (typeof captureH !== 'undefined') ? (window.innerHeight - captureCssH) / 2 : 0;
+  // translateSinglePage her zaman captureW/H gecirir, bu yol kullanilir.
+  // (v1 selection mode eski fonksiyonu kullanir, o captureW/H vermez, fallback olur)
+
+  // scaleX / scaleY: capture CSS → rendered CSS
+  // img viewport'ta farkli boyutta olabilir (responsive), bu yuzden scale gerekli
+  var scaleX = renderedW / captureCssW;
+  var scaleY = renderedH / captureCssH;
+
+  console.log('[MangaLens-v2.4] captureCss:', captureCssW, 'x', captureCssH,
               'rendered:', renderedW, 'x', renderedH,
-              'scale:', scaleX.toFixed(3), 'x', scaleY.toFixed(3));
+              'scale:', scaleX.toFixed(3), 'x', scaleY.toFixed(3),
+              'imgRect.left:', imgRect.left.toFixed(1), 'top:', imgRect.top.toFixed(1));
 
   // Parent: img parent (position relative yapildi)
   var parent = ensureRelativeParent(img);
   if (!parent) {
-    console.warn('[MangaLens-v2.2] parent yok, fallback');
+    console.warn('[MangaLens-v2.4] parent yok, fallback');
     showFixedOverlayFallback(allBubbles, viewport);
     return;
   }
@@ -736,8 +821,10 @@ function showOverlayOnImage(allBubbles, viewport, captureW, captureH, pageId, ta
     container.dataset.pageId = pageId;
   }
   container.dataset.mangaSrc = (img.src || img.currentSrc || '').slice(0, 80);
-  container.dataset.captureW = String(captureW_safe);
-  container.dataset.captureH = String(captureH_safe);
+  container.dataset.captureW = String(captureCssW);
+  container.dataset.captureH = String(captureCssH);
+  container.dataset.imgLeft = String(imgRect.left);
+  container.dataset.imgTop = String(imgRect.top);
   container.setAttribute('style',
     'position:absolute!important;' +
     'left:0!important;top:0!important;' +
@@ -749,28 +836,29 @@ function showOverlayOnImage(allBubbles, viewport, captureW, captureH, pageId, ta
   );
 
   // Her balon
+  // viewport CSS → img-relative CSS (imgRect.left/top cikar)
+  // → scale (img display boyutu / capture viewport'taki boyut)
   var rendered = 0;
   allBubbles.forEach(function(b, idx) {
-    if (!b.text || !b.text.trim()) return; // bos text → atla
+    if (!b.text || !b.text.trim()) return;
 
-    // AI bbox viewport (capture) koordinatinda
-    // → rendered koordinata cevir
-    var boxLeft = b.x * scaleX;
-    var boxTop  = b.y * scaleY;
+    // img-relative CSS koordinati (img sol üst köşe 0,0)
+    var boxLeft = (b.x - imgRect.left) * scaleX;
+    var boxTop  = (b.y - imgRect.top)  * scaleY;
     var boxW    = b.width  * scaleX;
     var boxH    = b.height * scaleY;
 
-    // Debug log (her bbox)
-    console.log('[MangaLens-v2.2] bbox #' + idx,
-                'raw:', JSON.stringify(b),
-                'scaled: x=' + boxLeft.toFixed(1), 'y=' + boxTop.toFixed(1),
-                'w=' + boxW.toFixed(1), 'h=' + boxH.toFixed(1),
-                'parent:', parent.tagName + '.' + (parent.className || ''));
+    // Debug log (Faz F)
+    console.log('[MangaLens-v2.4] render-bbox #' + idx,
+                'chunk:', b.chunkIndex,
+                'viewport:', 'x=' + b.x.toFixed(0), 'y=' + b.y.toFixed(0), 'w=' + b.width.toFixed(0), 'h=' + b.height.toFixed(0),
+                'img-rel:', 'x=' + boxLeft.toFixed(1), 'y=' + boxTop.toFixed(1), 'w=' + boxW.toFixed(1), 'h=' + boxH.toFixed(1));
 
     var div = document.createElement('div');
     div.className = 'ml-bubble';
     div.textContent = b.text;
-    div.dataset.raw = JSON.stringify(b);   // resize/reposition icin kaydet
+    div.dataset.raw = JSON.stringify(b);   // v2.4: viewport CSS koordinati
+    div.dataset.chunkIndex = b.chunkIndex || '';
     div.setAttribute('style',
       'position:absolute!important;' +
       'left:' + boxLeft + 'px!important;' +
@@ -834,7 +922,7 @@ function setupOverlayWatchdog(container, img) {
     var rect = img.getBoundingClientRect();
     if (lastRect &&
         Math.abs(rect.width - lastRect.width) < 1 &&
-        Math.abs(rect.height - lastRect.height) < 1 &&
+        Math.abs(rect.height - rect.height) < 1 &&
         Math.abs(rect.left - lastRect.left) < 1 &&
         Math.abs(rect.top - lastRect.top) < 1) {
       return; // degisiklik yok
@@ -849,22 +937,29 @@ function setupOverlayWatchdog(container, img) {
     container.style.width = rect.width + 'px';
     container.style.height = rect.height + 'px';
 
-    // Bubble'lari scaleX/Y ile yeniden hesapla
-    var captureW = parseFloat(container.dataset.captureW || '0');
-    var captureH = parseFloat(container.dataset.captureH || '0');
-    if (!captureW || !captureH) return;
+    // v2.4: capture CSS (img viewport'taki CSS boyutu), viewport CSS koordinatli
+    // raw bbox'lar viewport CSS koordinatinda (capture piksel / dpr).
+    // Yeni scale: img display / capture css
+    var captureCssW = parseFloat(container.dataset.captureW || '0');
+    var captureCssH = parseFloat(container.dataset.captureH || '0');
+    if (!captureCssW || !captureCssH) return;
 
-    var scaleX = rect.width / captureW;
-    var scaleY = rect.height / captureH;
+    var scaleX = rect.width / captureCssW;
+    var scaleY = rect.height / captureCssH;
 
     var bubbles = container.querySelectorAll('.ml-bubble');
     bubbles.forEach(function(bubble, idx) {
       var raw = JSON.parse(bubble.dataset.raw || '{}');
       if (!raw.x) return;
-      bubble.style.left = (raw.x * scaleX) + 'px';
-      bubble.style.top  = (raw.y * scaleY) + 'px';
-      bubble.style.width  = (raw.width  * scaleX) + 'px';
-      bubble.style.height = (raw.height * scaleY) + 'px';
+      // viewport CSS → img-relative CSS (rect.left/top cikar) → scale
+      var boxLeft = (raw.x - rect.left) * scaleX;
+      var boxTop  = (raw.y - rect.top)  * scaleY;
+      var boxW    = raw.width  * scaleX;
+      var boxH    = raw.height * scaleY;
+      bubble.style.left   = boxLeft + 'px';
+      bubble.style.top    = boxTop  + 'px';
+      bubble.style.width  = boxW    + 'px';
+      bubble.style.height = boxH    + 'px';
     });
   }
 
