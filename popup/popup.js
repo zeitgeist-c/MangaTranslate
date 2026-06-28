@@ -30,6 +30,12 @@ const el = {
   btnSave:       $('btn-save'),
   btnSelection:  $('btn-selection'),
   toast:         $('toast'),
+  // v2.5: API key yonetimi
+  apiKeyList:    $('api-key-list'),
+  apiEmptyMsg:   $('api-empty-msg'),
+  newApiKey:     $('new-api-key'),
+  newApiLabel:   $('new-api-label'),
+  btnAddKey:     $('btn-add-key'),
 };
 
 let cachePollTimer = null;
@@ -40,6 +46,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   applySettingsToUI(settings);
   bindEvents();
   updateStatus(settings);
+  await renderApiKeyList();
   await refreshCacheStats();
   startCachePolling();
 });
@@ -136,6 +143,7 @@ chrome.runtime.onMessage.addListener(function(message) {
 function bindEvents() {
   // Sayfayi Otomatik Cevir (v2 - 3x3 grid, rate limited)
   el.btnAuto.addEventListener('click', async () => {
+    if (!await checkApiKeyBefore()) return;
     el.btnAuto.disabled = true;
     el.btnTranslate.disabled = true;
     const originalText = el.btnAuto.innerHTML;
@@ -168,6 +176,7 @@ function bindEvents() {
 
   // Alan Sec ve Cevir (v1 - manuel crop, fallback)
   el.btnTranslate.addEventListener('click', async () => {
+    if (!await checkApiKeyBefore()) return;
     el.btnTranslate.disabled = true;
     const originalText = el.btnTranslate.innerHTML;
     el.btnTranslate.innerHTML = '<span class="btn-spinner"></span> Aktif ediliyor...';
@@ -202,6 +211,12 @@ function bindEvents() {
     const s = await loadSettings();
     updateStatus({ ...s, enabled });
     showToast(enabled ? '▶ Çeviri aktif' : '■ Çeviri durduruldu', enabled ? 'success' : 'info');
+  });
+
+  // v2.5: API key ekle
+  el.btnAddKey.addEventListener('click', addApiKey);
+  el.newApiKey.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') addApiKey();
   });
 
   // Cache temizle
@@ -278,4 +293,206 @@ function showToast(message, type = 'info') {
   el.toast.textContent = message;
   el.toast.className = `toast ${type} show`;
   toastTimer = setTimeout(() => el.toast.classList.remove('show'), 3000);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  v2.5: Google API Key Yonetimi
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function loadApiKeys() {
+  const data = await new Promise(resolve => {
+    chrome.storage.local.get(['googleApiKeys', 'activeGoogleApiKeyId'], d => resolve(d));
+  });
+  return { list: data.googleApiKeys || [], activeId: data.activeGoogleApiKeyId || null };
+}
+
+async function saveApiKeys(list, activeId) {
+  return new Promise(resolve => {
+    chrome.storage.local.set(
+      { googleApiKeys: list, activeGoogleApiKeyId: activeId },
+      () => resolve()
+    );
+  });
+}
+
+function maskKey(key) {
+  if (!key || key.length < 12) return '****';
+  return key.slice(0, 6) + '...' + key.slice(-4);
+}
+
+function statusLabel(s) {
+  return ({
+    untested:      'Test edilmedi',
+    success:       '✓ Çalışıyor',
+    error:         '✗ Hata',
+    rate_limited:  '⏱ Rate limit',
+    invalid:       '⛔ Geçersiz key',
+  })[s] || s;
+}
+
+async function renderApiKeyList() {
+  const { list, activeId } = await loadApiKeys();
+
+  // Bos state uyarisi
+  el.apiEmptyMsg.hidden = list.length > 0;
+  el.btnAuto.disabled = list.length === 0;
+  el.btnTranslate.disabled = list.length === 0;
+
+  // Listeyi render et
+  el.apiKeyList.innerHTML = '';
+  list.forEach(entry => {
+    const isActive = entry.id === activeId;
+    const item = document.createElement('div');
+    item.className = 'api-key-item' + (isActive ? ' api-key-active' : '');
+
+    const info = document.createElement('div');
+    info.className = 'api-key-info';
+
+    const label = document.createElement('div');
+    label.className = 'api-key-label';
+    label.textContent = entry.label || 'Adsız anahtar';
+
+    const masked = document.createElement('div');
+    masked.className = 'api-key-mask';
+    masked.textContent = maskKey(entry.key);
+
+    const status = document.createElement('div');
+    status.className = 'api-key-status status-' + (entry.lastTestStatus || 'untested');
+    status.textContent = statusLabel(entry.lastTestStatus || 'untested');
+    if (entry.lastTestedAt) {
+      const d = new Date(entry.lastTestedAt);
+      status.title = 'Son test: ' + d.toLocaleString();
+    }
+
+    info.appendChild(label);
+    info.appendChild(masked);
+    info.appendChild(status);
+
+    const actions = document.createElement('div');
+    actions.className = 'api-key-actions';
+
+    // Test butonu
+    const testBtn = document.createElement('button');
+    testBtn.className = 'btn-icon-sm';
+    testBtn.textContent = 'Test';
+    testBtn.title = 'API key test et';
+    testBtn.addEventListener('click', () => testApiKeyById(entry.id));
+
+    // Aktif yap
+    const actBtn = document.createElement('button');
+    actBtn.className = 'btn-icon-sm btn-icon-primary';
+    actBtn.textContent = isActive ? '✓ Aktif' : 'Aktif Yap';
+    actBtn.disabled = isActive;
+    actBtn.addEventListener('click', () => activateApiKey(entry.id));
+
+    // Sil
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn-icon-sm btn-icon-danger';
+    delBtn.textContent = 'Sil';
+    delBtn.addEventListener('click', () => deleteApiKey(entry.id));
+
+    actions.appendChild(testBtn);
+    actions.appendChild(actBtn);
+    actions.appendChild(delBtn);
+
+    item.appendChild(info);
+    item.appendChild(actions);
+    el.apiKeyList.appendChild(item);
+  });
+}
+
+async function addApiKey() {
+  const raw = (el.newApiKey.value || '').trim();
+  if (!raw) {
+    showToast('⚠ API anahtarı gir', 'error');
+    return;
+  }
+  if (!raw.startsWith('AIza')) {
+    showToast('⚠ Geçersiz format (AIza... ile başlamalı)', 'error');
+    return;
+  }
+  const label = (el.newApiLabel.value || '').trim() || ('API ' + (Date.now() % 10000));
+
+  const { list, activeId } = await loadApiKeys();
+  const newEntry = {
+    id: crypto.randomUUID(),
+    key: raw,
+    label: label,
+    isActive: false,
+    lastTestStatus: 'untested',
+    lastTestMessage: '',
+    lastTestedAt: 0,
+  };
+
+  // Ilk eklenen otomatik aktif
+  const willBeActive = list.length === 0;
+  if (willBeActive) newEntry.isActive = true;
+  const newList = [...list, newEntry];
+  const newActiveId = willBeActive ? newEntry.id : activeId;
+
+  await saveApiKeys(newList, newActiveId);
+  el.newApiKey.value = '';
+  el.newApiLabel.value = '';
+  await renderApiKeyList();
+  showToast(willBeActive ? '✓ API anahtarı eklendi ve aktif yapıldı' : '✓ API anahtarı eklendi', 'success');
+}
+
+async function activateApiKey(id) {
+  const { list } = await loadApiKeys();
+  const exists = list.some(k => k.id === id);
+  if (!exists) return;
+  await saveApiKeys(list, id);
+  await renderApiKeyList();
+  showToast('✓ Aktif anahtar değiştirildi', 'success');
+}
+
+async function deleteApiKey(id) {
+  if (!confirm('Bu API anahtarını silmek istediğine emin misin?')) return;
+  const { list, activeId } = await loadApiKeys();
+  const newList = list.filter(k => k.id !== id);
+
+  let newActiveId = activeId;
+  // Silinen aktiftse → başka key varsa ilkini aktif yap
+  if (activeId === id) {
+    if (newList.length > 0) {
+      newActiveId = newList[0].id;
+    } else {
+      newActiveId = null;
+    }
+  }
+  await saveApiKeys(newList, newActiveId);
+  await renderApiKeyList();
+  showToast('🗑 API anahtarı silindi', 'info');
+}
+
+async function testApiKeyById(id) {
+  const { list } = await loadApiKeys();
+  const entry = list.find(k => k.id === id);
+  if (!entry) return;
+  const result = await chrome.runtime.sendMessage({ type: 'TEST_API_KEY', apiKey: entry.key });
+  if (!result || !result.success) {
+    showToast('Test çağrısı başarısız', 'error');
+    return;
+  }
+  // Status güncelle
+  const idx = list.findIndex(k => k.id === id);
+  if (idx >= 0) {
+    list[idx].lastTestStatus = result.status || 'error';
+    list[idx].lastTestMessage = result.message || '';
+    list[idx].lastTestedAt = Date.now();
+    const { activeId } = await loadApiKeys();
+    await saveApiKeys(list, activeId);
+  }
+  await renderApiKeyList();
+  if (result.status === 'success') showToast('✓ API çalışıyor', 'success');
+  else showToast('✗ ' + (result.message || 'Test başarısız'), 'error');
+}
+
+async function checkApiKeyBefore() {
+  const { list, activeId } = await loadApiKeys();
+  if (!list.find(k => k.id === activeId)) {
+    showToast('⚠ Önce Google Gemini API anahtarı ekleyin ve aktif yapın.', 'error');
+    return false;
+  }
+  return true;
 }

@@ -1,10 +1,9 @@
-// dosya: src/background.js (v3 - Gemini native)
-// Dogrudan Google Gemini native API. 9Router/OpenRouter kaldirildi.
+// dosya: src/background.js (v2.5 - API key yonetimi)
+// Google Gemini native API. API key artik chrome.storage.local'dan okunuyor.
 
 'use strict';
 
-const GEMINI_API_KEY = 'REDACTED_GEMINI_KEY';
-const GEMINI_MODEL  = 'gemini-3.1-flash-lite';
+const GEMINI_MODEL  = 'gemini-3.1-flash-lite';   // tek model — sabit
 const GEMINI_BASE   = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 const REQUEST_TIMEOUT = 45000;
@@ -63,16 +62,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true;
   }
+
+  // v2.5: Aktif API key sorgula
+  if (message.type === 'GET_ACTIVE_API_KEY') {
+    getActiveApiKey().then(key => {
+      sendResponse({ success: true, hasKey: !!key, keyLength: key ? key.length : 0 });
+    });
+    return true;
+  }
+
+  // v2.5: API key test et
+  if (message.type === 'TEST_API_KEY') {
+    testApiKey(message.apiKey)
+      .then(r => sendResponse({ success: true, status: r.status, message: r.message }))
+      .catch(err => sendResponse({ success: false, status: err.status || 'error', message: err.message }));
+    return true;
+  }
 });
 
 const PROMPT = 'You are a manga panel analyzer.\n\nFind all speech bubbles, narration boxes, and sound effects. For each, return:\n- "text": the text TRANSLATED to natural Turkish (translate dialogue; keep character names in original language; translate SFX like BOOM as GUM, CRACK as CAT)\n- "x", "y", "width", "height": bounding box in PIXELS of the input image (integers, top-left origin)\n\nReturn ONLY a JSON array. No prose. Example: [{"text":"Selam!","x":100,"y":50,"width":200,"height":80}]\n\nOrder bubbles top-to-bottom. Return [] if nothing readable.';
 
 async function handleExtract({ dataUrl, w, h }) {
   if (!dataUrl) throw new Error('dataUrl eksik');
+
+  // v2.5: aktif API key'i storage'dan al
+  const apiKey = await getActiveApiKey();
+  if (!apiKey) {
+    throw new Error('Lutfen once Google Gemini API anahtari ekleyin ve aktif yapin.');
+  }
+
   console.log('[MangaLens-bg] handleExtract basladi, w=', w, 'h=', h, 'dataUrl uzunluk=', dataUrl.length);
 
   // v2: rate-limited queue uzerinden calistir
-  const bubbles = await enqueueWithRateLimit(() => callMultimodal(dataUrl, w, h));
+  const bubbles = await enqueueWithRateLimit(() => callMultimodal(apiKey, dataUrl, w, h));
 
   console.log('[MangaLens-bg] Gemini dondu:', bubbles ? bubbles.length : 0, 'balon');
   if (bubbles && bubbles.length > 0) {
@@ -81,29 +103,45 @@ async function handleExtract({ dataUrl, w, h }) {
   return { bubbles: [], model: GEMINI_MODEL };
 }
 
-async function callMultimodal(dataUrl, w, h) {
-  // Google Gemini native API — dataUrl'in base64 kismini ayir
-  // data:image/png;base64,XXXX → mime + base64
+async function callMultimodal(apiKey, dataUrl, w, h) {
   const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl);
   if (!m) throw new Error('Gecersiz dataUrl formati');
   const mime = m[1];
   const base64 = m[2];
 
+  const text = await callGemini({
+    apiKey,
+    prompt: PROMPT + '\n[Image: ' + w + 'x' + h + ']',
+    imageBase64: { mime, base64 },
+    responseMimeType: 'application/json',
+  });
+
+  console.log('[MangaLens-bg] Gemini dondu, raw:', String(text).slice(0, 200));
+  return parseBubbleArray(text || '[]', w, h);
+}
+
+/**
+ * v2.5: Tek Gemini client helper.
+ * Translation + test + gelecekteki diger tum cagrilar buradan gecer.
+ */
+async function callGemini({ apiKey, prompt, imageBase64, responseMimeType }) {
+  if (!apiKey) throw new Error('API key eksik');
+
+  const parts = [{ text: prompt }];
+  if (imageBase64) {
+    parts.push({ inline_data: { mime_type: imageBase64.mime, data: imageBase64.base64 } });
+  }
+
   const body = {
-    contents: [{
-      parts: [
-        { text: PROMPT + '\n[Image: ' + w + 'x' + h + ']' },
-        { inline_data: { mime_type: mime, data: base64 } },
-      ],
-    }],
+    contents: [{ parts }],
     generationConfig: {
       temperature: 0.2,
       maxOutputTokens: 8192,
-      responseMimeType: 'application/json',
+      ...(responseMimeType ? { responseMimeType } : {}),
     },
   };
 
-  const url = GEMINI_BASE + '/' + GEMINI_MODEL + ':generateContent?key=' + GEMINI_API_KEY;
+  const url = GEMINI_BASE + '/' + GEMINI_MODEL + ':generateContent?key=' + apiKey;
 
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT);
@@ -122,19 +160,65 @@ async function callMultimodal(dataUrl, w, h) {
 
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({}));
-    console.warn('[MangaLens-bg] Gemini HTTP', res.status, JSON.stringify(errBody).slice(0, 500));
-    throw new Error('Gemini ' + res.status + ': ' + (errBody?.error?.message || res.statusText));
+    console.warn('[MangaLens-bg] Gemini HTTP', res.status, JSON.stringify(errBody).slice(0, 300));
+    throw normalizeGeminiError(res.status, errBody);
   }
 
   const data = await res.json();
-  // Gemini native format: candidates[0].content.parts[0].text
-  let raw = '';
-  const parts = data?.candidates?.[0]?.content?.parts;
-  if (Array.isArray(parts)) {
-    raw = parts.map(p => p.text || '').join('\n');
+  const msg = data?.candidates?.[0]?.message || {};
+  let text = msg.content || '';
+  if (!text && Array.isArray(msg.reasoning_details)) {
+    text = msg.reasoning_details.map(r => r?.text || '').join('\n');
   }
-  console.log('[MangaLens-bg] Gemini dondu, raw:', raw.slice(0, 200));
-  return parseBubbleArray(raw || '[]', w, h);
+  return text;
+}
+
+/**
+ * v2.5: Gemini hata yanitini normalize et (kullanici dostu mesaj + status).
+ * status: 'invalid' | 'rate_limited' | 'error'
+ */
+function normalizeGeminiError(status, body) {
+  if (status === 401 || status === 403) {
+    const e = new Error('API key gecersiz veya bu modele erisim yetkisi yok.');
+    e.status = 'invalid';
+    return e;
+  }
+  if (status === 429) {
+    const e = new Error('Rate limit veya kota dolmus.');
+    e.status = 'rate_limited';
+    return e;
+  }
+  const e = new Error('Gemini ' + status + ': ' + (body?.error?.message || 'Bilinmeyen hata'));
+  e.status = 'error';
+  return e;
+}
+
+/**
+ * v2.5: Aktif API key'i chrome.storage.local'dan oku.
+ * chrome.storage.sync olarak da dene (geriye uyumluluk).
+ */
+async function getActiveApiKey() {
+  const data = await new Promise(resolve => {
+    chrome.storage.local.get(['googleApiKeys', 'activeGoogleApiKeyId'], d => resolve(d));
+  });
+  const list = data.googleApiKeys || [];
+  const activeId = data.activeGoogleApiKeyId;
+  const active = list.find(k => k.id === activeId);
+  return active ? active.key : null;
+}
+
+/**
+ * v2.5: API key test et. Kisa "Reply with OK only." promptu, JSON yok.
+ */
+async function testApiKey(apiKey) {
+  if (!apiKey) throw new Error('API key bos');
+  try {
+    await callGemini({ apiKey, prompt: 'Reply with OK only.' });
+    return { status: 'success', message: 'API calisiyor.' };
+  } catch (e) {
+    if (!e.status) e.status = 'error';
+    return { status: e.status, message: e.message };
+  }
 }
 
 function parseBubbleArray(raw, w, h) {
