@@ -50,6 +50,16 @@ chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
     return true;
   }
 
+  // v2.2: Cache temizle + yeniden cevir
+  if (message.type === 'RESET_AND_RETRANSLATE') {
+    console.log('[MangaLens-v2.2] RESET_AND_RETRANSLATE');
+    translatedPages.clear();
+    translateVisiblePages()
+      .then(function(result) { sendResponse(result); })
+      .catch(function(err) { sendResponse({ ok: false, error: err.message }); });
+    return true;
+  }
+
   return true;
 });
 
@@ -209,7 +219,202 @@ async function sha256Hex(input) {
 }
 
 async function translatePage() {
-  console.log('[MangaLens-v2] translatePage basladi');
+  // v2.2: viewport'taki gorunur manga img'lerini bul, her birini ayri cevir
+  return await translateVisiblePages();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  v2.2: Viewport Bazlı Çoklu Sayfa Çevirisi (PageId + ImageWrapperLevel)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Bu oturumda cevrilmis sayfalarin pageId'si
+const translatedPages = new Set();
+
+function isElementVisibleInViewport(el) {
+  const rect = el.getBoundingClientRect();
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  const vw = window.innerWidth  || document.documentElement.clientWidth;
+
+  if (rect.width === 0 || rect.height === 0) return false;
+
+  const visibleHeight = Math.min(rect.bottom, vh) - Math.max(rect.top, 0);
+  const visibleWidth  = Math.min(rect.right,  vw) - Math.max(rect.left, 0);
+
+  if (visibleHeight <= 0 || visibleWidth <= 0) return false;
+
+  const visibleArea = visibleHeight * visibleWidth;
+  const totalArea   = rect.width * rect.height;
+  return totalArea > 0 && (visibleArea / totalArea) > 0.25;
+}
+
+// Lazy-load tamamlanmis mi? naturalWidth/Height > 0 olmali.
+function isImageReady(img) {
+  if (!img) return false;
+  if (img.tagName === 'IMG') {
+    if (!img.complete) return false;
+    if (!img.naturalWidth || !img.naturalHeight) return false;
+  } else if (img.tagName === 'CANVAS') {
+    if (!img.width || !img.height) return false;
+  }
+  return true;
+}
+
+// Sayfadaki tum manga img/canvas adaylarini topla
+function collectMangaPages() {
+  // data-ml-page="1" olanlara oncelik ver (site manifest'ten), yoksa tum img/canvas
+  var candidates = [];
+  var marked = document.querySelectorAll('[data-ml-page]');
+  if (marked.length > 0) {
+    marked.forEach(function(el, i) {
+      candidates.push({ el: el, index: candidates.length, source: 'marked' });
+    });
+  } else {
+    var allImgs = document.querySelectorAll('img');
+    allImgs.forEach(function(img, i) {
+      // Buyuk goruntuler (manga sayfalari genelde 400+ px)
+      var nW = img.naturalWidth || img.width || 0;
+      var nH = img.naturalHeight || img.height || 0;
+      if (nW >= 400 && nH >= 200) {
+        candidates.push({ el: img, index: candidates.length, source: 'img' });
+      }
+    });
+    var allCanvas = document.querySelectorAll('canvas');
+    allCanvas.forEach(function(c) {
+      if (c.width >= 400 && c.height >= 200) {
+        candidates.push({ el: c, index: candidates.length, source: 'canvas' });
+      }
+    });
+  }
+  return candidates;
+}
+
+// Sayfa kimligi: URL + index + src + boyut
+function getPageId(el, index) {
+  var src = '';
+  if (el.tagName === 'IMG') {
+    src = el.currentSrc || el.src || el.dataset.src || '';
+  } else if (el.tagName === 'CANVAS') {
+    src = el.toDataURL ? 'canvas-' + index : 'canvas';
+  }
+  var w = el.naturalWidth || el.width || (el.getBoundingClientRect().width | 0);
+  var h = el.naturalHeight || el.height || (el.getBoundingClientRect().height | 0);
+  return location.href.split('#')[0] + '::' + index + '::' + src + '::' + w + 'x' + h;
+}
+
+async function translateVisiblePages() {
+  console.log('[MangaLens-v2.2] translateVisiblePages basladi');
+  console.log('[MangaLens-v2.2] scrollY:', window.scrollY,
+              'innerWidth:', window.innerWidth, 'innerHeight:', window.innerHeight);
+
+  // 1. Tum manga sayfa adaylarini topla
+  var candidates = collectMangaPages();
+  console.log('[MangaLens-v2.2] toplam manga sayfa:', candidates.length);
+
+  // 2. Viewport'ta gorunen olanlari filtrele
+  var visiblePages = candidates.filter(function(p) {
+    return isElementReady(p.el) && isElementVisibleInViewport(p.el);
+  });
+  console.log('[MangaLens-v2.2] viewport\'ta gorunen sayfa:', visiblePages.length);
+
+  // 3. Cevrilmemis olanlari sec
+  var untranslatedPages = [];
+  visiblePages.forEach(function(p) {
+    p.pageId = getPageId(p.el, p.index);
+    if (translatedPages.has(p.pageId)) {
+      console.log('[MangaLens-v2.2] zaten cevrilmis, atlanıyor:', p.pageId);
+      return;
+    }
+    untranslatedPages.push(p);
+  });
+  console.log('[MangaLens-v2.2] cevrilmemis sayfa:', untranslatedPages.length);
+
+  // 4. Popup'a baslangic durumu bildir
+  chrome.runtime.sendMessage({
+    type: 'PAGE_PROGRESS',
+    completed: 0,
+    total: untranslatedPages.length,
+    current: null,
+  }).catch(() => {});
+
+  if (untranslatedPages.length === 0) {
+    console.log('[MangaLens-v2.2] cevrilecek yeni sayfa yok');
+    return {
+      ok: true,
+      total: 0,
+      translated: 0,
+      bubbles: 0,
+      errors: 0,
+      message: 'Gorunur alanda cevrilmemis yeni sayfa yok',
+    };
+  }
+
+  // 5. Sirayla her sayfa icin grid cevirisi yap
+  var totalBubbles = 0;
+  var totalErrors = 0;
+  for (var i = 0; i < untranslatedPages.length; i++) {
+    var page = untranslatedPages[i];
+    var rect = page.el.getBoundingClientRect();
+    console.log('[MangaLens-v2.2] === Sayfa', i + 1, '/', untranslatedPages.length, '===');
+    console.log('[MangaLens-v2.2] src:', (page.el.src || page.el.currentSrc || '').slice(0, 80));
+    console.log('[MangaLens-v2.2] rect: top=', rect.top.toFixed(1),
+                'bottom=', rect.bottom.toFixed(1),
+                'width=', rect.width, 'height=', rect.height);
+    console.log('[MangaLens-v2.2] pageId:', page.pageId);
+
+    chrome.runtime.sendMessage({
+      type: 'PAGE_PROGRESS',
+      completed: i,
+      total: untranslatedPages.length,
+      current: { index: i, src: (page.el.src || '').slice(0, 50) },
+    }).catch(() => {});
+
+    try {
+      var result = await translateSinglePage(page.el, page.pageId);
+      if (result && result.bubbles) totalBubbles += result.bubbles;
+      if (result && result.errors) totalErrors += result.errors;
+      translatedPages.add(page.pageId);  // cache: ayni sayfa bir daha cevrilmez
+    } catch (e) {
+      console.warn('[MangaLens-v2.2] sayfa ceviri hatasi:', e.message);
+      totalErrors++;
+    }
+  }
+
+  // 6. Tamamlandi bildir
+  chrome.runtime.sendMessage({
+    type: 'PAGE_PROGRESS',
+    completed: untranslatedPages.length,
+    total: untranslatedPages.length,
+    current: null,
+  }).catch(() => {});
+
+  console.log('[MangaLens-v2.2] tamamlandi:', untranslatedPages.length, 'sayfa,',
+              totalBubbles, 'balon,', totalErrors, 'hata');
+
+  return {
+    ok: true,
+    total: untranslatedPages.length,
+    translated: untranslatedPages.length - totalErrors,
+    bubbles: totalBubbles,
+    errors: totalErrors,
+  };
+}
+
+function isElementReady(el) {
+  if (!el) return false;
+  if (el.tagName === 'IMG') return isImageReady(el);
+  if (el.tagName === 'CANVAS') return el.width > 0 && el.height > 0;
+  return false;
+}
+
+/**
+ * Tek bir manga sayfasini cevirir:
+ *   1. Capture visible tab
+ *   2. Capture image'den sayfanin oldugu bolumu crop'la
+ *   3. 3x3 grid uzerinden AI cagirisi yap
+ *   4. Sonucu sayfanin img parent'ina overlay olarak bas
+ */
+async function translateSinglePage(targetEl, pageId) {
+  console.log('[MangaLens-v2.2] translateSinglePage:', pageId);
 
   // 1. Tam viewport screenshot al
   var fullDataUrl = null;
@@ -217,87 +422,89 @@ async function translatePage() {
     var resp = await chrome.runtime.sendMessage({ type: 'CAPTURE_TAB' });
     if (resp && resp.dataUrl) fullDataUrl = resp.dataUrl;
   } catch (e) {
-    console.warn('[MangaLens-v2] captureVisibleTab hatasi:', e.message);
-    return { ok: false, error: e.message };
+    console.warn('[MangaLens-v2.2] captureVisibleTab hatasi:', e.message);
+    return { ok: false, error: e.message, bubbles: 0, errors: 1 };
   }
   if (!fullDataUrl) {
-    return { ok: false, error: 'Screenshot alinamadi' };
+    return { ok: false, error: 'Screenshot alinamadi', bubbles: 0, errors: 1 };
   }
 
-  // 2. Image yukle, boyut oku
+  // 2. Image yukle
   var img = new Image();
   await new Promise(function(resolve) {
     img.onload = resolve;
     img.onerror = resolve;
     img.src = fullDataUrl;
   });
-  console.log('[MangaLens-v2] full screenshot:', img.naturalWidth, 'x', img.naturalHeight);
 
-  // 3. Grid hücrelerini hesapla (DPR-aware crop koordinatlari)
+  // 3. Target elemanin viewport koordinatlarini al
   var dpr = window.devicePixelRatio || 1;
-  var cssW = window.innerWidth;
-  var cssH = window.innerHeight;
-  var cellCssW = Math.floor(cssW / GRID_COLS);
-  var cellCssH = Math.floor(cssH / GRID_ROWS);
+  var tRect = targetEl.getBoundingClientRect();
+  var elX = Math.max(0, Math.round(tRect.left * dpr));
+  var elY = Math.max(0, Math.round(tRect.top  * dpr));
+  var elW = Math.round(tRect.width  * dpr);
+  var elH = Math.round(tRect.height * dpr);
+
+  // Capture viewport sinirlari
+  if (elX + elW > img.naturalWidth)  elW = img.naturalWidth  - elX;
+  if (elY + elH > img.naturalHeight) elH = img.naturalHeight - elY;
+  if (elW < 10 || elH < 10) {
+    console.warn('[MangaLens-v2.2] hedef img cok kucuk:', elW, 'x', elH);
+    return { ok: false, error: 'img cok kucuk', bubbles: 0, errors: 1 };
+  }
+
+  console.log('[MangaLens-v2.2] target capture:', elX, elY, elW, 'x', elH, 'dpr:', dpr);
+
+  // 4. Hedef sayfa icin 3x3 grid hesapla (capture koordinatinda)
+  var cellCaptureW = Math.floor(elW / GRID_COLS);
+  var cellCaptureH = Math.floor(elH / GRID_ROWS);
 
   var cells = [];
   for (var row = 0; row < GRID_ROWS; row++) {
     for (var col = 0; col < GRID_COLS; col++) {
-      // CSS koordinati
-      var cx = col * cellCssW;
-      var cy = row * cellCssH;
-      var cw = cellCssW;
-      var ch = cellCssH;
-      // Overlap ekle (son satir/sutun haric)
+      var cx = elX + col * cellCaptureW;
+      var cy = elY + row * cellCaptureH;
+      var cw = cellCaptureW;
+      var ch = cellCaptureH;
       if (col < GRID_COLS - 1) cw += GRID_OVERLAP;
       if (row < GRID_ROWS - 1) ch += GRID_OVERLAP;
-      // Kenarlardan tasma varsa kirp
-      if (cx + cw > cssW) cw = cssW - cx;
-      if (cy + ch > cssH) ch = cssH - cy;
+      // capture sinirlari
+      if (cx + cw > elX + elW) cw = (elX + elW) - cx;
+      if (cy + ch > elY + elH) ch = (elY + elH) - cy;
+      if (cw < 10 || ch < 10) continue;
       cells.push({
         row: row, col: col,
-        cssX: cx, cssY: cy, cssW: cw, cssH: ch,
-        // AI'ya gönderilecek gercek piksel koordinatlari
-        px: Math.round(cx * dpr),
-        py: Math.round(cy * dpr),
-        pw: Math.round(cw * dpr),
-        ph: Math.round(ch * dpr),
+        // Capture koordinatlari (gercek piksel)
+        px: cx, py: cy, pw: cw, ph: ch,
       });
     }
   }
-  console.log('[MangaLens-v2]', cells.length, 'hucre hesaplandi');
+  console.log('[MangaLens-v2.2]', cells.length, 'hucre (capture koordinatinda)');
 
-  // 4. Sirayla her hucre icin AI cagirisi yap (background rate limit yonetir)
+  // 5. Her hucre icin AI cagirisi (cache + rate limit)
   var allBubbles = [];
-  var errors = [];
-  var cacheHits = 0;
-  var apiCalls = 0;
+  var errors = 0;
   for (var i = 0; i < cells.length; i++) {
     var cell = cells[i];
-    notifyProgress(i, cells.length, cell);
 
-    // Cache key: sayfa URL + cell koordinatlari (DPR dahil)
-    var cacheKey = await sha256Hex(location.href + '|' + cell.px + ',' + cell.py + ',' + cell.pw + 'x' + cell.ph);
+    // PageId + cell koordinatlari = unique cache key
+    var cacheKey = await sha256Hex(pageId + '|cell|' + cell.px + ',' + cell.py + ',' + cell.pw + 'x' + cell.ph);
 
     // Once cache kontrol
-    var cachedBubbles = null;
+    var bubbles = null;
     try {
       var cacheResp = await chrome.runtime.sendMessage({ type: 'GET_CACHED_CELL', cacheKey: cacheKey });
       if (cacheResp && cacheResp.success && cacheResp.bubbles) {
-        cachedBubbles = cacheResp.bubbles;
-        cacheHits++;
+        bubbles = cacheResp.bubbles;
+        console.log('[MangaLens-v2.2] cell', i, 'cache HIT,', bubbles.length, 'balon');
       }
     } catch (e) { /* cache miss */ }
 
-    var bubbles = null;
-    if (cachedBubbles) {
-      console.log('[MangaLens-v2] cell', i, 'cache HIT');
-      bubbles = cachedBubbles;
-    } else {
-      // Cache miss → AI cagirisi yap
-      var cropDataUrl = cropCell(img, cell);
+    if (!bubbles) {
+      // Cache miss → crop + AI
+      var cropDataUrl = cropCellRaw(img, cell.px, cell.py, cell.pw, cell.ph);
       if (!cropDataUrl) {
-        errors.push({ cell: i, error: 'crop basarisiz' });
+        errors++;
         continue;
       }
 
@@ -310,50 +517,69 @@ async function translatePage() {
           h: cell.ph,
         });
       } catch (e) {
-        errors.push({ cell: i, error: e.message });
+        errors++;
         continue;
       }
 
       if (aiResp && aiResp.success && aiResp.bubbles) {
         bubbles = aiResp.bubbles;
-        // Cache'e yaz (arka planda)
         chrome.runtime.sendMessage({
           type: 'STORE_CACHED_CELL',
           cacheKey: cacheKey,
           bubbles: bubbles,
         }).catch(() => {});
-        apiCalls++;
       } else {
-        errors.push({ cell: i, error: aiResp?.error || 'bos sonuc' });
+        errors++;
       }
     }
 
     if (bubbles && bubbles.length > 0) {
-      var shifted = shiftBubblesToViewport(bubbles, cell, dpr);
-      allBubbles = allBubbles.concat(shifted);
-      console.log('[MangaLens-v2] cell', i, 'ok:', bubbles.length, 'balon');
-    } else if (bubbles) {
-      console.log('[MangaLens-v2] cell', i, 'bos');
+      // Capture koordinatindan viewport CSS koordinatina cevir
+      var cssBubbles = bubbles.map(function(b) {
+        return {
+          text: b.text,
+          x: b.x / dpr,         // capture piksel → CSS piksel
+          y: b.y / dpr,
+          width:  b.width  / dpr,
+          height: b.height / dpr,
+        };
+      });
+      allBubbles = allBubbles.concat(cssBubbles);
     }
   }
 
-  // 5. Tum bubble'lari tek overlay'de goster
-  notifyProgress(cells.length, cells.length, null);
+  console.log('[MangaLens-v2.2] sayfa', pageId, ':', allBubbles.length, 'balon,', errors, 'hata');
+
+  // 6. Overlay'i hedef img'nin parent'ina bas
   if (allBubbles.length > 0) {
-    // Capture viewport boyutu (gercek piksel)
-    var captureW = img.naturalWidth || cssW * dpr;
-    var captureH = img.naturalHeight || cssH * dpr;
-    console.log('[MangaLens-v2] capture size:', captureW, 'x', captureH, 'css:', cssW, 'x', cssH, 'dpr:', dpr);
-    showOverlayOnImage(allBubbles, { width: cssW, height: cssH }, captureW, captureH);
+    var captureW = img.naturalWidth;
+    var captureH = img.naturalHeight;
+    showOverlayOnImage(allBubbles, { width: window.innerWidth, height: window.innerHeight },
+                       captureW, captureH, pageId, targetEl);
   }
 
-  return {
-    ok: true,
-    total: cells.length,
-    translated: cells.length - errors.length,
-    bubbles: allBubbles.length,
-    errors: errors.length,
-  };
+  return { ok: true, bubbles: allBubbles.length, errors: errors };
+}
+
+// Capture koordinatinda (gercek piksel) crop
+function cropCellRaw(img, px, py, pw, ph) {
+  var c = document.createElement('canvas');
+  c.width = pw;
+  c.height = ph;
+  var ctx = c.getContext('2d');
+  try {
+    ctx.drawImage(img, px, py, pw, ph, 0, 0, pw, ph);
+    return c.toDataURL('image/jpeg', 0.85);
+  } catch (e) {
+    console.warn('[MangaLens-v2.2] crop hatasi:', e.message);
+    return null;
+  }
+}
+
+// Yeniden cevir butonu icin (translatedPages temizle)
+function resetTranslatedPages() {
+  translatedPages.clear();
+  console.log('[MangaLens-v2.2] translatedPages temizlendi');
 }
 
 function cropCell(img, cell) {
@@ -454,21 +680,33 @@ function ensureRelativeParent(img) {
  * captureVisibleTab viewport koordinati verir. Img parent'i relative ise,
  * viewport koordinati → img koordinati = bbox - img.rect.left/top.
  * Scroll offset gerekmez cunku parent relative.
+ *
+ * pageId + targetEl opsiyonel: spesifik sayfa icin (v2.2 translateSinglePage)
+ * Belirtilmezse en buyuk gorunur img secilir (v1 selection mode fallback)
  */
-function showOverlayOnImage(allBubbles, viewport, captureW, captureH) {
-  console.log('[MangaLens-v2.1] showOverlayOnImage:', allBubbles.length, 'balon');
+function showOverlayOnImage(allBubbles, viewport, captureW, captureH, pageId, targetEl) {
+  console.log('[MangaLens-v2.2] showOverlayOnImage:', allBubbles.length, 'balon,',
+              'pageId:', pageId || '(yok)', 'targetEl:', targetEl ? targetEl.tagName : '(yok)');
 
-  // Eski overlay'leri temizle
-  clearAllOverlays();
+  // Eski ayni sayfanın overlay'ini temizle (yenisi yerine)
+  if (pageId) {
+    document.querySelectorAll('[data-page-id="' + CSS.escape(pageId) + '"]').forEach(function(el) {
+      el.remove();
+    });
+  } else {
+    clearAllOverlays();
+  }
 
-  var img = findMangaImage();
-  if (!img) {
-    console.warn('[MangaLens-v2.1] manga img bulunamadi, viewport fixed fallback');
+  var img = targetEl || findMangaImage();
+  if (!img || img.tagName === 'CANVAS' && !img.parentElement) {
+    console.warn('[MangaLens-v2.2] hedef img bulunamadi, viewport fixed fallback');
     showFixedOverlayFallback(allBubbles, viewport);
     return;
   }
 
-  console.log('[MangaLens-v2.1] manga img bulundu:', img.src?.slice(0, 80), 'natural:', img.naturalWidth, 'x', img.naturalHeight);
+  console.log('[MangaLens-v2.2] hedef img bulundu:',
+              (img.src || img.currentSrc || '').slice(0, 80),
+              'natural:', img.naturalWidth, 'x', img.naturalHeight);
 
   var imgRect = img.getBoundingClientRect();
   var renderedW = imgRect.width;
@@ -480,21 +718,24 @@ function showOverlayOnImage(allBubbles, viewport, captureW, captureH) {
   var scaleX = renderedW / captureW_safe;
   var scaleY = renderedH / captureH_safe;
 
-  console.log('[MangaLens-v2.1] capture:', captureW_safe, 'x', captureH_safe,
+  console.log('[MangaLens-v2.2] capture:', captureW_safe, 'x', captureH_safe,
               'rendered:', renderedW, 'x', renderedH,
               'scale:', scaleX.toFixed(3), 'x', scaleY.toFixed(3));
 
   // Parent: img parent (position relative yapildi)
   var parent = ensureRelativeParent(img);
   if (!parent) {
-    console.warn('[MangaLens-v2.1] parent yok, fallback');
+    console.warn('[MangaLens-v2.2] parent yok, fallback');
     showFixedOverlayFallback(allBubbles, viewport);
     return;
   }
 
   var container = document.createElement('div');
   container.id = 'ml-overlay-' + Date.now();
-  container.dataset.mangaSrc = (img.src || '').slice(0, 80);
+  if (pageId) {
+    container.dataset.pageId = pageId;
+  }
+  container.dataset.mangaSrc = (img.src || img.currentSrc || '').slice(0, 80);
   container.dataset.captureW = String(captureW_safe);
   container.dataset.captureH = String(captureH_safe);
   container.setAttribute('style',
@@ -520,7 +761,7 @@ function showOverlayOnImage(allBubbles, viewport, captureW, captureH) {
     var boxH    = b.height * scaleY;
 
     // Debug log (her bbox)
-    console.log('[MangaLens-v2.1] bbox #' + idx,
+    console.log('[MangaLens-v2.2] bbox #' + idx,
                 'raw:', JSON.stringify(b),
                 'scaled: x=' + boxLeft.toFixed(1), 'y=' + boxTop.toFixed(1),
                 'w=' + boxW.toFixed(1), 'h=' + boxH.toFixed(1),
@@ -558,7 +799,7 @@ function showOverlayOnImage(allBubbles, viewport, captureW, captureH) {
     rendered++;
   });
 
-  console.log('[MangaLens-v2.1]', rendered, 'balon overlay eklendi');
+  console.log('[MangaLens-v2.2]', rendered, 'balon overlay eklendi');
 
   // Kapatma butonu
   var closeBtn = document.createElement('div');
