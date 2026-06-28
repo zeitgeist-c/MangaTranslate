@@ -1,0 +1,131 @@
+<!-- dosya: popup/popup.html -->
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MangaLens TR</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="bg-grid"></div>
+  <div class="bg-glow"></div>
+  <div id="app">
+
+    <header class="header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+            <path d="M2 17l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 12l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div>
+          <div class="brand-name">MangaLens <span class="brand-tr">TR</span></div>
+          <div class="brand-sub">Görsel Çeviri v2</div>
+        </div>
+      </div>
+      <label class="power-toggle" title="Eklentiyi aç/kapat">
+        <input type="checkbox" id="enabled-toggle">
+        <div class="power-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2v6M6.8 6.8A8 8 0 1 0 17.2 6.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+      </label>
+    </header>
+
+    <div class="status-bar" id="status-bar">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">Yükleniyor...</span>
+    </div>
+
+    <!-- ═══ PRIMARY CTA ═══ -->
+    <button class="btn-translate-page" id="btn-translate-page">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+        <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
+        <path d="M9 3v18M15 3v18M3 9h18M3 15h18" stroke="currentColor" stroke-width="1.5"/>
+      </svg>
+      Alan Seç ve Çevir
+    </button>
+
+    <div class="cta-info">
+      <strong>Neden "Alan Seç"?</strong>
+      Manga sitelerinin çoğu görselleri CORS korumalı sunuyor. Tam sayfa otomatik çeviri canvas'a yazılamaz. Manuel alan seçerek <em>captureVisibleTab</em> üzerinden çeviri yapılır — CORS engeli yoktur.
+    </div>
+
+    <div class="progress-bar" id="progress-bar" hidden>
+      <div class="progress-fill" id="progress-fill"></div>
+      <span class="progress-text" id="progress-text">Çeviriliyor...</span>
+    </div>
+
+    <!-- ═══ 9ROUTER YAPILANDIRMASI ═══ -->
+    <section class="section">
+      <div class="section-label">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="3" y="11" width="18" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M7 11V7a5 5 0 0 1 10 0v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        9ROUTER API
+      </div>
+      <div class="field-group">
+        <label class="field-label">Endpoint</label>
+        <div class="input-wrap">
+          <input type="text" id="ninerouter-url" class="field-input" placeholder="http://localhost:20128/v1">
+        </div>
+        <div class="hint-text">
+          9Router'ın varsayılan adresi. <a href="http://localhost:20128/dashboard" target="_blank">Dashboard'ı aç</a>
+        </div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Model (Fallback Zinciri)</label>
+        <select id="ninerouter-model" class="field-select"></select>
+        <div class="hint-text">
+          Bir model hata verirse otomatik sonrakine geçer
+        </div>
+      </div>
+      <button class="btn-test" id="btn-test">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M5 12l5 5L20 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Bağlantıyı Test Et
+      </button>
+    </section>
+
+    <!-- ═══ DAVRANIŞ ═══ -->
+    <section class="section">
+      <div class="section-label">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        DAVRANIŞ
+      </div>
+      <label class="toggle-label">
+        <input type="checkbox" id="auto-translate">
+        <span>Sayfa açılınca otomatik çevir</span>
+      </label>
+      <label class="toggle-label">
+        <input type="checkbox" id="cache-enabled" checked>
+        <span>Çeviri önbelleğini kullan</span>
+      </label>
+      <div class="cache-stats" id="cache-stats">
+        <span>📦</span>
+        <span><strong id="cache-count">0</strong> sayfa</span>
+        <span>•</span>
+        <span><strong id="cache-bytes">0</strong> MB</span>
+        <button class="btn-clear-cache" id="btn-clear-cache">Temizle</button>
+      </div>
+    </section>
+
+    <button class="btn-save" id="btn-save">
+      Kaydet
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" stroke="currentColor" stroke-width="1.5"/><path d="M17 21v-8H7v8M7 3v5h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </button>
+
+    <button class="btn-secondary" id="btn-selection">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18" stroke="currentColor" stroke-width="1.5"/></svg>
+      Alan Seç (Alt+S)
+    </button>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

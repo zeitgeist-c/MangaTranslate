@@ -1,0 +1,16 @@
+# Backup files
+*.bak
+
+# Tesseract (kullanilmiyor ama yedek)
+lib/tesseract.min.js
+lib/tesseract.worker.min.js
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Temp
+*.tmp
+*.log
