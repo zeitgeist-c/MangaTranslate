@@ -76,14 +76,42 @@
       <span class="progress-text" id="progress-text">Çeviriliyor...</span>
     </div>
 
-    <!-- ═══ API (Gemini hardcoded) ═══ -->
+    <!-- ═══ GOOGLE API ANAHTARLARI ═══ -->
     <section class="section">
       <div class="section-label">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="3" y="11" width="18" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M7 11V7a5 5 0 0 1 10 0v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-        API
+        GOOGLE API ANAHTARLARI
       </div>
-      <div class="hint-text">
-        Google Gemini 3.1 Flash Lite (multimodal). API anahtarı <code>src/background.js</code>'te hardcoded. Değiştirmek için dosyayı düzenleyip eklentiyi yenileyin.
+
+      <!-- Ekli key listesi (dinamik) -->
+      <div class="api-key-list" id="api-key-list">
+        <!-- JS tarafından doldurulacak -->
+      </div>
+
+      <div class="api-empty-msg" id="api-empty-msg" hidden>
+        <div class="hint-text" style="color:#f87171;">
+          ⚠ Aktif API anahtarı yok. Çeviri başlatılamaz.
+        </div>
+      </div>
+
+      <!-- Yeni key ekleme -->
+      <div class="field-group" style="margin-top:10px;">
+        <label class="field-label">Yeni API Anahtarı</label>
+        <input type="password" id="new-api-key" class="field-input" placeholder="AIzaSy..." autocomplete="off">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Etiket (opsiyonel)</label>
+        <input type="text" id="new-api-label" class="field-input" placeholder="Google API 1" autocomplete="off">
+      </div>
+      <button class="btn-add-key" id="btn-add-key">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+          <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        API Ekle
+      </button>
+
+      <div class="hint-text" style="margin-top:10px;">
+        Model: <code>Gemini 3.1 Flash Lite</code> (sabit)
       </div>
     </section>
 
