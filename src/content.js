@@ -340,7 +340,11 @@ async function translatePage() {
   // 5. Tum bubble'lari tek overlay'de goster
   notifyProgress(cells.length, cells.length, null);
   if (allBubbles.length > 0) {
-    showCombinedOverlay(allBubbles, { width: cssW, height: cssH });
+    // Capture viewport boyutu (gercek piksel)
+    var captureW = img.naturalWidth || cssW * dpr;
+    var captureH = img.naturalHeight || cssH * dpr;
+    console.log('[MangaLens-v2] capture size:', captureW, 'x', captureH, 'css:', cssW, 'x', cssH, 'dpr:', dpr);
+    showOverlayOnImage(allBubbles, { width: cssW, height: cssH }, captureW, captureH);
   }
 
   return {
@@ -382,85 +386,308 @@ function shiftBubblesToViewport(bubbles, cell, dpr) {
 }
 
 // Tek overlay: tum hucrelerin bubble'lari birlesik, viewport'u kaplar
-function showCombinedOverlay(allBubbles, viewport) {
-  console.log('[MangaLens-v2] showCombinedOverlay:', allBubbles.length, 'balon, viewport:', viewport);
+// ══════════════════════════════════════════════════════════════════════════════
+//  v2.1: Overlay Refactor — Image-Wrapper Level
+// ══════════════════════════════════════════════════════════════════════════════
 
-  var existing = document.getElementById('ml-result-overlay');
-  if (existing) existing.remove();
+// Eski overlay'leri temizle
+function clearAllOverlays() {
+  document.querySelectorAll('[id^="ml-result-overlay"], [id^="ml-overlay-"]').forEach(function(el) {
+    el.remove();
+  });
+}
+
+/**
+ * Sayfadaki en buyuk gorunur manga img'sini bul.
+ * AI viewport screenshot'u aliyor → captureVisibleTab gorunur viewport'u alir.
+ * Bu viewport'a en yakin/en buyuk img bizim manga imajimiz.
+ */
+function findMangaImage() {
+  var imgs = Array.from(document.querySelectorAll('img'));
+  var best = null;
+  var bestArea = 0;
+
+  imgs.forEach(function(img) {
+    // naturalWidth/Height ya da displayed width/height
+    var nW = img.naturalWidth || img.width;
+    var nH = img.naturalHeight || img.height;
+    if (!nW || !nH) return;
+
+    var rect = img.getBoundingClientRect();
+    var dW = rect.width;
+    var dH = rect.height;
+
+    // Görünür viewport'ta olmali
+    if (dW === 0 || dH === 0) return;
+    if (rect.bottom < 0 || rect.top > window.innerHeight) return;
+    if (rect.right < 0 || rect.left > window.innerWidth) return;
+
+    // Buyukluk skoru: natural alan x displayed alan
+    var area = dW * dH;
+    if (area > bestArea) {
+      bestArea = area;
+      best = img;
+    }
+  });
+
+  return best;
+}
+
+/**
+ * Manga img'sinin parent'ini overlay-parent olarak hazirla.
+ * position: relative olmalı (yoksa ekle).
+ */
+function ensureRelativeParent(img) {
+  var parent = img.parentElement;
+  if (!parent) return null;
+  var pos = window.getComputedStyle(parent).position;
+  if (pos === 'static' || !pos) {
+    parent.style.position = 'relative';
+    parent.style.zIndex = '1';
+  }
+  return parent;
+}
+
+/**
+ * Overlay'i manga img parent'ina ekler, bbox'lari img koordinat sistemine cevirir.
+ *
+ * captureVisibleTab viewport koordinati verir. Img parent'i relative ise,
+ * viewport koordinati → img koordinati = bbox - img.rect.left/top.
+ * Scroll offset gerekmez cunku parent relative.
+ */
+function showOverlayOnImage(allBubbles, viewport, captureW, captureH) {
+  console.log('[MangaLens-v2.1] showOverlayOnImage:', allBubbles.length, 'balon');
+
+  // Eski overlay'leri temizle
+  clearAllOverlays();
+
+  var img = findMangaImage();
+  if (!img) {
+    console.warn('[MangaLens-v2.1] manga img bulunamadi, viewport fixed fallback');
+    showFixedOverlayFallback(allBubbles, viewport);
+    return;
+  }
+
+  console.log('[MangaLens-v2.1] manga img bulundu:', img.src?.slice(0, 80), 'natural:', img.naturalWidth, 'x', img.naturalHeight);
+
+  var imgRect = img.getBoundingClientRect();
+  var renderedW = imgRect.width;
+  var renderedH = imgRect.height;
+  var captureW_safe = captureW || viewport.width;
+  var captureH_safe = captureH || viewport.height;
+
+  // scaleX / scaleY: capture (gercek piksel) → rendered (CSS piksel)
+  var scaleX = renderedW / captureW_safe;
+  var scaleY = renderedH / captureH_safe;
+
+  console.log('[MangaLens-v2.1] capture:', captureW_safe, 'x', captureH_safe,
+              'rendered:', renderedW, 'x', renderedH,
+              'scale:', scaleX.toFixed(3), 'x', scaleY.toFixed(3));
+
+  // Parent: img parent (position relative yapildi)
+  var parent = ensureRelativeParent(img);
+  if (!parent) {
+    console.warn('[MangaLens-v2.1] parent yok, fallback');
+    showFixedOverlayFallback(allBubbles, viewport);
+    return;
+  }
 
   var container = document.createElement('div');
-  container.id = 'ml-result-overlay';
+  container.id = 'ml-overlay-' + Date.now();
+  container.dataset.mangaSrc = (img.src || '').slice(0, 80);
+  container.dataset.captureW = String(captureW_safe);
+  container.dataset.captureH = String(captureH_safe);
   container.setAttribute('style',
-    'all:initial!important;' +
-    'position:fixed!important;' +
+    'position:absolute!important;' +
     'left:0!important;top:0!important;' +
-    'width:' + viewport.width + 'px!important;' +
-    'height:' + viewport.height + 'px!important;' +
+    'width:' + renderedW + 'px!important;' +
+    'height:' + renderedH + 'px!important;' +
     'pointer-events:none!important;' +
     'z-index:2147483647!important;' +
     'display:block!important;visibility:visible!important;opacity:1!important;'
   );
 
-  // Kapatma butonu
-  var closeBtn = document.createElement('div');
-  closeBtn.textContent = 'x Kapat';
-  closeBtn.setAttribute('style',
-    'all:initial!important;' +
-    'position:absolute!important;' +
-    'top:10px!important;right:10px!important;' +
-    'background:#7c3aed!important;color:white!important;' +
-    'padding:8px 14px!important;border-radius:6px!important;' +
-    'font-family:system-ui,sans-serif!important;font-size:13px!important;font-weight:600!important;' +
-    'cursor:pointer!important;pointer-events:auto!important;z-index:100001!important;'
-  );
-  closeBtn.addEventListener('click', function() {
-    container.remove();
-    if (window.__mlPageRunning) window.__mlPageRunning = false;
-  });
-  container.appendChild(closeBtn);
-
   // Her balon
-  allBubbles.forEach(function(b) {
+  var rendered = 0;
+  allBubbles.forEach(function(b, idx) {
+    if (!b.text || !b.text.trim()) return; // bos text → atla
+
+    // AI bbox viewport (capture) koordinatinda
+    // → rendered koordinata cevir
+    var boxLeft = b.x * scaleX;
+    var boxTop  = b.y * scaleY;
+    var boxW    = b.width  * scaleX;
+    var boxH    = b.height * scaleY;
+
+    // Debug log (her bbox)
+    console.log('[MangaLens-v2.1] bbox #' + idx,
+                'raw:', JSON.stringify(b),
+                'scaled: x=' + boxLeft.toFixed(1), 'y=' + boxTop.toFixed(1),
+                'w=' + boxW.toFixed(1), 'h=' + boxH.toFixed(1),
+                'parent:', parent.tagName + '.' + (parent.className || ''));
+
     var div = document.createElement('div');
-    div.textContent = b.text || '(bos)';
+    div.className = 'ml-bubble';
+    div.textContent = b.text;
+    div.dataset.raw = JSON.stringify(b);   // resize/reposition icin kaydet
     div.setAttribute('style',
-      'all:initial!important;' +
       'position:absolute!important;' +
-      'left:' + b.x + 'px!important;' +
-      'top:' + b.y + 'px!important;' +
-      'width:' + b.width + 'px!important;' +
-      'min-height:' + b.height + 'px!important;' +
-      'background:rgba(255,255,255,0.95)!important;' +
+      'left:' + boxLeft + 'px!important;' +
+      'top:' + boxTop + 'px!important;' +
+      'width:' + boxW + 'px!important;' +
+      'height:' + boxH + 'px!important;' +
+      'background:rgba(255,235,150,0.92)!important;' +
       'color:#000!important;' +
-      'padding:4px!important;' +
+      'padding:2px!important;' +
       'font-family:system-ui,sans-serif!important;' +
-      'font-size:13px!important;' +
+      'font-size:12px!important;' +
       'font-weight:600!important;' +
       'border-radius:3px!important;' +
+      'border:1px solid #b91c1c!important;' +
       'display:flex!important;' +
       'align-items:center!important;' +
       'justify-content:center!important;' +
       'text-align:center!important;' +
-      'line-height:1.3!important;' +
+      'line-height:1.2!important;' +
       'box-sizing:border-box!important;' +
-      'border:1px solid #7c3aed!important;' +
       'overflow:hidden!important;' +
-      'pointer-events:auto!important;'
+      'pointer-events:auto!important;' +
+      'z-index:100000!important;'
+    );
+    container.appendChild(div);
+    rendered++;
+  });
+
+  console.log('[MangaLens-v2.1]', rendered, 'balon overlay eklendi');
+
+  // Kapatma butonu
+  var closeBtn = document.createElement('div');
+  closeBtn.textContent = 'x Kapat';
+  closeBtn.setAttribute('style',
+    'position:absolute!important;' +
+    'top:-32px!important;right:0!important;' +
+    'background:#7c3aed!important;color:white!important;' +
+    'padding:6px 12px!important;border-radius:6px!important;' +
+    'font-family:system-ui,sans-serif!important;font-size:12px!important;font-weight:600!important;' +
+    'cursor:pointer!important;pointer-events:auto!important;z-index:100002!important;'
+  );
+  closeBtn.addEventListener('click', function() {
+    container.remove();
+  });
+  container.appendChild(closeBtn);
+
+  parent.appendChild(container);
+
+  // Watchdog: scroll/resize'da overlay pozisyonunu guncelle
+  setupOverlayWatchdog(container, img);
+}
+
+/**
+ * Overlay pozisyonunu scroll/resize'da img ile senkron tutar.
+ * Img scaled, moved, hidden olursa overlay yeniden konumlanir.
+ */
+function setupOverlayWatchdog(container, img) {
+  var lastRect = null;
+
+  function reposition() {
+    var rect = img.getBoundingClientRect();
+    if (lastRect &&
+        Math.abs(rect.width - lastRect.width) < 1 &&
+        Math.abs(rect.height - lastRect.height) < 1 &&
+        Math.abs(rect.left - lastRect.left) < 1 &&
+        Math.abs(rect.top - lastRect.top) < 1) {
+      return; // degisiklik yok
+    }
+    lastRect = { width: rect.width, height: rect.height, left: rect.left, top: rect.top };
+
+    if (rect.width === 0 || rect.height === 0) {
+      container.style.display = 'none';
+      return;
+    }
+    container.style.display = 'block';
+    container.style.width = rect.width + 'px';
+    container.style.height = rect.height + 'px';
+
+    // Bubble'lari scaleX/Y ile yeniden hesapla
+    var captureW = parseFloat(container.dataset.captureW || '0');
+    var captureH = parseFloat(container.dataset.captureH || '0');
+    if (!captureW || !captureH) return;
+
+    var scaleX = rect.width / captureW;
+    var scaleY = rect.height / captureH;
+
+    var bubbles = container.querySelectorAll('.ml-bubble');
+    bubbles.forEach(function(bubble, idx) {
+      var raw = JSON.parse(bubble.dataset.raw || '{}');
+      if (!raw.x) return;
+      bubble.style.left = (raw.x * scaleX) + 'px';
+      bubble.style.top  = (raw.y * scaleY) + 'px';
+      bubble.style.width  = (raw.width  * scaleX) + 'px';
+      bubble.style.height = (raw.height * scaleY) + 'px';
+    });
+  }
+
+  // Ilk hesapla
+  setTimeout(reposition, 100);
+
+  // resize/scroll'da guncelle
+  window.addEventListener('resize', reposition);
+  window.addEventListener('scroll', reposition, true);
+  // ResizeObserver ile img de resize olursa yakala
+  if (window.ResizeObserver) {
+    try {
+      var ro = new ResizeObserver(reposition);
+      ro.observe(img);
+    } catch (e) {}
+  }
+}
+
+/**
+ * Manga img bulunamazsa fallback: viewport'un en ust solune fixed overlay.
+ */
+function showFixedOverlayFallback(allBubbles, viewport) {
+  console.log('[MangaLens-v2.1] fixed fallback overlay');
+
+  var container = document.createElement('div');
+  container.id = 'ml-overlay-fallback-' + Date.now();
+  container.setAttribute('style',
+    'position:fixed!important;' +
+    'left:0!important;top:0!important;' +
+    'width:' + viewport.width + 'px!important;' +
+    'height:' + viewport.height + 'px!important;' +
+    'pointer-events:none!important;' +
+    'z-index:2147483647!important;'
+  );
+
+  allBubbles.forEach(function(b) {
+    if (!b.text || !b.text.trim()) return;
+    var div = document.createElement('div');
+    div.textContent = b.text;
+    div.setAttribute('style',
+      'position:absolute!important;' +
+      'left:' + b.x + 'px!important;' +
+      'top:' + b.y + 'px!important;' +
+      'width:' + b.width + 'px!important;' +
+      'height:' + b.height + 'px!important;' +
+      'background:rgba(255,235,150,0.92)!important;' +
+      'color:#000!important;padding:2px!important;' +
+      'font-family:system-ui,sans-serif!important;font-size:12px!important;' +
+      'border:1px solid #b91c1c!important;'
     );
     container.appendChild(div);
   });
 
-  document.body.appendChild(container);
-  console.log('[MangaLens-v2] overlay eklendi');
+  var closeBtn = document.createElement('div');
+  closeBtn.textContent = 'x Kapat';
+  closeBtn.setAttribute('style',
+    'position:absolute!important;top:10px;right:10px;' +
+    'background:#7c3aed!important;color:white!important;padding:6px 12px;border-radius:6px;' +
+    'cursor:pointer!important;pointer-events:auto!important;z-index:100002!important;'
+  );
+  closeBtn.addEventListener('click', function() { container.remove(); });
+  container.appendChild(closeBtn);
 
-  // Watchdog
-  var watchdog = setInterval(function() {
-    var c = document.getElementById('ml-result-overlay');
-    if (!c || !c.isConnected) {
-      try { document.body.appendChild(container); } catch (e) {}
-    }
-  }, 500);
-  setTimeout(function() { clearInterval(watchdog); }, 30000);
+  document.body.appendChild(container);
 }
 
 // Popup'a ilerleme gönder (varsa)
@@ -552,137 +779,34 @@ async function translateOne(area) {
 }
 
 function showOverlay(area, bubbles) {
-  console.log('[MangaLens] showOverlay cagirildi, area:', area, 'bubbles:', bubbles.length);
+  // v2.1: v1 selection mode icin de image-wrapper-level overlay kullan
+  console.log('[MangaLens-v2.1] showOverlay (v1 selection mode):', bubbles.length, 'balon');
 
-  // Eger daha once bir overlay kaldiysa kaldir
-  var existing = document.getElementById('ml-result-overlay');
-  if (existing) existing.remove();
+  // Eski overlay'leri temizle
+  clearAllOverlays();
 
-  var container = document.createElement('div');
-  container.id = 'ml-result-overlay';
-  container.className = 'ml-overlay-result';
-  // Inline style ile tum CSS'i override et — site stilleri engel olmasin
-  container.setAttribute('style',
-    'all:initial!important;' +
-    'position:fixed!important;' +
-    'left:' + area.x + 'px!important;' +
-    'top:' + area.y + 'px!important;' +
-    'width:' + area.width + 'px!important;' +
-    'height:' + area.height + 'px!important;' +
-    'border:3px solid #7c3aed!important;' +
-    'background:rgba(20,10,40,0.95)!important;' +
-    'z-index:2147483647!important;' +
-    'overflow:visible!important;' +
-    'border-radius:6px!important;' +
-    'pointer-events:auto!important;' +
-    'display:block!important;' +
-    'visibility:visible!important;' +
-    'opacity:1!important;' +
-    'box-sizing:border-box!important;' +
-    'font-family:system-ui,-apple-system,sans-serif!important;' +
-    'color:inherit!important;' +
-    'text-align:inherit!important;'
-  );
+  if (!bubbles || bubbles.length === 0) return;
 
-  console.log('[MangaLens] container olusturuldu, html ye ekleniyor...');
-
-  // Kapatma butonu
-  var closeBtn = document.createElement('div');
-  closeBtn.textContent = 'x Kapat';
-  closeBtn.style.cssText =
-    'position:absolute!important;top:-28px!important;right:0!important;' +
-    'background:#7c3aed!important;color:white!important;' +
-    'padding:4px 10px!important;border-radius:4px!important;' +
-    'font-size:11px!important;cursor:pointer!important;z-index:100001!important;';
-  closeBtn.addEventListener('click', function() { container.remove(); });
-  container.appendChild(closeBtn);
-
-  // Her balon icin kutu — bbox'lar artik crop koordinatinda, direkt koy
-  // Crop boyutu area boyutundan farkli olabilir (DPR nedeniyle)
+  // v1: bubbles crop koordinatinda geldi (captureVisibleTab crop).
+  // captureW = area.width * dpr
+  // captureH = area.height * dpr
   var dpr = window.devicePixelRatio || 1;
-  bubbles.forEach(function(b) {
-    var div = document.createElement('div');
-    div.textContent = b.text || '(bos)';
-    // Crop koordinatini CSS koordinatina cevir (DPR'ye bol)
-    var px = b.x / dpr;
-    var py = b.y / dpr;
-    var pw = b.width / dpr;
-    var ph = b.height / dpr;
-    div.setAttribute('style',
-      'all:initial!important;' +
-      'position:absolute!important;' +
-      'left:' + px + 'px!important;' +
-      'top:' + py + 'px!important;' +
-      'width:' + pw + 'px!important;' +
-      'min-height:' + ph + 'px!important;' +
-      'background:rgba(255,255,255,0.98)!important;' +
-      'color:#000!important;' +
-      'padding:4px!important;' +
-      'font-family:system-ui,sans-serif!important;' +
-      'font-size:13px!important;' +
-      'font-weight:600!important;' +
-      'border-radius:3px!important;' +
-      'display:flex!important;' +
-      'align-items:center!important;' +
-      'justify-content:center!important;' +
-      'text-align:center!important;' +
-      'line-height:1.3!important;' +
-      'box-sizing:border-box!important;' +
-      'border:1px solid #7c3aed!important;' +
-      'overflow:hidden!important;'
-    );
-    container.appendChild(div);
+  var captureW = area.width * dpr;
+  var captureH = area.height * dpr;
+
+  // Oncelikle crop koordinatlarini viewport CSS koordinatlarina cevir
+  var viewportBubbles = bubbles.map(function(b) {
+    return {
+      text: b.text,
+      x: area.x + (b.x / dpr),
+      y: area.y + (b.y / dpr),
+      width: b.width / dpr,
+      height: b.height / dpr,
+    };
   });
 
-  // documentElement'e ekle (body degil) — en ust seviyede
-  var parent = document.body || document.documentElement;
-  parent.appendChild(container);
-  console.log('[MangaLens] container eklendi. Rect:', container.getBoundingClientRect());
-
-  // TEST: Minimal bir div ekle — site CSS engelliyor mu kontrol et
-  var testDiv = document.createElement('div');
-  testDiv.id = 'ml-test-div';
-  testDiv.textContent = 'ML_TEST_VISIBLE';
-  testDiv.setAttribute('style',
-    'all:initial!important;' +
-    'position:fixed!important;' +
-    'left:10px!important;top:10px!important;' +
-    'background:red!important;color:white!important;' +
-    'padding:20px!important;font-size:30px!important;' +
-    'z-index:2147483647!important;' +
-    'display:block!important;visibility:visible!important;opacity:1!important;'
-  );
-  document.body.appendChild(testDiv);
-  console.log('[MangaLens] TEST div eklendi. Goruyor musun? Rect:', testDiv.getBoundingClientRect());
-  // 5 sn sonra kaldir
-  setTimeout(function() {
-    testDiv.remove();
-    console.log('[MangaLens] TEST div 5sn sonra kaldirildi.');
-  }, 5000);
-
-  // 1 sn sonra hâlâ DOM'da mı kontrol et
-  setTimeout(function() {
-    var still = document.getElementById('ml-result-overlay');
-    if (still) {
-      console.log('[MangaLens] 1sn sonra overlay hâlâ DOM\'da. Rect:', still.getBoundingClientRect());
-      console.log('[MangaLens] Parent:', still.parentElement?.tagName, 'ComputedStyle:', getComputedStyle(still).display, getComputedStyle(still).visibility, getComputedStyle(still).opacity, getComputedStyle(still).zIndex);
-    } else {
-      console.warn('[MangaLens] 1sn sonra overlay DOM\'dan SİLİNMİŞ! Sayfa JS tarafından kaldırıldı.');
-    }
-  }, 1000);
-
-  // Iframe içinde miyiz?
-  console.log('[MangaLens] window === top?', window === window.top, 'iframe?', window !== window.top);
-
-  // Re-attach watchdog: 3 sn boyunca container DOM'dan kaybolursa yeniden ekle
-  var watchdog = setInterval(function() {
-    var c = document.getElementById('ml-result-overlay');
-    if (!c || !c.isConnected) {
-      console.warn('[MangaLens] watchdog: container kayip, yeniden ekleniyor...');
-      try { (document.body || document.documentElement).appendChild(container); } catch (e) {}
-    }
-  }, 200);
-  setTimeout(function() { clearInterval(watchdog); }, 3000);
+  // Sonra image-wrapper-level overlay'e gec
+  showOverlayOnImage(viewportBubbles, { width: window.innerWidth, height: window.innerHeight }, captureW, captureH);
 }
 
 console.log('[MangaLens] v3 minimal content.js hazir');
