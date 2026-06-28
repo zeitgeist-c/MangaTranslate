@@ -80,7 +80,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-const PROMPT = 'You are a manga panel analyzer.\n\nFind all speech bubbles, narration boxes, and sound effects. For each, return:\n- "text": the text TRANSLATED to natural Turkish (translate dialogue; keep character names in original language; translate SFX like BOOM as GUM, CRACK as CAT)\n- "x", "y", "width", "height": bounding box in PIXELS of the input image (integers, top-left origin)\n\nReturn ONLY a JSON array. No prose. Example: [{"text":"Selam!","x":100,"y":50,"width":200,"height":80}]\n\nOrder bubbles top-to-bottom. Return [] if nothing readable.';
+// v2.7: Structured prompt — JSON schema, "balloons" wrapper, explicit requirements
+const PROMPT = 'You are analyzing a manga/comic image.\n' +
+  'Detect all visible speech bubbles, narration boxes, signs, and readable text.\n' +
+  'Return ONLY valid JSON. Do NOT use markdown. Do NOT explain.\n\n' +
+  'OUTPUT SCHEMA:\n' +
+  '{\n' +
+  '  "balloons": [\n' +
+  '    {\n' +
+  '      "text": "English text",\n' +
+  '      "translation": "Turkish translation",\n' +
+  '      "x": 0, "y": 0, "width": 100, "height": 50\n' +
+  '    }\n' +
+  '  ]\n' +
+  '}\n\n' +
+  'RULES:\n' +
+  '- Coordinates are PIXELS of the input image (integers, top-left origin).\n' +
+  '- Tight bbox: include bubble border NOT surrounding art.\n' +
+  '- Order top-to-bottom, left-to-right.\n' +
+  '- Translate text to natural Turkish in "translation" field.\n' +
+  '- SFX: translate e.g. BOOM -> GUM, CRACK -> CAT. Keep short.\n' +
+  '- If NO readable text, return {"balloons":[]}.\n' +
+  '- NEVER return empty string. NEVER return markdown.';
 
 async function handleExtract({ dataUrl, w, h }) {
   if (!dataUrl) throw new Error('dataUrl eksik');
@@ -121,8 +142,8 @@ async function callMultimodal(apiKey, dataUrl, w, h) {
 }
 
 /**
- * v2.5: Tek Gemini client helper.
- * Translation + test + gelecekteki diger tum cagrilar buradan gecer.
+ * v2.7: Tek Gemini client helper.
+ * Translation + test + response hardening (finishReason, candidates, empty).
  */
 async function callGemini({ apiKey, prompt, imageBase64, responseMimeType }) {
   if (!apiKey) throw new Error('API key eksik');
@@ -164,12 +185,45 @@ async function callGemini({ apiKey, prompt, imageBase64, responseMimeType }) {
     throw normalizeGeminiError(res.status, errBody);
   }
 
-  const data = await res.json();
-  const msg = data?.candidates?.[0]?.message || {};
-  let text = msg.content || '';
-  if (!text && Array.isArray(msg.reasoning_details)) {
-    text = msg.reasoning_details.map(r => r?.text || '').join('\n');
+  // v2.7: Parse response
+  const json = await res.json();
+
+  // Debug: candidates, finishReason, parts count (key yok)
+  console.log('[MangaLens-bg] Gemini response meta:', {
+    candidates: json?.candidates?.length || 0,
+    finishReason: json?.candidates?.[0]?.finishReason,
+    partsCount: json?.candidates?.[0]?.content?.parts?.length || 0,
+  });
+
+  const candidates = json?.candidates || [];
+  if (candidates.length === 0) {
+    throw new Error('Gemini candidates bos döndü. (safety block?)');
   }
+
+  const finishReason = candidates[0]?.finishReason;
+  if (finishReason === 'SAFETY' || finishReason === 'BLOCKLIST') {
+    throw new Error('Gemini response safety tarafindan bloklandi.');
+  }
+
+  // v2.7: Tum parts arrayini birlestir (sadece ilk degil)
+  const partsArr = candidates[0]?.content?.parts || [];
+  let text = '';
+  for (const part of partsArr) {
+    if (typeof part.text === 'string') text += part.text + '\n';
+  }
+  text = text.trim();
+
+  // Reasoning fallback
+  if (!text && Array.isArray(candidates[0]?.message?.reasoning_details)) {
+    text = candidates[0].message.reasoning_details
+      .map(r => r?.text || '').join('\n').trim();
+  }
+
+  // v2.7: Bos text → hata (0 balon sayma)
+  if (!text) {
+    throw new Error('Gemini bos cevap dondurdu. (finishReason: ' + (finishReason || 'yok') + ')');
+  }
+
   return text;
 }
 
@@ -221,21 +275,50 @@ async function testApiKey(apiKey) {
   }
 }
 
+// v2.7: parseBubbleArray boş/geçersiz girişte hata fırlatır → cache yazılmaz
 function parseBubbleArray(raw, w, h) {
-  const s = String(raw).replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
-  const first = s.indexOf('[');
-  const last = s.lastIndexOf(']');
-  if (first < 0 || last <= first) return [];
-  let arr;
-  try { arr = JSON.parse(s.slice(first, last + 1)); } catch { return []; }
-  if (!Array.isArray(arr)) return [];
-  return arr.filter(it => it && typeof it === 'object').map(it => ({
-    text: String(it.text || '').slice(0, 200).trim(),
-    x: clampInt(it.x, 0, w),
-    y: clampInt(it.y, 0, h),
-    width: clampInt(it.width, 1, w),
-    height: clampInt(it.height, 1, h),
-  })).filter(b => b.text && b.width > 0 && b.height > 0);
+  if (!raw || !String(raw).trim()) {
+    throw new Error('parseBubbleArray: bos giris');
+  }
+
+  var s = String(raw)
+    .replace(/```(?:json)?\s*([\s\S]*?)```/g, '$1')  // markdown fences
+    .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '') // thinking
+    .trim();
+
+  // Try direct array format: [...]
+  var first = s.indexOf('[');
+  var last  = s.lastIndexOf(']');
+  if (first >= 0 && last > first) {
+    try {
+      var arr = JSON.parse(s.slice(first, last + 1));
+      if (Array.isArray(arr)) return validateBubbles(arr, w, h);
+    } catch (e) { /* fall through to object format */ }
+  }
+
+  // Try object format: {"balloons": [...]} veya {"texts": [...]}
+  try {
+    var obj = JSON.parse(s);
+    if (Array.isArray(obj.balloons)) return validateBubbles(obj.balloons, w, h);
+    if (Array.isArray(obj.texts)) return validateBubbles(obj.texts, w, h);
+  } catch (e) { /* fall through */ }
+
+  throw new Error('parseBubbleArray: JSON array veya {balloons:[]} bulunamadi. raw=' + s.slice(0, 120));
+}
+
+// v2.7: Ortak bubble validation — her kaynaktan gelen bubble'i ayni mantikla dogrula
+function validateBubbles(arr, w, h) {
+  if (!Array.isArray(arr)) throw new Error('validateBubbles: array degil');
+  return arr
+    .filter(it => it && typeof it === 'object')
+    .map(it => ({
+      text: String(it.text || it.translation || '').slice(0, 200).trim(),
+      x: clampInt(it.x || it.left || 0, 0, w),
+      y: clampInt(it.y || it.top  || 0, 0, h),
+      width:  clampInt(it.width  || it.w || it.right - it.x || 0, 1, w),
+      height: clampInt(it.height || it.h || it.bottom - it.y || 0, 1, h),
+    }))
+    .filter(b => b.text && b.width > 0 && b.height > 0);
 }
 
 function clampInt(v, min, max) {

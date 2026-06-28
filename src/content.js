@@ -200,12 +200,91 @@ async function translateAreas(areas) {
 //  v2: Otomatik Sayfa Çevirisi (Grid Tabanlı)
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Grid ayarları
-const GRID_COLS = 3;
-const GRID_ROWS = 3;
-const GRID_OVERLAP = 16;   // px, kenarda kalan balonları yakala
+// v2.7: Adaptive grid — sayfa boyutuna gore 3x3, 2x2 veya 1x1
+const GRID_OVERLAP = 16;   // px, kenarda kalan balonlari yakala
+const MIN_CELL_SIZE = 320; // px — bundan kucukse upscale et
 
 // SHA-256 hash (hex) - cache key uretimi
+
+// v2.7: Adaptive grid secimi — sayfa boyutuna gore
+function chooseGrid(pageW, pageH) {
+  if (pageW >= 900 && pageH >= 1200) return { cols: 3, rows: 3 };
+  if (pageW >= 600 && pageH >= 800)  return { cols: 2, rows: 2 };
+  return { cols: 1, rows: 1 };
+}
+
+// v2.7: Orijinal img fetch (CORS izinli siteler icin)
+async function loadOriginalImage(imgEl) {
+  var src = imgEl.currentSrc || imgEl.src;
+  if (!src) throw new Error('src yok');
+  var resp = await fetch(src, { credentials: 'omit' });
+  if (!resp.ok) throw new Error('fetch basarisiz: ' + resp.status);
+  var blob = await resp.blob();
+  var bitmap = await createImageBitmap(blob);
+  var canvas = document.createElement('canvas');
+  canvas.width  = bitmap.width;
+  canvas.height = bitmap.height;
+  canvas.getContext('2d').drawImage(bitmap, 0, 0);
+  return { canvas: canvas, width: bitmap.width, height: bitmap.height, src: src, source: 'original' };
+}
+
+// v2.7: Viewport capture fallback
+async function captureViewportImage(imgEl) {
+  var fullDataUrl = await new Promise(function(resolve) {
+    chrome.runtime.sendMessage({ type: 'CAPTURE_TAB' }, function(resp) {
+      resolve(resp && resp.dataUrl ? resp.dataUrl : null);
+    });
+  });
+  if (!fullDataUrl) throw new Error('Screenshot alinamadi');
+
+  var tmp = new Image();
+  await new Promise(function(resolve) { tmp.onload = resolve; tmp.onerror = resolve; tmp.src = fullDataUrl; });
+
+  var dpr = window.devicePixelRatio || 1;
+  var rect = imgEl.getBoundingClientRect();
+  var cx = Math.max(0, Math.round(rect.left * dpr));
+  var cy = Math.max(0, Math.round(rect.top  * dpr));
+  var cw = Math.round(rect.width  * dpr);
+  var ch = Math.round(rect.height * dpr);
+  if (cx + cw > tmp.naturalWidth)  cw = tmp.naturalWidth  - cx;
+  if (cy + ch > tmp.naturalHeight) ch = tmp.naturalHeight - cy;
+  if (cw < 10 || ch < 10) throw new Error('crop cok kucuk');
+
+  var c = document.createElement('canvas');
+  c.width = cw; c.height = ch;
+  c.getContext('2d').drawImage(tmp, cx, cy, cw, ch, 0, 0, cw, ch);
+  return { canvas: c, width: cw, height: ch, src: imgEl.src, source: 'viewport-crop' };
+}
+
+// v2.7: Kucuk cell'leri upscale et (Gemini okusun diye)
+function maybeUpscale(canvas, minSize) {
+  if (!minSize) minSize = MIN_CELL_SIZE;
+  var side = Math.max(canvas.width, canvas.height);
+  var scale = side < minSize ? Math.ceil(minSize / side) : 1;
+  if (scale <= 1) return { canvas: canvas, scale: 1 };
+  var out = document.createElement('canvas');
+  out.width  = canvas.width  * scale;
+  out.height = canvas.height * scale;
+  var ctx = out.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(canvas, 0, 0, out.width, out.height);
+  return { canvas: out, scale: scale };
+}
+
+// v2.7: Capture stratejisi — once orijinal fetch, basarisizsa viewport crop
+async function capturePageImage(imgEl) {
+  try {
+    var orig = await loadOriginalImage(imgEl);
+    console.log('[MangaLens-v2.7] image source: original,', orig.width, 'x', orig.height);
+    return orig;
+  } catch (e) {
+    console.warn('[MangaLens-v2.7] original fetch fail, viewport-crop fallback:', e.message);
+  }
+  var vp = await captureViewportImage(imgEl);
+  console.log('[MangaLens-v2.7] image source: viewport-crop,', vp.width, 'x', vp.height);
+  return vp;
+}
 async function sha256Hex(input) {
   try {
     var buf = new TextEncoder().encode(input);
@@ -414,77 +493,54 @@ function isElementReady(el) {
  *   4. Sonucu sayfanin img parent'ina overlay olarak bas
  */
 async function translateSinglePage(targetEl, pageId) {
-  console.log('[MangaLens-v2.2] translateSinglePage:', pageId);
+  console.log('[MangaLens-v2.7] translateSinglePage:', pageId);
 
-  // 1. Tam viewport screenshot al
-  var fullDataUrl = null;
+  // 1. Capture stratejisi: once orijinal fetch, basarisizsa viewport crop
+  var pageCap = null;
   try {
-    var resp = await chrome.runtime.sendMessage({ type: 'CAPTURE_TAB' });
-    if (resp && resp.dataUrl) fullDataUrl = resp.dataUrl;
+    pageCap = await capturePageImage(targetEl);
   } catch (e) {
-    console.warn('[MangaLens-v2.2] captureVisibleTab hatasi:', e.message);
+    console.warn('[MangaLens-v2.7] capturePageImage basarisiz:', e.message);
     return { ok: false, error: e.message, bubbles: 0, errors: 1 };
   }
-  if (!fullDataUrl) {
-    return { ok: false, error: 'Screenshot alinamadi', bubbles: 0, errors: 1 };
+  if (!pageCap || !pageCap.canvas) {
+    return { ok: false, error: 'Capture basarisiz', bubbles: 0, errors: 1 };
   }
 
-  // 2. Image yukle
-  var img = new Image();
-  await new Promise(function(resolve) {
-    img.onload = resolve;
-    img.onerror = resolve;
-    img.src = fullDataUrl;
-  });
+  console.log('[MangaLens-v2.7] source:', pageCap.source, pageCap.width, 'x', pageCap.height);
 
-  // 3. Target elemanin viewport koordinatlarini al
+  // 2. Adaptive grid secimi (sayfa boyutuna gore)
+  var grid = chooseGrid(pageCap.width, pageCap.height);
+  console.log('[MangaLens-v2.7] grid:', grid.cols, 'x', grid.rows, '(width:', pageCap.width, 'height:', pageCap.height, ')');
+
   var dpr = window.devicePixelRatio || 1;
-  var tRect = targetEl.getBoundingClientRect();
-  var elX = Math.max(0, Math.round(tRect.left * dpr));
-  var elY = Math.max(0, Math.round(tRect.top  * dpr));
-  var elW = Math.round(tRect.width  * dpr);
-  var elH = Math.round(tRect.height * dpr);
+  var cellCaptureW = Math.floor(pageCap.width  / grid.cols);
+  var cellCaptureH = Math.floor(pageCap.height / grid.rows);
 
-  // Capture viewport sinirlari
-  if (elX + elW > img.naturalWidth)  elW = img.naturalWidth  - elX;
-  if (elY + elH > img.naturalHeight) elH = img.naturalHeight - elY;
-  if (elW < 10 || elH < 10) {
-    console.warn('[MangaLens-v2.2] hedef img cok kucuk:', elW, 'x', elH);
-    return { ok: false, error: 'img cok kucuk', bubbles: 0, errors: 1 };
-  }
-
-  console.log('[MangaLens-v2.2] target capture:', elX, elY, elW, 'x', elH, 'dpr:', dpr);
-
-  // 4. Hedef sayfa icin 3x3 grid hesapla (capture koordinatinda)
-  var cellCaptureW = Math.floor(elW / GRID_COLS);
-  var cellCaptureH = Math.floor(elH / GRID_ROWS);
-
+  // 3. Grid hücrelerini hesapla (capture koordinatinda, img-referansli)
   var cells = [];
   var chunkIndex = 0;
-  for (var row = 0; row < GRID_ROWS; row++) {
-    for (var col = 0; col < GRID_COLS; col++) {
-      var cx = elX + col * cellCaptureW;
-      var cy = elY + row * cellCaptureH;
+  for (var row = 0; row < grid.rows; row++) {
+    for (var col = 0; col < grid.cols; col++) {
+      var cx = col * cellCaptureW;
+      var cy = row * cellCaptureH;
       var cw = cellCaptureW;
       var ch = cellCaptureH;
-      if (col < GRID_COLS - 1) cw += GRID_OVERLAP;
-      if (row < GRID_ROWS - 1) ch += GRID_OVERLAP;
-      // capture sinirlari
-      if (cx + cw > elX + elW) cw = (elX + elW) - cx;
-      if (cy + ch > elY + elH) ch = (elY + elH) - cy;
+      if (col < grid.cols - 1) cw += GRID_OVERLAP;
+      if (row < grid.rows - 1) ch += GRID_OVERLAP;
+      if (cx + cw > pageCap.width)  cw = pageCap.width  - cx;
+      if (cy + ch > pageCap.height) ch = pageCap.height - cy;
       if (cw < 10 || ch < 10) continue;
       cells.push({
         chunkIndex: chunkIndex++,
         row: row, col: col,
-        // Capture koordinatlari (gercek piksel, chunk-local origin)
         px: cx, py: cy, pw: cw, ph: ch,
-        // Page (img) capture metadata — viewport içindeki offset + boyut
-        pageCaptureX: elX, pageCaptureY: elY,
-        pageCaptureW: elW, pageCaptureH: elH,
+        pageCaptureW: pageCap.width,
+        pageCaptureH: pageCap.height,
       });
     }
   }
-  console.log('[MangaLens-v2.4]', cells.length, 'hucre (capture koordinatinda)');
+  console.log('[MangaLens-v2.7]', cells.length, 'hucre (adaptive grid)');
 
   // 5. Her hucre icin AI cagirisi (cache + rate limit)
   var allGlobalBubbles = [];
@@ -506,8 +562,18 @@ async function translateSinglePage(targetEl, pageId) {
     } catch (e) { /* cache miss */ }
 
     if (!bubbles) {
-      // Cache miss → crop + AI
-      var cropDataUrl = cropCellRaw(img, cell.px, cell.py, cell.pw, cell.ph);
+      // Cache miss → crop + maybeUpscale + AI
+      var cellCanvas = document.createElement('canvas');
+      cellCanvas.width  = cell.pw;
+      cellCanvas.height = cell.ph;
+      cellCanvas.getContext('2d')
+        .drawImage(pageCap.canvas, cell.px, cell.py, cell.pw, cell.ph, 0, 0, cell.pw, cell.ph);
+
+      // v2.7: Kucuk cell'leri upscale et
+      var up = maybeUpscale(cellCanvas, MIN_CELL_SIZE);
+      var capW = up.canvas.width;
+      var capH = up.canvas.height;
+      var cropDataUrl = up.canvas.toDataURL('image/jpeg', 0.85);
       if (!cropDataUrl) {
         errors++;
         continue;
@@ -518,8 +584,8 @@ async function translateSinglePage(targetEl, pageId) {
         aiResp = await chrome.runtime.sendMessage({
           type: 'EXTRACT_BUBBLES',
           dataUrl: cropDataUrl,
-          w: cell.pw,
-          h: cell.ph,
+          w: capW,
+          h: capH,
         });
       } catch (e) {
         errors++;
@@ -527,12 +593,25 @@ async function translateSinglePage(targetEl, pageId) {
       }
 
       if (aiResp && aiResp.success && aiResp.bubbles) {
-        bubbles = aiResp.bubbles;
-        chrome.runtime.sendMessage({
-          type: 'STORE_CACHED_CELL',
-          cacheKey: cacheKey,
-          bubbles: bubbles,
-        }).catch(() => {});
+        // v2.7: Bbox'lari upscale scale'e bol (AI upscaled goruntude buldu)
+        var s = up.scale;
+        bubbles = aiResp.bubbles.map(function(b) {
+          return {
+            text:   b.text,
+            x:      Math.round(b.x / s),
+            y:      Math.round(b.y / s),
+            width:  Math.round(b.width / s),
+            height: Math.round(b.height / s),
+          };
+        });
+        // v2.7: Cache'e sadece balon VARSA yaz
+        if (bubbles.length > 0) {
+          chrome.runtime.sendMessage({
+            type: 'STORE_CACHED_CELL',
+            cacheKey: cacheKey,
+            bubbles: bubbles,
+          }).catch(() => {});
+        }
       } else {
         errors++;
       }
