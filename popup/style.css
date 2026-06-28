@@ -200,62 +200,6 @@ body {
 
 .section-label svg { color: var(--violet); flex-shrink: 0; }
 
-/* ── Provider grid ─────────────────────────────────────────────────────────── */
-.provider-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-}
-
-.provider-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  padding: 8px 4px;
-  background: var(--bg-2);
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: var(--transition);
-  transition-property: border-color, background, transform;
-  color: var(--text-2);
-}
-
-.provider-btn:hover {
-  border-color: var(--border-hi);
-  background: var(--bg-3);
-  transform: translateY(-1px);
-}
-
-.provider-btn.active {
-  border-color: var(--violet);
-  background: rgba(124, 58, 237, 0.12);
-  color: var(--text-1);
-  box-shadow: 0 0 0 1px rgba(124,58,237,0.3), inset 0 1px 0 rgba(255,255,255,0.04);
-}
-
-.provider-icon {
-  font-size: 16px;
-  line-height: 1;
-  color: var(--violet);
-}
-
-.provider-btn.active .provider-icon { color: #c4b5fd; }
-
-.provider-name {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-}
-
-.provider-tag {
-  font-size: 9px;
-  font-family: var(--font-mono);
-  color: var(--text-3);
-  letter-spacing: 0.3px;
-}
-
 /* ── Field group ───────────────────────────────────────────────────────────── */
 .field-group { display: flex; flex-direction: column; gap: 4px; }
 
@@ -299,24 +243,6 @@ body {
   cursor: pointer;
 }
 
-/* Şifreyi göster/gizle butonu */
-.eye-btn {
-  position: absolute;
-  right: 6px; top: 50%;
-  transform: translateY(-50%);
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--text-3);
-  display: flex; align-items: center; justify-content: center;
-  padding: 4px;
-  border-radius: 4px;
-  transition: color 0.15s;
-}
-
-.eye-btn:hover { color: var(--text-2); }
-.field-input:has(+ .eye-btn), .input-wrap:has(.eye-btn) .field-input { padding-right: 32px; }
-
 /* ── Hint text ─────────────────────────────────────────────────────────────── */
 .hint-text {
   font-size: 10px;
@@ -332,57 +258,13 @@ body {
 
 .hint-text a:hover { text-decoration: underline; }
 
-/* ── Filter row ─────────────────────────────────────────────────────────────── */
-.filter-row {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 4px;
-}
-
-.filter-btn {
-  flex: 1;
-  padding: 4px 8px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: var(--transition);
-}
-
-.filter-btn:hover {
-  border-color: var(--border-hi);
-  color: var(--text-2);
-}
-
-.filter-btn.active {
-  background: rgba(124, 58, 237, 0.15);
-  border-color: var(--violet);
-  color: #c4b5fd;
-}
-
-/* ── Refresh models button ─────────────────────────────────────────────────── */
-.btn-refresh-models {
-  width: 100%;
-  padding: 6px;
-  margin-bottom: 4px;
-  background: var(--bg-2);
-  border: 1px dashed var(--border);
-  border-radius: 4px;
-  color: var(--text-3);
+.hint-text code {
+  background: var(--bg-0);
+  padding: 1px 5px;
+  border-radius: 3px;
   font-family: var(--font-mono);
   font-size: 10px;
-  cursor: pointer;
-  transition: var(--transition);
-}
-
-.btn-refresh-models:hover {
-  border-color: var(--violet);
   color: #c4b5fd;
-  border-style: solid;
 }
 
 /* ── Toggle label ─────────────────────────────────────────────────────────────── */

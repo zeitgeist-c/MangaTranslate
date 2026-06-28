@@ -1,5 +1,5 @@
-// dosya: src/background.js (v5 - direct Gemini API)
-// 9Router multimodal'da 401 aliyoruz. Dogrudan Google Gemini native API kullan.
+// dosya: src/background.js (v3 - Gemini native)
+// Dogrudan Google Gemini native API. 9Router/OpenRouter kaldirildi.
 
 'use strict';
 
@@ -44,8 +44,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'GET_SETTINGS') {
     sendResponse({
       enabled: true,
-      ninerouterModel: GEMINI_MODEL,
-      provider: 'gemini',
+      model: GEMINI_MODEL,
     });
     return false;
   }

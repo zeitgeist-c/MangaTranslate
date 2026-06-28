@@ -44,7 +44,7 @@
   ],
   "host_permissions": [
     "<all_urls>",
-    "http://localhost:20128/*"
+    "https://generativelanguage.googleapis.com/*"
   ],
   "web_accessible_resources": [
     {
