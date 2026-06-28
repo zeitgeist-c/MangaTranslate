@@ -401,22 +401,43 @@ async function renderApiKeyList() {
   });
 }
 
-async function addApiKey() {
-  const raw = (el.newApiKey.value || '').trim();
-  if (!raw) {
-    showToast('⚠ API anahtarı gir', 'error');
-    return;
-  }
-  if (!raw.startsWith('AIza')) {
-    showToast('⚠ Geçersiz format (AIza... ile başlamalı)', 'error');
-    return;
-  }
-  const label = (el.newApiLabel.value || '').trim() || ('API ' + (Date.now() % 10000));
+// v2.5.1: API key normalize + flexible validation (AIza sarti yok)
+function normalizeApiKey(value) {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, '');   // \n, \t, space dahil tum whitespace kaldir
+}
 
-  const { list, activeId } = await loadApiKeys();
+function validateApiKeyForSave(value) {
+  const apiKey = normalizeApiKey(value);
+  if (!apiKey) {
+    return { ok: false, message: 'API anahtarı boş olamaz.' };
+  }
+  if (apiKey.length < 20) {
+    return { ok: false, message: 'API anahtarı çok kısa görünüyor.' };
+  }
+  return { ok: true, apiKey: apiKey };
+}
+
+async function addApiKey() {
+  const validation = validateApiKeyForSave(el.newApiKey.value);
+  if (!validation.ok) {
+    showToast('⚠ ' + validation.message, 'error');
+    return;
+  }
+  const apiKey = validation.apiKey;
+
+  // Debug log (tam key YOK)
+  console.log('[MangaLens] API key add attempt: length=' + apiKey.length
+    + ', prefix=' + apiKey.slice(0, 4) + ', suffix=' + apiKey.slice(-4));
+
+  const { list } = await loadApiKeys();
+  const label = (el.newApiLabel.value || '').trim()
+    || ('Google API ' + (list.length + 1));
+
   const newEntry = {
     id: crypto.randomUUID(),
-    key: raw,
+    key: apiKey,
     label: label,
     isActive: false,
     lastTestStatus: 'untested',
@@ -428,7 +449,7 @@ async function addApiKey() {
   const willBeActive = list.length === 0;
   if (willBeActive) newEntry.isActive = true;
   const newList = [...list, newEntry];
-  const newActiveId = willBeActive ? newEntry.id : activeId;
+  const newActiveId = willBeActive ? newEntry.id : (list.find(k => k.id === activeId)?.id);
 
   await saveApiKeys(newList, newActiveId);
   el.newApiKey.value = '';
