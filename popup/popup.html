@@ -76,32 +76,15 @@
       <span class="progress-text" id="progress-text">Çeviriliyor...</span>
     </div>
 
-    <!-- ═══ 9ROUTER YAPILANDIRMASI ═══ -->
+    <!-- ═══ API (Gemini hardcoded) ═══ -->
     <section class="section">
       <div class="section-label">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="3" y="11" width="18" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M7 11V7a5 5 0 0 1 10 0v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-        9ROUTER API
+        API
       </div>
-      <div class="field-group">
-        <label class="field-label">Endpoint</label>
-        <div class="input-wrap">
-          <input type="text" id="ninerouter-url" class="field-input" placeholder="http://localhost:20128/v1">
-        </div>
-        <div class="hint-text">
-          9Router'ın varsayılan adresi. <a href="http://localhost:20128/dashboard" target="_blank">Dashboard'ı aç</a>
-        </div>
+      <div class="hint-text">
+        Google Gemini 3.1 Flash Lite (multimodal). API anahtarı <code>src/background.js</code>'te hardcoded. Değiştirmek için dosyayı düzenleyip eklentiyi yenileyin.
       </div>
-      <div class="field-group">
-        <label class="field-label">Model (Fallback Zinciri)</label>
-        <select id="ninerouter-model" class="field-select"></select>
-        <div class="hint-text">
-          Bir model hata verirse otomatik sonrakine geçer
-        </div>
-      </div>
-      <button class="btn-test" id="btn-test">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M5 12l5 5L20 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        Bağlantıyı Test Et
-      </button>
     </section>
 
     <!-- ═══ DAVRANIŞ ═══ -->

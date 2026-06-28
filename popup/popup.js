@@ -1,16 +1,11 @@
 // dosya: popup/popup.js
-// MangaLens TR — Popup Mantigi (v2)
-// "Bu Sayfayi Cevir" CTA, OpenRouter ayarlari, cache stats, auto-translate toggle.
+// MangaLens TR — Popup Mantigi (v3, Gemini only)
+// Auto-translate CTA, cache stats, selection mode, settings.
 
 'use strict';
 
-const MODEL_CHAIN = ['gemini', 'qwen', 'gpt-oss', 'nemotron', 'cloudflare'];
-
 const DEFAULTS = {
   enabled:          true,
-  provider:         '9router',
-  ninerouterUrl:    'http://localhost:20128/v1',
-  ninerouterModel:  MODEL_CHAIN[0],
   cacheEnabled:     true,
   autoTranslate:    false,
 };
@@ -25,9 +20,6 @@ const el = {
   progressBar:   $('progress-bar'),
   progressFill:  $('progress-fill'),
   progressText:  $('progress-text'),
-  nrUrl:         $('ninerouter-url'),
-  nrModel:       $('ninerouter-model'),
-  btnTest:       $('btn-test'),
   autoTranslate: $('auto-translate'),
   cacheEnabled:  $('cache-enabled'),
   cacheStats:    $('cache-stats'),
@@ -40,7 +32,6 @@ const el = {
   toast:         $('toast'),
 };
 
-let modelList = [];
 let cachePollTimer = null;
 
 // ── Baslat ────────────────────────────────────────────────────────────────────
@@ -49,7 +40,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   applySettingsToUI(settings);
   bindEvents();
   updateStatus(settings);
-  populateModelSelect();
   await refreshCacheStats();
   startCachePolling();
 });
@@ -69,9 +59,6 @@ function loadSettings() {
 function saveSettings() {
   const s = {
     enabled:          el.toggle.checked,
-    provider:         '9router',
-    ninerouterUrl:    el.nrUrl.value.trim() || 'http://localhost:20128/v1',
-    ninerouterModel:  el.nrModel.value,
     cacheEnabled:     el.cacheEnabled.checked,
     autoTranslate:    el.autoTranslate.checked,
   };
@@ -79,54 +66,9 @@ function saveSettings() {
 }
 
 function applySettingsToUI(s) {
-  el.toggle.checked       = s.enabled !== false;
-  el.nrUrl.value          = s.ninerouterUrl || 'http://localhost:20128/v1';
-  el.nrModel.value        = s.ninerouterModel || MODEL_CHAIN[0];
-  el.cacheEnabled.checked = s.cacheEnabled !== false;
-  el.autoTranslate.checked = s.autoTranslate === true;
-}
-
-async function populateModelSelect() {
-  // 9Router'dan canlı model listesi çek
-  try {
-    const result = await chrome.runtime.sendMessage({ type: 'GET_MODELS' });
-    if (result?.success && result.models?.models?.length > 0) {
-      modelList = result.models.models;
-    } else {
-      modelList = MODEL_CHAIN.map(id => ({ id, name: id, isFree: true }));
-    }
-  } catch {
-    modelList = MODEL_CHAIN.map(id => ({ id, name: id, isFree: true }));
-  }
-
-  el.nrModel.innerHTML = modelList
-    .map(m => `<option value="${m.id}">${m.name || m.id}</option>`)
-    .join('');
-  // Mevcut seçili modeli koru
-  const s = await loadSettings();
-  if (s.ninerouterModel && [...el.nrModel.options].some(o => o.value === s.ninerouterModel)) {
-    el.nrModel.value = s.ninerouterModel;
-  }
-}
-
-// ── Model Labels ──────────────────────────────────────────────────────────────
-
-function modelLabel(id) {
-  return {
-    'gemini':     '⭐ Gemini (multimodal)',
-    'qwen':       '⭐ Qwen-VL (multimodal)',
-    'gpt-oss':    'GPT OSS',
-    'nemotron':   '⭐ Nemotron (multimodal)',
-    'cloudflare': 'Cloudflare Workers AI',
-    'minimax':    '⭐ M3 (multimodal)',
-    'gpt-5.5':    'GPT-5.5 (kaliteli)',
-    'deepseek':   'DeepSeek',
-    'kimi':       'Kimi',
-    'opencode':   'OpenCode',
-    'openrouter': 'OpenRouter',
-    'ollama':     'Ollama (lokal)',
-    'vip':        '🌟 VIP (combined)',
-  }[id] || id;
+  el.toggle.checked         = s.enabled !== false;
+  el.cacheEnabled.checked   = s.cacheEnabled !== false;
+  el.autoTranslate.checked  = s.autoTranslate === true;
 }
 
 // ── Status ────────────────────────────────────────────────────────────────────
@@ -135,16 +77,12 @@ function updateStatus(s) {
   if (!s.enabled) {
     setStatus('inactive', 'Eklenti kapalı');
     el.btnTranslate.disabled = true;
+    el.btnAuto.disabled = true;
     return;
   }
-  // 9Router durumunu test et (kısa ping)
-  if (s.ninerouterUrl) {
-    setStatus('active', `Aktif — ${modelLabel(s.ninerouterModel || MODEL_CHAIN[0])}`);
-    el.btnTranslate.disabled = false;
-  } else {
-    setStatus('error', '9Router URL eksik');
-    el.btnTranslate.disabled = true;
-  }
+  setStatus('active', 'Aktif — Gemini 3.1 Flash Lite');
+  el.btnTranslate.disabled = false;
+  el.btnAuto.disabled = false;
 }
 
 function setStatus(type, text) {
@@ -266,28 +204,6 @@ function bindEvents() {
     showToast(enabled ? '▶ Çeviri aktif' : '■ Çeviri durduruldu', enabled ? 'success' : 'info');
   });
 
-  // Baglanti testi
-  el.btnTest.addEventListener('click', async () => {
-    el.btnTest.disabled = true;
-    setStatus('loading', 'Test ediliyor...');
-    try {
-      const result = await chrome.runtime.sendMessage({
-        type: 'TEST_API', provider: '9router',
-      });
-      if (result?.success) {
-        setStatus('active', 'Bağlantı başarılı');
-        showToast(`✓ ${result.message}`, 'success');
-      } else {
-        setStatus('error', 'Bağlantı başarısız');
-        showToast(`✗ ${result?.error || 'Bilinmeyen hata'}`, 'error');
-      }
-    } catch (e) {
-      setStatus('error', 'Test başarısız');
-      showToast(`✗ ${e.message}`, 'error');
-    }
-    el.btnTest.disabled = false;
-  });
-
   // Cache temizle
   el.btnClearCache.addEventListener('click', async () => {
     el.btnClearCache.disabled = true;
@@ -333,44 +249,6 @@ function bindEvents() {
       el.btnSelection.disabled = false;
     }
   });
-
-  // Goz (sifre goster/gizle) — artık key yok, bos
-  document.querySelectorAll('.eye-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const input = document.getElementById(btn.dataset.target);
-      if (!input) return;
-      input.type = input.type === 'password' ? 'text' : 'password';
-    });
-  });
-}
-
-// ── Progress polling ──────────────────────────────────────────────────────────
-
-function startProgressPolling() {
-  let ticks = 0;
-  const interval = setInterval(async () => {
-    ticks++;
-    try {
-      const state = await chrome.runtime.sendMessage({ type: 'GET_PAGE_STATE' });
-      if (state) {
-        const total = (state.queued || 0) + (state.processing || 0);
-        if (total === 0) {
-          el.progressFill.style.width = '100%';
-          el.progressText.textContent = 'Tamamlandı';
-          clearInterval(interval);
-          setTimeout(() => { el.progressBar.hidden = true; refreshCacheStats(); }, 1500);
-        } else {
-          // Yaklasik tahmin: 5sn/gorsel, max %95'e kadar
-          const est = Math.min(95, ticks * 12);
-          el.progressFill.style.width = `${est}%`;
-          el.progressText.textContent = `${total} görsel kaldı`;
-        }
-      }
-    } catch {
-      clearInterval(interval);
-    }
-    if (ticks > 60) clearInterval(interval);  // 60sn timeout
-  }, 1000);
 }
 
 // ── Aktif sekmeye mesaj ───────────────────────────────────────────────────────
