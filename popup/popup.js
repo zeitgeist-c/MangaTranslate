@@ -46,6 +46,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   applySettingsToUI(settings);
   bindEvents();
   updateStatus(settings);
+  await migrateLegacyApiKey();   // v2.6: eski tekil alanlardan tasima
   await renderApiKeyList();
   await refreshCacheStats();
   startCachePolling();
@@ -159,8 +160,14 @@ function bindEvents() {
         if (el.progressFill) el.progressFill.style.width = '100%';
         if (el.progressText) el.progressText.textContent = '✓ Tamamlandı';
       } else {
-        showToast(`✗ ${resp?.error || 'Hata'}`, 'error');
-        if (el.progressText) el.progressText.textContent = 'Hata: ' + (resp?.error || '');
+        // v2.6: 429 / rate_limit icin spesifik mesaj
+        const errMsg = resp?.error || 'Hata';
+        if (/rate limit|kota/i.test(errMsg)) {
+          showToast('⚠ Aktif API anahtarında rate limit var. Lütfen başka bir anahtarı aktif yapın.', 'error');
+        } else {
+          showToast('✗ ' + errMsg, 'error');
+        }
+        if (el.progressText) el.progressText.textContent = 'Hata: ' + errMsg;
       }
     } catch (e) {
       showToast(`✗ ${e.message}`, 'error');
@@ -299,6 +306,60 @@ function showToast(message, type = 'info') {
 //  v2.5: Google API Key Yonetimi
 // ══════════════════════════════════════════════════════════════════════════════
 
+/**
+ * v2.6: Eski tekil alanlari (googleApiKey, apiKey, geminiApiKey) yeni dizi formuna tasi.
+ * Bir kere calisir, sonra artik dizi formatinda devam eder.
+ */
+async function migrateLegacyApiKey() {
+  const data = await new Promise(resolve => {
+    chrome.storage.local.get(
+      ['googleApiKeys', 'activeGoogleApiKeyId', 'googleApiKey', 'apiKey', 'geminiApiKey'],
+      d => resolve(d)
+    );
+  });
+
+  // Zaten yeni formattaysa gerek yok
+  if (Array.isArray(data.googleApiKeys) && data.googleApiKeys.length > 0) {
+    // Yine de eski alanlari temizle (yine de kalma ihtimali var)
+    if (data.googleApiKey || data.apiKey || data.geminiApiKey) {
+      await chrome.storage.local.remove(['googleApiKey', 'apiKey', 'geminiApiKey']);
+      console.log('[MangaLens] Eski tekil alanlar temizlendi');
+    }
+    return;
+  }
+
+  const legacy = data.googleApiKey || data.apiKey || data.geminiApiKey;
+  if (!legacy || typeof legacy !== 'string') return;
+
+  const normalized = String(legacy).trim().replace(/\s+/g, '');
+  if (!normalized || normalized.length < 20) {
+    // Cok kisa, migration yapma ama eski alanlari temizle
+    await chrome.storage.local.remove(['googleApiKey', 'apiKey', 'geminiApiKey']);
+    return;
+  }
+
+  const newEntry = {
+    id: crypto.randomUUID(),
+    key: normalized,
+    label: 'Migrated',
+    isActive: true,
+    lastTestStatus: 'untested',
+    lastTestMessage: 'Eski formattan tasindi.',
+    lastTestedAt: null,
+    createdAt: Date.now(),
+  };
+
+  await chrome.storage.local.set({
+    googleApiKeys: [newEntry],
+    activeGoogleApiKeyId: newEntry.id,
+  });
+
+  // Eski alanlari temizle
+  await chrome.storage.local.remove(['googleApiKey', 'apiKey', 'geminiApiKey']);
+
+  console.log('[MangaLens] Migrated legacy API key to googleApiKeys array');
+}
+
 async function loadApiKeys() {
   const data = await new Promise(resolve => {
     chrome.storage.local.get(['googleApiKeys', 'activeGoogleApiKeyId'], d => resolve(d));
@@ -431,7 +492,14 @@ async function addApiKey() {
   console.log('[MangaLens] API key add attempt: length=' + apiKey.length
     + ', prefix=' + apiKey.slice(0, 4) + ', suffix=' + apiKey.slice(-4));
 
-  const { list } = await loadApiKeys();
+  const { list, activeId } = await loadApiKeys();
+
+  // v2.6: Duplicate kontrolü
+  if (list.some(k => k.key === apiKey)) {
+    showToast('⚠ Bu API anahtarı zaten kayıtlı.', 'error');
+    return;
+  }
+
   const label = (el.newApiLabel.value || '').trim()
     || ('Google API ' + (list.length + 1));
 
@@ -441,49 +509,68 @@ async function addApiKey() {
     label: label,
     isActive: false,
     lastTestStatus: 'untested',
-    lastTestMessage: '',
-    lastTestedAt: 0,
+    lastTestMessage: 'Henüz test edilmedi.',
+    lastTestedAt: null,
+    createdAt: Date.now(),
   };
 
-  // Ilk eklenen otomatik aktif
-  const willBeActive = list.length === 0;
-  if (willBeActive) newEntry.isActive = true;
-  const newList = [...list, newEntry];
-  const newActiveId = willBeActive ? newEntry.id : (list.find(k => k.id === activeId)?.id);
+  // v2.6: Aktif mantigi: ilk key VEYA aktif key yoksa → yeni key aktif
+  const activeExists = activeId && list.some(k => k.id === activeId);
+  const shouldMakeActive = !activeExists;
 
-  await saveApiKeys(newList, newActiveId);
+  // isActive flag'lerini normalize et
+  const normalizedList = list.map(k => ({ ...k, isActive: k.id === activeId && activeExists }));
+  const nextActiveId = shouldMakeActive ? newEntry.id : activeId;
+  newEntry.isActive = shouldMakeActive;
+
+  const nextKeys = [...normalizedList, newEntry];
+
+  await saveApiKeys(nextKeys, nextActiveId);
   el.newApiKey.value = '';
   el.newApiLabel.value = '';
   await renderApiKeyList();
-  showToast(willBeActive ? '✓ API anahtarı eklendi ve aktif yapıldı' : '✓ API anahtarı eklendi', 'success');
+  showToast(
+    shouldMakeActive
+      ? '✓ API anahtarı eklendi ve aktif yapıldı.'
+      : '✓ API anahtarı eklendi.',
+    'success'
+  );
 }
 
 async function activateApiKey(id) {
   const { list } = await loadApiKeys();
-  const exists = list.some(k => k.id === id);
-  if (!exists) return;
-  await saveApiKeys(list, id);
+  if (!list.some(k => k.id === id)) return;
+
+  // v2.6: isActive flag'lerini normalize et (sadece secili true)
+  const normalizedList = list.map(k => ({ ...k, isActive: k.id === id }));
+  await saveApiKeys(normalizedList, id);
   await renderApiKeyList();
-  showToast('✓ Aktif anahtar değiştirildi', 'success');
+  showToast('✓ Aktif API anahtarı değiştirildi.', 'success');
 }
 
 async function deleteApiKey(id) {
   if (!confirm('Bu API anahtarını silmek istediğine emin misin?')) return;
   const { list, activeId } = await loadApiKeys();
-  const newList = list.filter(k => k.id !== id);
+  const remaining = list.filter(k => k.id !== id);
 
   let newActiveId = activeId;
-  // Silinen aktiftse → başka key varsa ilkini aktif yap
+  // v2.6: Silinen aktiftse → ilk kalan key aktif olur (yoksa null)
   if (activeId === id) {
-    if (newList.length > 0) {
-      newActiveId = newList[0].id;
-    } else {
-      newActiveId = null;
-    }
+    newActiveId = remaining.length > 0 ? remaining[0].id : null;
   }
-  await saveApiKeys(newList, newActiveId);
+
+  // isActive flag'lerini normalize et
+  const normalizedList = remaining.map(k => ({
+    ...k,
+    isActive: k.id === newActiveId,
+  }));
+
+  await saveApiKeys(normalizedList, newActiveId);
   await renderApiKeyList();
-  showToast('🗑 API anahtarı silindi', 'info');
+  showToast(remaining.length === 0
+    ? '🗑 Son API anahtarı silindi.'
+    : '🗑 API anahtarı silindi.',
+    'info');
 }
 
 async function testApiKeyById(id) {
@@ -505,8 +592,13 @@ async function testApiKeyById(id) {
     await saveApiKeys(list, activeId);
   }
   await renderApiKeyList();
-  if (result.status === 'success') showToast('✓ API çalışıyor', 'success');
-  else showToast('✗ ' + (result.message || 'Test başarısız'), 'error');
+
+  // v2.6: Status'a ozel toast mesajlari
+  if (result.status === 'success')             showToast('✓ API çalışıyor', 'success');
+  else if (result.status === 'invalid')        showToast('⛔ API key geçersiz', 'error');
+  else if (result.status === 'rate_limited')   showToast('⏱ Rate limit / kota dolu', 'error');
+  else if (result.status === 'error')          showToast('✗ ' + (result.message || 'Test başarısız'), 'error');
+  else                                         showToast('✗ Test başarısız', 'error');
 }
 
 async function checkApiKeyBefore() {
