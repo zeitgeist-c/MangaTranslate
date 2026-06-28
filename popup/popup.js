@@ -34,6 +34,7 @@ const el = {
   cacheCount:    $('cache-count'),
   cacheBytes:    $('cache-bytes'),
   btnClearCache: $('btn-clear-cache'),
+  btnResetCache: $('btn-reset-cache'),
   btnSave:       $('btn-save'),
   btnSelection:  $('btn-selection'),
   toast:         $('toast'),
@@ -298,6 +299,25 @@ function bindEvents() {
       showToast(`✗ ${e.message}`, 'error');
     }
     el.btnClearCache.disabled = false;
+  });
+
+  // Yeniden Cevir: pageId cache temizle + sayfayi tekrar cevir
+  el.btnResetCache?.addEventListener('click', async () => {
+    el.btnResetCache.disabled = true;
+    el.btnAuto.disabled = true;
+    el.btnTranslate.disabled = true;
+    try {
+      // Content script'e translatedPages temizlemesi + tekrar cevir
+      await notifyActiveTabPromise({ type: 'RESET_AND_RETRANSLATE' });
+      showToast('✓ Cache temizlendi, yeniden çevriliyor...', 'success');
+    } catch (e) {
+      showToast(`✗ ${e.message}`, 'error');
+    }
+    setTimeout(() => {
+      el.btnResetCache.disabled = false;
+      el.btnAuto.disabled = false;
+      el.btnTranslate.disabled = false;
+    }, 3000);
   });
 
   // Alan Sec
