@@ -41,6 +41,15 @@ chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
     return true;
   }
 
+  // v2: Otomatik 3x3 grid ceviri
+  if (message.type === 'TRANSLATE_PAGE') {
+    console.log('[MangaLens-v2] TRANSLATE_PAGE aldi');
+    translatePage()
+      .then(function(result) { sendResponse(result); })
+      .catch(function(err) { sendResponse({ ok: false, error: err.message }); });
+    return true;
+  }
+
   return true;
 });
 
@@ -175,6 +184,295 @@ async function translateAreas(areas) {
   for (var i = 0; i < areas.length; i++) {
     await translateOne(areas[i]);
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  v2: Otomatik Sayfa Çevirisi (Grid Tabanlı)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Grid ayarları
+const GRID_COLS = 3;
+const GRID_ROWS = 3;
+const GRID_OVERLAP = 16;   // px, kenarda kalan balonları yakala
+
+// SHA-256 hash (hex) - cache key uretimi
+async function sha256Hex(input) {
+  try {
+    var buf = new TextEncoder().encode(input);
+    var digest = await crypto.subtle.digest('SHA-256', buf);
+    return Array.from(new Uint8Array(digest))
+      .map(function(b) { return b.toString(16).padStart(2, '0'); })
+      .join('');
+  } catch (e) {
+    return '';  // hash yoksa cache calismaz, AI cagirilir
+  }
+}
+
+async function translatePage() {
+  console.log('[MangaLens-v2] translatePage basladi');
+
+  // 1. Tam viewport screenshot al
+  var fullDataUrl = null;
+  try {
+    var resp = await chrome.runtime.sendMessage({ type: 'CAPTURE_TAB' });
+    if (resp && resp.dataUrl) fullDataUrl = resp.dataUrl;
+  } catch (e) {
+    console.warn('[MangaLens-v2] captureVisibleTab hatasi:', e.message);
+    return { ok: false, error: e.message };
+  }
+  if (!fullDataUrl) {
+    return { ok: false, error: 'Screenshot alinamadi' };
+  }
+
+  // 2. Image yukle, boyut oku
+  var img = new Image();
+  await new Promise(function(resolve) {
+    img.onload = resolve;
+    img.onerror = resolve;
+    img.src = fullDataUrl;
+  });
+  console.log('[MangaLens-v2] full screenshot:', img.naturalWidth, 'x', img.naturalHeight);
+
+  // 3. Grid hücrelerini hesapla (DPR-aware crop koordinatlari)
+  var dpr = window.devicePixelRatio || 1;
+  var cssW = window.innerWidth;
+  var cssH = window.innerHeight;
+  var cellCssW = Math.floor(cssW / GRID_COLS);
+  var cellCssH = Math.floor(cssH / GRID_ROWS);
+
+  var cells = [];
+  for (var row = 0; row < GRID_ROWS; row++) {
+    for (var col = 0; col < GRID_COLS; col++) {
+      // CSS koordinati
+      var cx = col * cellCssW;
+      var cy = row * cellCssH;
+      var cw = cellCssW;
+      var ch = cellCssH;
+      // Overlap ekle (son satir/sutun haric)
+      if (col < GRID_COLS - 1) cw += GRID_OVERLAP;
+      if (row < GRID_ROWS - 1) ch += GRID_OVERLAP;
+      // Kenarlardan tasma varsa kirp
+      if (cx + cw > cssW) cw = cssW - cx;
+      if (cy + ch > cssH) ch = cssH - cy;
+      cells.push({
+        row: row, col: col,
+        cssX: cx, cssY: cy, cssW: cw, cssH: ch,
+        // AI'ya gönderilecek gercek piksel koordinatlari
+        px: Math.round(cx * dpr),
+        py: Math.round(cy * dpr),
+        pw: Math.round(cw * dpr),
+        ph: Math.round(ch * dpr),
+      });
+    }
+  }
+  console.log('[MangaLens-v2]', cells.length, 'hucre hesaplandi');
+
+  // 4. Sirayla her hucre icin AI cagirisi yap (background rate limit yonetir)
+  var allBubbles = [];
+  var errors = [];
+  var cacheHits = 0;
+  var apiCalls = 0;
+  for (var i = 0; i < cells.length; i++) {
+    var cell = cells[i];
+    notifyProgress(i, cells.length, cell);
+
+    // Cache key: sayfa URL + cell koordinatlari (DPR dahil)
+    var cacheKey = await sha256Hex(location.href + '|' + cell.px + ',' + cell.py + ',' + cell.pw + 'x' + cell.ph);
+
+    // Once cache kontrol
+    var cachedBubbles = null;
+    try {
+      var cacheResp = await chrome.runtime.sendMessage({ type: 'GET_CACHED_CELL', cacheKey: cacheKey });
+      if (cacheResp && cacheResp.success && cacheResp.bubbles) {
+        cachedBubbles = cacheResp.bubbles;
+        cacheHits++;
+      }
+    } catch (e) { /* cache miss */ }
+
+    var bubbles = null;
+    if (cachedBubbles) {
+      console.log('[MangaLens-v2] cell', i, 'cache HIT');
+      bubbles = cachedBubbles;
+    } else {
+      // Cache miss → AI cagirisi yap
+      var cropDataUrl = cropCell(img, cell);
+      if (!cropDataUrl) {
+        errors.push({ cell: i, error: 'crop basarisiz' });
+        continue;
+      }
+
+      var aiResp;
+      try {
+        aiResp = await chrome.runtime.sendMessage({
+          type: 'EXTRACT_BUBBLES',
+          dataUrl: cropDataUrl,
+          w: cell.pw,
+          h: cell.ph,
+        });
+      } catch (e) {
+        errors.push({ cell: i, error: e.message });
+        continue;
+      }
+
+      if (aiResp && aiResp.success && aiResp.bubbles) {
+        bubbles = aiResp.bubbles;
+        // Cache'e yaz (arka planda)
+        chrome.runtime.sendMessage({
+          type: 'STORE_CACHED_CELL',
+          cacheKey: cacheKey,
+          bubbles: bubbles,
+        }).catch(() => {});
+        apiCalls++;
+      } else {
+        errors.push({ cell: i, error: aiResp?.error || 'bos sonuc' });
+      }
+    }
+
+    if (bubbles && bubbles.length > 0) {
+      var shifted = shiftBubblesToViewport(bubbles, cell, dpr);
+      allBubbles = allBubbles.concat(shifted);
+      console.log('[MangaLens-v2] cell', i, 'ok:', bubbles.length, 'balon');
+    } else if (bubbles) {
+      console.log('[MangaLens-v2] cell', i, 'bos');
+    }
+  }
+
+  // 5. Tum bubble'lari tek overlay'de goster
+  notifyProgress(cells.length, cells.length, null);
+  if (allBubbles.length > 0) {
+    showCombinedOverlay(allBubbles, { width: cssW, height: cssH });
+  }
+
+  return {
+    ok: true,
+    total: cells.length,
+    translated: cells.length - errors.length,
+    bubbles: allBubbles.length,
+    errors: errors.length,
+  };
+}
+
+function cropCell(img, cell) {
+  var c = document.createElement('canvas');
+  c.width = cell.pw;
+  c.height = cell.ph;
+  var ctx = c.getContext('2d');
+  try {
+    ctx.drawImage(img, cell.px, cell.py, cell.pw, cell.ph, 0, 0, cell.pw, cell.ph);
+    return c.toDataURL('image/jpeg', 0.85);
+  } catch (e) {
+    console.warn('[MangaLens-v2] crop hatasi:', e.message);
+    return null;
+  }
+}
+
+// AI'dan gelen bbox'lar crop koordinatinda (piksel).
+// Bunlari CSS viewport koordinatlarina cevirip tüm sayfa overlay'inde dogru
+// yere koyabilmek icin offset ekliyoruz.
+function shiftBubblesToViewport(bubbles, cell, dpr) {
+  return bubbles.map(function(b) {
+    return {
+      text:   b.text,
+      x:      cell.cssX + (b.x / dpr),
+      y:      cell.cssY + (b.y / dpr),
+      width:  b.width / dpr,
+      height: b.height / dpr,
+    };
+  });
+}
+
+// Tek overlay: tum hucrelerin bubble'lari birlesik, viewport'u kaplar
+function showCombinedOverlay(allBubbles, viewport) {
+  console.log('[MangaLens-v2] showCombinedOverlay:', allBubbles.length, 'balon, viewport:', viewport);
+
+  var existing = document.getElementById('ml-result-overlay');
+  if (existing) existing.remove();
+
+  var container = document.createElement('div');
+  container.id = 'ml-result-overlay';
+  container.setAttribute('style',
+    'all:initial!important;' +
+    'position:fixed!important;' +
+    'left:0!important;top:0!important;' +
+    'width:' + viewport.width + 'px!important;' +
+    'height:' + viewport.height + 'px!important;' +
+    'pointer-events:none!important;' +
+    'z-index:2147483647!important;' +
+    'display:block!important;visibility:visible!important;opacity:1!important;'
+  );
+
+  // Kapatma butonu
+  var closeBtn = document.createElement('div');
+  closeBtn.textContent = 'x Kapat';
+  closeBtn.setAttribute('style',
+    'all:initial!important;' +
+    'position:absolute!important;' +
+    'top:10px!important;right:10px!important;' +
+    'background:#7c3aed!important;color:white!important;' +
+    'padding:8px 14px!important;border-radius:6px!important;' +
+    'font-family:system-ui,sans-serif!important;font-size:13px!important;font-weight:600!important;' +
+    'cursor:pointer!important;pointer-events:auto!important;z-index:100001!important;'
+  );
+  closeBtn.addEventListener('click', function() {
+    container.remove();
+    if (window.__mlPageRunning) window.__mlPageRunning = false;
+  });
+  container.appendChild(closeBtn);
+
+  // Her balon
+  allBubbles.forEach(function(b) {
+    var div = document.createElement('div');
+    div.textContent = b.text || '(bos)';
+    div.setAttribute('style',
+      'all:initial!important;' +
+      'position:absolute!important;' +
+      'left:' + b.x + 'px!important;' +
+      'top:' + b.y + 'px!important;' +
+      'width:' + b.width + 'px!important;' +
+      'min-height:' + b.height + 'px!important;' +
+      'background:rgba(255,255,255,0.95)!important;' +
+      'color:#000!important;' +
+      'padding:4px!important;' +
+      'font-family:system-ui,sans-serif!important;' +
+      'font-size:13px!important;' +
+      'font-weight:600!important;' +
+      'border-radius:3px!important;' +
+      'display:flex!important;' +
+      'align-items:center!important;' +
+      'justify-content:center!important;' +
+      'text-align:center!important;' +
+      'line-height:1.3!important;' +
+      'box-sizing:border-box!important;' +
+      'border:1px solid #7c3aed!important;' +
+      'overflow:hidden!important;' +
+      'pointer-events:auto!important;'
+    );
+    container.appendChild(div);
+  });
+
+  document.body.appendChild(container);
+  console.log('[MangaLens-v2] overlay eklendi');
+
+  // Watchdog
+  var watchdog = setInterval(function() {
+    var c = document.getElementById('ml-result-overlay');
+    if (!c || !c.isConnected) {
+      try { document.body.appendChild(container); } catch (e) {}
+    }
+  }, 500);
+  setTimeout(function() { clearInterval(watchdog); }, 30000);
+}
+
+// Popup'a ilerleme gönder (varsa)
+function notifyProgress(completed, total, currentCell) {
+  try {
+    chrome.runtime.sendMessage({
+      type: 'PAGE_PROGRESS',
+      completed: completed,
+      total: total,
+      current: currentCell ? { row: currentCell.row, col: currentCell.col } : null,
+    });
+  } catch (e) { /* popup kapali olabilir */ }
 }
 
 async function translateOne(area) {

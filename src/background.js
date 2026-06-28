@@ -9,6 +9,14 @@ const GEMINI_BASE   = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 const REQUEST_TIMEOUT = 45000;
 
+// v2: Rate limit yonetimi (Gemini 15 RPM = ~4sn minimum aralik)
+const MIN_INTERVAL_MS = 4000;        // istekler arasi minimum bekleme
+const BACKOFF_INITIAL_MS = 30000;     // 429 alinca ilk bekleme
+const BACKOFF_MAX_MS = 120000;        // maksimum backoff
+const requestQueue = [];
+let lastRequestTime = 0;
+let activeRequest = false;
+
 try {
   chrome.alarms?.create('keepalive', { periodInMinutes: 0.4 });
 } catch {}
@@ -34,8 +42,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'GET_SETTINGS') {
-    sendResponse({ enabled: true, ninerouterModel: MODEL_CHAIN[0] });
+    sendResponse({
+      enabled: true,
+      ninerouterModel: GEMINI_MODEL,
+      provider: 'gemini',
+    });
     return false;
+  }
+
+  // v2: Per-cell cache
+  if (message.type === 'GET_CACHED_CELL') {
+    getCachedCell(message.cacheKey).then(cached => {
+      sendResponse({ success: true, bubbles: cached });
+    });
+    return true;
+  }
+
+  if (message.type === 'STORE_CACHED_CELL') {
+    storeCachedCell(message.cacheKey, message.bubbles).then(() => {
+      sendResponse({ success: true });
+    });
+    return true;
   }
 });
 
@@ -44,17 +71,15 @@ const PROMPT = 'You are a manga panel analyzer.\n\nFind all speech bubbles, narr
 async function handleExtract({ dataUrl, w, h }) {
   if (!dataUrl) throw new Error('dataUrl eksik');
   console.log('[MangaLens-bg] handleExtract basladi, w=', w, 'h=', h, 'dataUrl uzunluk=', dataUrl.length);
-  try {
-    const bubbles = await callMultimodal(dataUrl, w, h);
-    console.log('[MangaLens-bg] Gemini dondu:', bubbles ? bubbles.length : 0, 'balon');
-    if (bubbles && bubbles.length > 0) {
-      return { bubbles, model: GEMINI_MODEL };
-    }
-    return { bubbles: [], model: GEMINI_MODEL };
-  } catch (e) {
-    console.warn('[MangaLens-bg] Gemini HATA:', e.message);
-    throw e;
+
+  // v2: rate-limited queue uzerinden calistir
+  const bubbles = await enqueueWithRateLimit(() => callMultimodal(dataUrl, w, h));
+
+  console.log('[MangaLens-bg] Gemini dondu:', bubbles ? bubbles.length : 0, 'balon');
+  if (bubbles && bubbles.length > 0) {
+    return { bubbles, model: GEMINI_MODEL };
   }
+  return { bubbles: [], model: GEMINI_MODEL };
 }
 
 async function callMultimodal(dataUrl, w, h) {
@@ -134,4 +159,93 @@ function clampInt(v, min, max) {
   const n = Math.round(Number(v));
   if (!Number.isFinite(n)) return min;
   return Math.max(min, Math.min(max, n));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  v2: Rate-Limited Sequential Queue
+// ══════════════════════════════════════════════════════════════════════════════
+
+function enqueueWithRateLimit(fn) {
+  return new Promise((resolve, reject) => {
+    requestQueue.push({ fn, resolve, reject, retries: 0 });
+    processRateLimitedQueue();
+  });
+}
+
+async function processRateLimitedQueue() {
+  if (activeRequest || requestQueue.length === 0) return;
+
+  const { fn, resolve, reject, retries } = requestQueue.shift();
+  activeRequest = true;
+
+  try {
+    // Minimum aralik bekle
+    const now = Date.now();
+    const elapsed = now - lastRequestTime;
+    if (lastRequestTime > 0 && elapsed < MIN_INTERVAL_MS) {
+      const wait = Math.max(0, MIN_INTERVAL_MS - elapsed);
+      if (wait > 0) {
+        console.log('[MangaLens-bg] rate-limit bekleme:', wait, 'ms');
+        await new Promise(r => setTimeout(r, wait));
+      }
+    }
+
+    lastRequestTime = Date.now();
+    console.log('[MangaLens-bg] istek gonderiliyor, queue:', requestQueue.length);
+
+    let result;
+    try {
+      result = await fn();
+      resolve(result);
+    } catch (e) {
+      // 429 veya timeout → backoff ile retry
+      const isRetryable = /429|rate|timeout/i.test(String(e.message));
+      if (isRetryable && retries < 3) {
+        const backoff = Math.min(BACKOFF_INITIAL_MS * Math.pow(2, retries), BACKOFF_MAX_MS);
+        console.warn('[MangaLens-bg] retryable hata:', e.message, '-> backoff:', backoff, 'ms');
+        requestQueue.unshift({ fn, resolve, reject, retries: retries + 1 });
+        // lastRequestTime'i geriye cek ki bir sonraki deneme de backoff yapisin
+        lastRequestTime = Date.now() + backoff;
+      } else {
+        reject(e);
+      }
+    }
+  } finally {
+    activeRequest = false;
+    // Siradaki istek
+    if (requestQueue.length > 0) {
+      // Kuyruktaki bir sonraki istek icin minimum araligi koru
+      setTimeout(processRateLimitedQueue, MIN_INTERVAL_MS);
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  v2: Per-Cell Cache (chrome.storage.local)
+// ══════════════════════════════════════════════════════════════════════════════
+
+const CACHE_PREFIX = 'ml_cell_';
+
+async function getCachedCell(cacheKey) {
+  if (!cacheKey) return null;
+  try {
+    const fullKey = CACHE_PREFIX + cacheKey;
+    const res = await chrome.storage.local.get([fullKey]);
+    return res[fullKey]?.bubbles || null;
+  } catch (e) {
+    console.warn('[MangaLens-bg] cache read hatasi:', e.message);
+    return null;
+  }
+}
+
+async function storeCachedCell(cacheKey, bubbles) {
+  if (!cacheKey) return;
+  try {
+    const fullKey = CACHE_PREFIX + cacheKey;
+    const payload = { bubbles, cachedAt: Date.now() };
+    await chrome.storage.local.set({ [fullKey]: payload });
+    console.log('[MangaLens-bg] cache stored:', fullKey, '(', bubbles.length, 'balon)');
+  } catch (e) {
+    console.warn('[MangaLens-bg] cache write hatasi:', e.message);
+  }
 }

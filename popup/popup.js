@@ -20,6 +20,7 @@ const el = {
   toggle:        $('enabled-toggle'),
   statusDot:     $('status-dot'),
   statusText:    $('status-text'),
+  btnAuto:       $('btn-auto-translate'),
   btnTranslate:  $('btn-translate-page'),
   progressBar:   $('progress-bar'),
   progressFill:  $('progress-fill'),
@@ -176,8 +177,57 @@ function startCachePolling() {
 
 // ── Event Handlers ────────────────────────────────────────────────────────────
 
+// Content'tan PAGE_PROGRESS mesajlarını dinle
+chrome.runtime.onMessage.addListener(function(message) {
+  if (message && message.type === 'PAGE_PROGRESS') {
+    var completed = message.completed || 0;
+    var total = message.total || 9;
+    var pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+    if (el.progressFill) el.progressFill.style.width = pct + '%';
+    if (el.progressText) {
+      if (message.current) {
+        el.progressText.textContent = (completed + 1) + '/' + total + ' parça işleniyor...';
+      } else {
+        el.progressText.textContent = completed + '/' + total + ' tamamlandı';
+      }
+    }
+  }
+});
+
 function bindEvents() {
-  // Alan Sec ve Cevir (primary CTA — full page translate CORS yuzunden calismaz)
+  // Sayfayi Otomatik Cevir (v2 - 3x3 grid, rate limited)
+  el.btnAuto.addEventListener('click', async () => {
+    el.btnAuto.disabled = true;
+    el.btnTranslate.disabled = true;
+    const originalText = el.btnAuto.innerHTML;
+    el.btnAuto.innerHTML = '<span class="btn-spinner"></span> Başlatılıyor...';
+    el.progressBar.hidden = false;
+    el.progressFill.style.width = '0%';
+    el.progressText.textContent = 'Ekran görüntüsü alınıyor...';
+
+    try {
+      const resp = await notifyActiveTabPromise({ type: 'TRANSLATE_PAGE' });
+      if (resp?.ok) {
+        showToast(`✓ ${resp.translated}/${resp.total} parça çevrildi (${resp.bubbles} balon)`, 'success');
+        if (el.progressFill) el.progressFill.style.width = '100%';
+        if (el.progressText) el.progressText.textContent = '✓ Tamamlandı';
+      } else {
+        showToast(`✗ ${resp?.error || 'Hata'}`, 'error');
+        if (el.progressText) el.progressText.textContent = 'Hata: ' + (resp?.error || '');
+      }
+    } catch (e) {
+      showToast(`✗ ${e.message}`, 'error');
+    }
+
+    setTimeout(() => {
+      el.btnAuto.innerHTML = originalText;
+      el.btnAuto.disabled = false;
+      el.btnTranslate.disabled = false;
+      el.progressBar.hidden = true;
+    }, 3000);
+  });
+
+  // Alan Sec ve Cevir (v1 - manuel crop, fallback)
   el.btnTranslate.addEventListener('click', async () => {
     el.btnTranslate.disabled = true;
     const originalText = el.btnTranslate.innerHTML;
