@@ -1,152 +1,106 @@
-<!-- dosya: popup/popup.html -->
 <!DOCTYPE html>
 <html lang="tr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MangaLens TR</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="bg-grid"></div>
-  <div class="bg-glow"></div>
   <div id="app">
-
-    <header class="header">
+    <header class="topbar">
       <div class="brand">
-        <div class="brand-icon">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-            <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-            <path d="M2 17l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M2 12l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </div>
-        <div>
-          <div class="brand-name">MangaLens <span class="brand-tr">TR</span></div>
-          <div class="brand-sub">Görsel Çeviri v2</div>
+        <div class="brand-mark" aria-hidden="true">ML</div>
+        <div class="brand-copy">
+          <div class="brand-name">MangaLens TR</div>
+          <div class="brand-sub" id="brand-sub">Görsel çeviri v3.0.0</div>
         </div>
       </div>
-      <label class="power-toggle" title="Eklentiyi aç/kapat">
-        <input type="checkbox" id="enabled-toggle">
-        <div class="power-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-            <path d="M12 2v6M6.8 6.8A8 8 0 1 0 17.2 6.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-        </div>
-      </label>
+
+      <div class="status-bar" id="status-bar">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">Yükleniyor...</span>
+      </div>
     </header>
 
-    <div class="status-bar" id="status-bar">
-      <span class="status-dot" id="status-dot"></span>
-      <span id="status-text">Yükleniyor...</span>
-    </div>
+    <nav class="tabs" aria-label="Popup bölümleri">
+      <button class="tab-btn active" type="button" data-tab="translate">Çeviri</button>
+      <button class="tab-btn" type="button" data-tab="api">API</button>
+    </nav>
 
-    <!-- ═══ PRIMARY CTA ═══ -->
-    <button class="btn-translate-page" id="btn-auto-translate">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-        <path d="M3 5h12M9 3v2M5 5c0 4 4 7 9 7M14 12l5-5M16 5l5 5M14 19l-3 3-3-3M5 14h12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      Sayfayı Otomatik Çevir
-    </button>
-
-    <button class="btn-secondary" id="btn-translate-page">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-        <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
-        <path d="M9 3v18M15 3v18M3 9h18M3 15h18" stroke="currentColor" stroke-width="1.5"/>
-      </svg>
-      Alan Seç ve Çevir
-    </button>
-
-    <div class="cta-info">
-      <strong>9 parçalı çeviri</strong>
-      ~36 sn sürer (15 RPM rate limit). Yenileme sonrası cache'li bölümler atlanır.
-    </div>
-
-    <button class="btn-secondary" id="btn-reset-cache" style="margin-top:4px;">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-        <path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      Yeniden Çevir (cache temizle)
-    </button>
-
-    <div class="progress-bar" id="progress-bar" hidden>
-      <div class="progress-fill" id="progress-fill"></div>
-      <span class="progress-text" id="progress-text">Çeviriliyor...</span>
-    </div>
-
-    <!-- ═══ GOOGLE API ANAHTARLARI ═══ -->
-    <section class="section">
-      <div class="section-label">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="3" y="11" width="18" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M7 11V7a5 5 0 0 1 10 0v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-        GOOGLE API ANAHTARLARI
-      </div>
-
-      <!-- Ekli key listesi (dinamik) -->
-      <div class="api-key-list" id="api-key-list">
-        <!-- JS tarafından doldurulacak -->
-      </div>
-
-      <div class="api-empty-msg" id="api-empty-msg" hidden>
-        <div class="hint-text" style="color:#f87171;">
-          ⚠ Aktif API anahtarı yok. Çeviri başlatılamaz.
+    <main class="tab-content">
+      <section class="tab-panel active" data-tab-panel="translate">
+        <div class="mode-card">
+          <div class="mode-head">
+            <div class="panel-title">Çeviri araçları</div>
+          </div>
+          <div class="action-grid mode-actions">
+            <button class="btn-secondary mode-button" id="btn-translate-page" type="button">
+              <span class="btn-icon" aria-hidden="true">▣</span>
+              Alan Seç
+            </button>
+            <button class="btn-secondary mode-button" id="btn-quick-translate" type="button">
+              <span class="btn-icon" aria-hidden="true">Q</span>
+              Oto Çevir
+            </button>
+          </div>
         </div>
-      </div>
 
-      <!-- Yeni key ekleme -->
-      <div class="field-group" style="margin-top:10px;">
-        <label class="field-label">Yeni API Anahtarı</label>
-        <input type="password" id="new-api-key" class="field-input" placeholder="AIzaSy..." autocomplete="off">
-      </div>
-      <div class="field-group">
-        <label class="field-label">Etiket (opsiyonel)</label>
-        <input type="text" id="new-api-label" class="field-input" placeholder="Google API 1" autocomplete="off">
-      </div>
-      <button class="btn-add-key" id="btn-add-key">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-          <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-        API Ekle
-      </button>
+        <div class="ml-stats-card">
+          <div class="ml-stats-title">Çeviri İstatistikleri</div>
+          <div class="ml-stats-grid">
+            <div class="ml-stat-box"><div class="ml-stat-label">Dakika</div><div class="ml-stat-value" id="ml-stat-minute">0</div></div>
+            <div class="ml-stat-box"><div class="ml-stat-label">Bugün</div><div class="ml-stat-value" id="ml-stat-day">0</div></div>
+            <div class="ml-stat-box"><div class="ml-stat-label">Toplam</div><div class="ml-stat-value" id="ml-stat-lifetime">0</div></div>
+          </div>
+        </div>
 
-      <div class="hint-text" style="margin-top:10px;">
-        Model: <code>Gemini 3.1 Flash Lite</code> (sabit)
-      </div>
-    </section>
+        <div class="settings-card">
+          <div class="settings-card-title">Tercihler</div>
+          <label class="switch-row">
+            <span><strong>Kapalıyken çeviri başlatılmaz.</strong></span>
+            <input type="checkbox" id="enabled-toggle">
+          </label>
+          <div class="font-size-setting">
+            <span><strong>Çeviri yazı boyutu</strong></span>
+            <div class="font-size-options" role="radiogroup" aria-label="Çeviri yazı boyutu">
+              <label><input type="radio" name="translation-font-size" value="16" checked><span>Normal</span></label>
+              <label><input type="radio" name="translation-font-size" value="20"><span>Büyük</span></label>
+            </div>
+          </div>
+          <button class="btn-primary btn-compact" id="btn-save" type="button">Kaydet</button>
+        </div>
+      </section>
+      <section class="tab-panel" data-tab-panel="api">
+        <div class="section-head">
+          <div>
+            <div class="panel-title">Google API anahtarları</div>
+          </div>
+        </div>
 
-    <!-- ═══ DAVRANIŞ ═══ -->
-    <section class="section">
-      <div class="section-label">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-        DAVRANIŞ
-      </div>
-      <label class="toggle-label">
-        <input type="checkbox" id="auto-translate">
-        <span>Sayfa açılınca otomatik çevir</span>
-      </label>
-      <label class="toggle-label">
-        <input type="checkbox" id="cache-enabled" checked>
-        <span>Çeviri önbelleğini kullan</span>
-      </label>
-      <div class="cache-stats" id="cache-stats">
-        <span>📦</span>
-        <span><strong id="cache-count">0</strong> sayfa</span>
-        <span>•</span>
-        <span><strong id="cache-bytes">0</strong> MB</span>
-        <button class="btn-clear-cache" id="btn-clear-cache">Temizle</button>
-      </div>
-    </section>
+        <div class="api-empty-msg" id="api-empty-msg" hidden>
+          Aktif API anahtarı yok. Çeviri başlatmak için bir anahtar ekleyin.
+        </div>
 
-    <button class="btn-save" id="btn-save">
-      Kaydet
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" stroke="currentColor" stroke-width="1.5"/><path d="M17 21v-8H7v8M7 3v5h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-    </button>
+        <div class="api-key-list" id="api-key-list"></div>
 
-    <button class="btn-secondary" id="btn-selection">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18" stroke="currentColor" stroke-width="1.5"/></svg>
-      Alan Seç (Alt+S)
-    </button>
+        <div class="form-block">
+          <label class="field-label" for="new-api-key">Yeni API anahtarı</label>
+          <input type="password" id="new-api-key" class="field-input" placeholder="AIzaSy..." autocomplete="off">
+
+          <label class="field-label" for="new-api-label">Etiket</label>
+          <input type="text" id="new-api-label" class="field-input" placeholder="Google API 1" autocomplete="off">
+
+          <button class="btn-primary btn-compact" id="btn-add-key" type="button">
+            API Ekle
+          </button>
+        </div>
+
+        <div class="note-line">Model: <code>Gemini 3.1 Flash Lite</code></div>
+      </section>
+
+    </main>
+
 
     <div class="toast" id="toast"></div>
   </div>

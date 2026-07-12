@@ -1,63 +1,61 @@
-# MangaLens TR v2.3 — Gemini Görsel Çeviri
+# MangaLens TR v3.0.0
 
-Google Chrome (Manifest V3) manga çeviri uzantısı.
+Google Chrome Manifest V3 tabanlı manga, manhwa ve manhua görsel çeviri uzantısı.
 
-## v2.3 Durumu
+## Özellikler
 
-**Çalışan:**
-- Google Gemini 3.1 Flash Lite (multimodal) ile görsel → balon bulma + Türkçe çeviri
-- "Bu Sayfayı Otomatik Çevir" — viewport'taki manga sayfalarını 3×3 grid ile çevirir
-- "Alan Seç ve Çevir" — manuel crop ile tek balon bölgesi çevirisi
-- Rate limit yönetimi: 15 RPM için 4000 ms aralık + exponential backoff
-- Per-page + per-cell cache (SHA-256, chrome.storage.local)
-- Viewport-aware: scroll edilince yeni sayfaları çevirir, çevrilmiş sayfaları atlar
-- Image-wrapper-level overlay: her manga img kendi overlay container'ında
-- DPR-aware koordinat dönüşümü + scaleX/scaleY
-- Watchdog + ResizeObserver: overlay sayfa scroll/resize'da img ile senkron
+- **Alan Seç:** Manga görselinde bir veya daha fazla alan çizip Enter ile toplu çevirir.
+- **Oto Çevir:** Çizilen her alanı beklemeden otomatik olarak çevirir.
+- **Alternatif çeviri:** Sonuç kutusundaki `Yeniden` düğmesi kaynak görseli bağımsız yeniden okuyup farklı bir Türkçe çeviri stratejisi uygular.
+- **Sonuç kontrolü:** Her sonuç kutusu `Yeniden` ve `×` araçlarına sahiptir.
+- **Yazı boyutu:** Normal (16 px) ve Büyük (20 px) seçenekleri bütün sonuçlara uygulanır.
+- **Çoklu API anahtarı:** Google Gemini anahtarları popup üzerinden eklenebilir, test edilebilir ve aktifleştirilebilir.
+- **Dayanıklı görsel yakalama:** Önce orijinal görsel denenir; CORS veya site kısıtında görünür sekme kırpma yöntemine geçilir.
+- **İstek kuyruğu:** Gemini istekleri rate limit ve geçici hata geri çekilmesiyle sıralı yürütülür.
 
 ## Kurulum
 
-1. `chrome://extensions` → Geliştirici modu AÇ
-2. "Paketlenmemişi yükle" → `MangaTranslate` klasörünü seç
-3. Manga sitesi aç → popup'ta "Bu Sayfayı Otomatik Çevir"
-4. Bir manga sayfasına scroll et → tekrar "Bu Sayfayı Otomatik Çevir" (yeni sayfa çevrilir, eski cache'ten gelir)
-5. Tüm çevirileri yeniden yapmak için "Yeniden Çevir (cache temizle)"
+1. `chrome://extensions` sayfasını açın.
+2. Geliştirici modunu etkinleştirin.
+3. **Paketlenmemiş öğe yükle** ile `MangaTranslate` klasörünü seçin.
+4. Popup içindeki API sekmesinden en az bir Gemini API anahtarı ekleyip aktif yapın.
+5. Manga sayfasında **Alan Seç** veya **Oto Çevir** modunu kullanın.
 
-## Teknik
+## Yeniden Çevir Nasıl Çalışır?
 
-- **AI:** Google Gemini 3.1 Flash Lite (`gemini-3.1-flash-lite`) — multimodal native API
-- **API key:** `src/background.js` içinde `GEMINI_API_KEY` hardcoded. Değiştirmek için düzenleyin.
-- **Grid:** 3×3 parça, 16 px overlap
-- **Rate limit:** Her istek arası 4000 ms (15 RPM güvenli). 429 alırsa 30s/60s/120s exponential backoff.
-- **Cache:** `chrome.storage.local`, SHA-256 anahtarlı, `unlimitedStorage` izni
-- **Overlay:** Img parent'ına `position:absolute`, scaleX/scaleY ile koordinat dönüşümü, ResizeObserver ile scroll/resize senkron
+Önceki Türkçe sonuç modele gönderilmez. Kaynak görsel yeniden analiz edilir ve denemeler sırayla şu yaklaşımları kullanır:
+
+1. Doğal, günlük Türkçe diyalog.
+2. Karakter tonu, duygu ve sahne bağlamı.
+3. Kısa, akıcı ve konuşma balonuna uygun Türkçe.
+
+Alternatif isteklerde daha yüksek yaratıcılık kullanılır. Bu yöntem farklı sonuç olasılığını artırır ancak üretken modeller nedeniyle her denemede farklı sonuç garanti edilemez.
+
+## Teknik Notlar
+
+- **Model:** `gemini-3.1-flash-lite`
+- **API anahtarları:** `chrome.storage.local` içinde saklanır; aktif anahtar service worker tarafından okunur.
+- **Kullanıcı tercihleri:** Etkinlik ve yazı boyutu `chrome.storage.sync` içinde saklanır.
+- **Capture:** Orijinal `img/canvas` veya görünür sekme kırpması.
+- **İstatistikler:** Başarılı Gemini çeviri istekleri dakika, gün ve toplam olarak yerel saklanır.
+- **Rate limit:** İstekler sıraya alınır; 429 ve geçici ağ hatalarında kontrollü geri çekilme uygulanır.
 
 ## Dosya Yapısı
 
 ```
 src/
-  background.js  — Gemini multimodal API, rate limit queue, cache
-  content.js    — Selection mode + pageId bazlı viewport ceviri + overlay
-  modules/       — yardımcı kodlar (constants, imagePipeline, canvasDraw, cache, observer, vb.)
+  background.js  - Gemini API, alternatif prompt stratejileri, rate limit ve API anahtarı okuma
+  content.js     - Alan seçimi, Oto Çevir, görsel yakalama ve sonuç kutuları
+
 popup/
-  popup.html    — CTA butonları + basit ayar paneli
-  popup.js      — handler'lar
-  style.css     — stiller
-manifest.json
+  popup.html     - Birleşik çeviri/tercihler ve API arayüzü
+  popup.js       - Popup davranışı ve API anahtarı yönetimi
+  style.css      - Popup stilleri
 ```
 
-## Git Tag'leri
+## Sorun Giderme
 
-- `v1.0-selection-mode` — İlk çalışan versiyon (selection mode)
-- `v2.0-auto-page` — Otomatik grid ceviri + rate limit
-- `v2.1-overlay-refactor` — Image-wrapper-level overlay
-- `v2.2-pageid-viewport` — Viewport bazlı pageId cache
-- `v2.3-gemini-only` — 9Router/OpenRouter kaldırıldı (bu versiyon)
-
-Geri dönmek için: `git checkout <tag>`
-
-## Notlar
-
-- API key'i değiştirmek: `src/background.js` içinde `GEMINI_API_KEY` sabitini güncelle
-- Cache temizleme: popup'taki "Yeniden Çevir" butonu veya `chrome://settings → Site ayarları → MangaTranslate → Depolama → Temizle`
-- Rate limit nedeniyle 9 parçalık bir sayfa ~36 saniye sürer
+- **API anahtarı yok/geçersiz:** API sekmesinde anahtarı ekleyin, test edin ve aktif yapın.
+- **Alan seçilemiyor:** Manga görselinin görünür olduğundan emin olun ve uzantıyı yeniden yükleyin.
+- **Görsel okunamıyor:** CORS nedeniyle orijinal görsel alınamazsa uzantı görünür sekme kırpmasına geçer; seçili alan ekranda görünür olmalıdır.
+- **Rate limit/kota:** Başka bir API anahtarını aktif yapın veya kota yenilenmesini bekleyin.
