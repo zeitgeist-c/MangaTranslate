@@ -1,13 +1,16 @@
 // dosya: popup/popup.js
 // MangaLens TR — Popup Mantigi (v3, Gemini only)
-// Auto-translate CTA, cache stats, selection mode, settings.
+// Selection modes, preferences, translation stats, and API key management.
 
 'use strict';
 
+
+
 const DEFAULTS = {
   enabled:          true,
-  cacheEnabled:     true,
-  autoTranslate:    false,
+
+
+  translationFontSize: 16,
 };
 
 const $ = id => document.getElementById(id);
@@ -15,20 +18,27 @@ const el = {
   toggle:        $('enabled-toggle'),
   statusDot:     $('status-dot'),
   statusText:    $('status-text'),
-  btnAuto:       $('btn-auto-translate'),
+
   btnTranslate:  $('btn-translate-page'),
-  progressBar:   $('progress-bar'),
-  progressFill:  $('progress-fill'),
-  progressText:  $('progress-text'),
-  autoTranslate: $('auto-translate'),
-  cacheEnabled:  $('cache-enabled'),
-  cacheStats:    $('cache-stats'),
-  cacheCount:    $('cache-count'),
-  cacheBytes:    $('cache-bytes'),
-  btnClearCache: $('btn-clear-cache'),
-  btnResetCache: $('btn-reset-cache'),
+
+
+
+
+  resultLine:    $('result-line'),
+
+
+  fontSizeOptions: Array.from(document.querySelectorAll('input[name="translation-font-size"]')),
+
+
+
+
+
+  btnQuick:      $('btn-quick-translate'),
   btnSave:       $('btn-save'),
-  btnSelection:  $('btn-selection'),
+
+  statMinute:    $('ml-stat-minute'),
+  statDay:       $('ml-stat-day'),
+  statLifetime:  $('ml-stat-lifetime'),
   toast:         $('toast'),
   // v2.5: API key yonetimi
   apiKeyList:    $('api-key-list'),
@@ -38,22 +48,71 @@ const el = {
   btnAddKey:     $('btn-add-key'),
 };
 
-let cachePollTimer = null;
+const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
+const tabPanels = Array.from(document.querySelectorAll('.tab-panel'));
+
+
+let statsPollTimer = null;
+
+
+let quickModeActive = false;
+
+function setActiveTranslationMode(mode) {
+  quickModeActive = mode === 'quick';
+  el.btnTranslate?.classList.toggle('active', mode === 'selection');
+  el.btnQuick?.classList.toggle('active', mode === 'quick');
+  if (el.btnQuick) {
+    el.btnQuick.innerHTML = mode === 'quick'
+      ? '<span class="btn-icon" aria-hidden="true">Q</span> Oto Açık'
+      : '<span class="btn-icon" aria-hidden="true">Q</span> Oto Çevir';
+  }
+}
+
+async function syncTranslationModeState() {
+  try {
+    const state = await notifyActiveTabPromise({ type: 'GET_TRANSLATION_MODE' });
+    setActiveTranslationMode(state?.mode || null);
+  } catch (_) {
+    setActiveTranslationMode(null);
+  }
+}
 
 // ── Baslat ────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+  syncVersionLabel();
   const settings = await loadSettings();
   applySettingsToUI(settings);
   bindEvents();
+  bindTabs();
+  await syncTranslationModeState();
   updateStatus(settings);
   await migrateLegacyApiKey();   // v2.6: eski tekil alanlardan tasima
   await renderApiKeyList();
-  await refreshCacheStats();
-  startCachePolling();
+  await chooseInitialTab();
+
+
+  await loadTranslationStatsToUI();
+
+  startStatsPolling();
 });
 
+function syncVersionLabel() {
+  const version = chrome.runtime.getManifest().version;
+  const versionEl = document.getElementById('brand-sub');
+  if (versionEl) {
+    versionEl.textContent = `Görsel çeviri v${version}`;
+  }
+}
+
 window.addEventListener('beforeunload', () => {
-  if (cachePollTimer) clearInterval(cachePollTimer);
+
+  if (statsPollTimer) clearInterval(statsPollTimer);
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.translationStats) {
+    loadTranslationStatsToUI();
+  }
 });
 
 // ── Settings ──────────────────────────────────────────────────────────────────
@@ -65,18 +124,51 @@ function loadSettings() {
 }
 
 function saveSettings() {
+  const selectedFontSize = el.fontSizeOptions.find(input => input.checked);
   const s = {
     enabled:          el.toggle.checked,
-    cacheEnabled:     el.cacheEnabled.checked,
-    autoTranslate:    el.autoTranslate.checked,
+
+
+    translationFontSize: normalizeTranslationFontSize(selectedFontSize?.value),
   };
   return new Promise(resolve => chrome.storage.sync.set(s, () => resolve(s)));
 }
 
 function applySettingsToUI(s) {
   el.toggle.checked         = s.enabled !== false;
-  el.cacheEnabled.checked   = s.cacheEnabled !== false;
-  el.autoTranslate.checked  = s.autoTranslate === true;
+
+
+  const fontSize = normalizeTranslationFontSize(s.translationFontSize);
+  el.fontSizeOptions.forEach(input => {
+    input.checked = Number(input.value) === fontSize;
+  });
+}
+
+function normalizeTranslationFontSize(value) {
+  const size = Number(value);
+  return [16, 20].includes(size) ? size : 16;
+}
+
+
+function bindTabs() {
+  tabButtons.forEach(btn => {
+    btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+  });
+}
+
+function activateTab(tabName) {
+  tabButtons.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tabName);
+  });
+  tabPanels.forEach(panel => {
+    panel.classList.toggle('active', panel.dataset.tabPanel === tabName);
+  });
+}
+
+async function chooseInitialTab() {
+  const { list, activeId } = await loadApiKeys();
+  const hasActiveKey = list.some(k => k.id === activeId);
+  activateTab(hasActiveKey ? 'translate' : 'api');
 }
 
 // ── Status ────────────────────────────────────────────────────────────────────
@@ -85,12 +177,14 @@ function updateStatus(s) {
   if (!s.enabled) {
     setStatus('inactive', 'Eklenti kapalı');
     el.btnTranslate.disabled = true;
-    el.btnAuto.disabled = true;
+
+    if (el.btnQuick) el.btnQuick.disabled = true;
     return;
   }
   setStatus('active', 'Aktif — Gemini 3.1 Flash Lite');
   el.btnTranslate.disabled = false;
-  el.btnAuto.disabled = false;
+
+  if (el.btnQuick) el.btnQuick.disabled = false;
 }
 
 function setStatus(type, text) {
@@ -102,96 +196,61 @@ function setStatus(type, text) {
   el.statusText.textContent = text;
 }
 
-// ── Cache Stats ───────────────────────────────────────────────────────────────
+// ── Cooldown ───────────────────────────────────────────────────────────────────
 
-async function refreshCacheStats() {
+function currentMinuteBucket(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  return `${y}-${m}-${d}T${hh}:${mm}`;
+}
+
+function currentDayBucket(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+async function loadTranslationStatsToUI() {
   try {
-    const stats = await chrome.runtime.sendMessage({ type: 'GET_CACHE_STATS' });
-    if (stats && stats.success) {
-      el.cacheCount.textContent = stats.count || 0;
-      const mb = ((stats.bytes || 0) / (1024 * 1024)).toFixed(1);
-      el.cacheBytes.textContent = mb;
-    }
-  } catch {
-    // Background henuz hazir degil
+    const data = await chrome.storage.local.get(['translationStats']);
+    const stats = data.translationStats || {};
+    const minuteBucket = currentMinuteBucket();
+    const dayBucket = currentDayBucket();
+    const minuteCount = stats.minute && stats.minute.bucket === minuteBucket ? stats.minute.count || 0 : 0;
+    const dayCount = stats.day && stats.day.bucket === dayBucket ? stats.day.count || 0 : 0;
+    const lifetimeCount = stats.lifetime ? stats.lifetime.count || 0 : 0;
+    if (el.statMinute) el.statMinute.textContent = minuteCount;
+    if (el.statDay) el.statDay.textContent = dayCount;
+    if (el.statLifetime) el.statLifetime.textContent = lifetimeCount;
+  } catch (e) {
+    console.warn('[MangaLens-popup] stats okunamadi:', e.message);
   }
 }
 
-function startCachePolling() {
-  if (cachePollTimer) clearInterval(cachePollTimer);
-  cachePollTimer = setInterval(refreshCacheStats, 3000);
+function startStatsPolling() {
+  if (statsPollTimer) clearInterval(statsPollTimer);
+  statsPollTimer = setInterval(loadTranslationStatsToUI, 15000);
 }
 
 // ── Event Handlers ────────────────────────────────────────────────────────────
 
-// Content'tan PAGE_PROGRESS mesajlarını dinle
-chrome.runtime.onMessage.addListener(function(message) {
-  if (message && message.type === 'PAGE_PROGRESS') {
-    var completed = message.completed || 0;
-    var total = message.total || 9;
-    var pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-    if (el.progressFill) el.progressFill.style.width = pct + '%';
-    if (el.progressText) {
-      if (message.current) {
-        el.progressText.textContent = (completed + 1) + '/' + total + ' parça işleniyor...';
-      } else {
-        el.progressText.textContent = completed + '/' + total + ' tamamlandı';
-      }
-    }
-  }
-});
-
 function bindEvents() {
-  // Sayfayi Otomatik Cevir (v2 - 3x3 grid, rate limited)
-  el.btnAuto.addEventListener('click', async () => {
-    if (!await checkApiKeyBefore()) return;
-    el.btnAuto.disabled = true;
-    el.btnTranslate.disabled = true;
-    const originalText = el.btnAuto.innerHTML;
-    el.btnAuto.innerHTML = '<span class="btn-spinner"></span> Başlatılıyor...';
-    el.progressBar.hidden = false;
-    el.progressFill.style.width = '0%';
-    el.progressText.textContent = 'Ekran görüntüsü alınıyor...';
-
-    try {
-      const resp = await notifyActiveTabPromise({ type: 'TRANSLATE_PAGE' });
-      if (resp?.ok) {
-        showToast(`✓ ${resp.translated}/${resp.total} parça çevrildi (${resp.bubbles} balon)`, 'success');
-        if (el.progressFill) el.progressFill.style.width = '100%';
-        if (el.progressText) el.progressText.textContent = '✓ Tamamlandı';
-      } else {
-        // v2.6: 429 / rate_limit icin spesifik mesaj
-        const errMsg = resp?.error || 'Hata';
-        if (/rate limit|kota/i.test(errMsg)) {
-          showToast('⚠ Aktif API anahtarında rate limit var. Lütfen başka bir anahtarı aktif yapın.', 'error');
-        } else {
-          showToast('✗ ' + errMsg, 'error');
-        }
-        if (el.progressText) el.progressText.textContent = 'Hata: ' + errMsg;
-      }
-    } catch (e) {
-      showToast(`✗ ${e.message}`, 'error');
-    }
-
-    setTimeout(() => {
-      el.btnAuto.innerHTML = originalText;
-      el.btnAuto.disabled = false;
-      el.btnTranslate.disabled = false;
-      el.progressBar.hidden = true;
-    }, 3000);
-  });
-
   // Alan Sec ve Cevir (v1 - manuel crop, fallback)
   el.btnTranslate.addEventListener('click', async () => {
-    if (!await checkApiKeyBefore()) return;
     el.btnTranslate.disabled = true;
     const originalText = el.btnTranslate.innerHTML;
+    setActiveTranslationMode('selection');
     el.btnTranslate.innerHTML = '<span class="btn-spinner"></span> Aktif ediliyor...';
     try {
       await notifyActiveTabPromise({ type: 'START_SELECTION_MODE' });
       showToast('✓ Alan seç — fare ile dikdörtgen çiz', 'success');
       setTimeout(() => window.close(), 600);
     } catch (e) {
+      setActiveTranslationMode(null);
       showToast(`✗ ${e.message}`, 'error');
     }
     setTimeout(() => {
@@ -200,12 +259,38 @@ function bindEvents() {
     }, 800);
   });
 
+  el.btnQuick?.addEventListener('click', async () => {
+    try {
+      if (!await checkApiKeyBefore()) return;
+    } catch(e) {
+      showToast('API key kontrolu basarisiz', 'error');
+      return;
+    }
+    try {
+      if (!quickModeActive) {
+        await notifyActiveTabPromise({ type: 'START_QUICK_TRANSLATE_MODE' });
+        setActiveTranslationMode('quick');
+        showToast('Oto cevir modu aktif. Esc ile kapat.', 'success');
+        setResultLine('Oto cevir aktif: alan secince otomatik cevirir.');
+      } else {
+        await notifyActiveTabPromise({ type: 'STOP_QUICK_TRANSLATE_MODE' });
+        setActiveTranslationMode(null);
+        showToast('Oto cevir kapatildi', 'info');
+        setResultLine('Oto cevir kapatildi.');
+      }
+    } catch (e) {
+      showToast(`✗ ${e.message}`, 'error');
+        setActiveTranslationMode(null);
+    }
+  });
+
   // Kaydet
   el.btnSave.addEventListener('click', async () => {
     el.btnSave.disabled = true;
     el.btnSave.textContent = 'Kaydediliyor...';
     const s = await saveSettings();
     updateStatus(s);
+    await renderApiKeyList();
     showToast('✓ Ayarlar kaydedildi', 'success');
     el.btnSave.disabled = false;
     el.btnSave.innerHTML = 'Kaydet <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" stroke="currentColor" stroke-width="1.5"/><path d="M17 21v-8H7v8M7 3v5h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
@@ -217,6 +302,7 @@ function bindEvents() {
     await chrome.storage.sync.set({ enabled });
     const s = await loadSettings();
     updateStatus({ ...s, enabled });
+    await renderApiKeyList();
     showToast(enabled ? '▶ Çeviri aktif' : '■ Çeviri durduruldu', enabled ? 'success' : 'info');
   });
 
@@ -226,73 +312,84 @@ function bindEvents() {
     if (e.key === 'Enter') addApiKey();
   });
 
-  // Cache temizle
-  el.btnClearCache.addEventListener('click', async () => {
-    el.btnClearCache.disabled = true;
-    try {
-      const r = await chrome.runtime.sendMessage({ type: 'CLEAR_CACHE' });
-      showToast(`✓ ${r?.evicted || 0} öğe silindi`, 'success');
-      await refreshCacheStats();
-    } catch (e) {
-      showToast(`✗ ${e.message}`, 'error');
-    }
-    el.btnClearCache.disabled = false;
-  });
 
-  // Yeniden Cevir: pageId cache temizle + sayfayi tekrar cevir
-  el.btnResetCache?.addEventListener('click', async () => {
-    el.btnResetCache.disabled = true;
-    el.btnAuto.disabled = true;
-    el.btnTranslate.disabled = true;
-    try {
-      // Content script'e translatedPages temizlemesi + tekrar cevir
-      await notifyActiveTabPromise({ type: 'RESET_AND_RETRANSLATE' });
-      showToast('✓ Cache temizlendi, yeniden çevriliyor...', 'success');
-    } catch (e) {
-      showToast(`✗ ${e.message}`, 'error');
-    }
-    setTimeout(() => {
-      el.btnResetCache.disabled = false;
-      el.btnAuto.disabled = false;
-      el.btnTranslate.disabled = false;
-    }, 3000);
-  });
 
-  // Alan Sec
-  el.btnSelection.addEventListener('click', async () => {
-    el.btnSelection.disabled = true;
-    showToast('🔄 Alan seçim modu başlatılıyor...', 'info');
-    try {
-      await notifyActiveTabPromise({ type: 'START_SELECTION_MODE' });
-      showToast('✓ Alan seçim modu aktif', 'success');
-      setTimeout(() => window.close(), 800);
-    } catch (e) {
-      showToast(`✗ ${e.message}`, 'error');
-      el.btnSelection.disabled = false;
-    }
-  });
+
 }
 
 // ── Aktif sekmeye mesaj ───────────────────────────────────────────────────────
 
-function notifyActiveTab(message) {
-  chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-    if (tabs[0]?.id) {
-      chrome.tabs.sendMessage(tabs[0].id, message).catch(() => {});
+async function notifyActiveTabPromise(message) {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = tabs[0];
+  if (!tab?.id) throw new Error('Aktif sekme bulunamadı');
+  if (!canUseContentScriptOnTab(tab)) {
+    throw new Error('Bu sayfada MangaLens çalışmaz. Bir manga/web sayfası açıp tekrar deneyin.');
+  }
+
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: 'PING_CONTENT' });
+  } catch (e) {
+    if (!isMissingContentScriptError(e)) throw normalizeTabMessageError(e);
+    await injectContentScript(tab.id);
+    await wait(120);
+  }
+
+  try {
+    return await chrome.tabs.sendMessage(tab.id, message);
+  } catch (e) {
+    if (isMissingContentScriptError(e)) {
+      await injectContentScript(tab.id);
+      await wait(120);
+      return await chrome.tabs.sendMessage(tab.id, message);
     }
-  });
+    throw normalizeTabMessageError(e);
+  }
 }
 
-function notifyActiveTabPromise(message) {
-  return new Promise((resolve, reject) => {
-    chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-      if (!tabs[0]?.id) return reject(new Error('Aktif sekme bulunamadı'));
-      chrome.tabs.sendMessage(tabs[0].id, message).then(resolve).catch(reject);
+function canUseContentScriptOnTab(tab) {
+  const url = tab.url || '';
+  return /^https?:\/\//i.test(url) || /^file:\/\//i.test(url);
+}
+
+function isMissingContentScriptError(error) {
+  const msg = String(error && error.message || error || '');
+  return /receiving end does not exist|could not establish connection|message port closed/i.test(msg);
+}
+
+async function injectContentScript(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      files: ['src/content.js'],
     });
+  } catch (e) {
+    throw normalizeTabMessageError(e);
+  }
+}
+
+function normalizeTabMessageError(error) {
+  const msg = String(error && error.message || error || '');
+  if (/receiving end does not exist|could not establish connection/i.test(msg)) {
+    return new Error('MangaLens içerik bağlantısı kurulamadı. Sayfayı yenileyip tekrar deneyin.');
+  }
+  if (/cannot access|extension manifest|permission|chrome:|edge:/i.test(msg)) {
+    return new Error('Bu sayfada MangaLens çalışmaz. Bir manga/web sayfası açıp tekrar deneyin.');
+  }
+  return new Error(msg || 'Aktif sekmeye mesaj gönderilemedi.');
+}
+
+function wait(ms) {
+  return new Promise(resolve => {
+    setTimeout(resolve, ms);
   });
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
+
+function setResultLine(text) {
+  if (el.resultLine) el.resultLine.textContent = text;
+}
 
 let toastTimer = null;
 function showToast(message, type = 'info') {
@@ -393,11 +490,14 @@ function statusLabel(s) {
 
 async function renderApiKeyList() {
   const { list, activeId } = await loadApiKeys();
+  const settings = await loadSettings();
+  const hasActiveKey = list.some(k => k.id === activeId);
 
   // Bos state uyarisi
-  el.apiEmptyMsg.hidden = list.length > 0;
-  el.btnAuto.disabled = list.length === 0;
-  el.btnTranslate.disabled = list.length === 0;
+  el.apiEmptyMsg.hidden = hasActiveKey;
+
+  el.btnTranslate.disabled = !hasActiveKey || settings.enabled === false;
+  if (el.btnQuick) el.btnQuick.disabled = !hasActiveKey || settings.enabled === false;
 
   // Listeyi render et
   el.apiKeyList.innerHTML = '';
@@ -529,6 +629,7 @@ async function addApiKey() {
   el.newApiKey.value = '';
   el.newApiLabel.value = '';
   await renderApiKeyList();
+  if (shouldMakeActive) activateTab('translate');
   showToast(
     shouldMakeActive
       ? '✓ API anahtarı eklendi ve aktif yapıldı.'
@@ -545,6 +646,7 @@ async function activateApiKey(id) {
   const normalizedList = list.map(k => ({ ...k, isActive: k.id === id }));
   await saveApiKeys(normalizedList, id);
   await renderApiKeyList();
+  activateTab('translate');
   showToast('✓ Aktif API anahtarı değiştirildi.', 'success');
 }
 
@@ -567,6 +669,7 @@ async function deleteApiKey(id) {
 
   await saveApiKeys(normalizedList, newActiveId);
   await renderApiKeyList();
+  if (!newActiveId) activateTab('api');
   showToast(remaining.length === 0
     ? '🗑 Son API anahtarı silindi.'
     : '🗑 API anahtarı silindi.',
@@ -605,6 +708,7 @@ async function checkApiKeyBefore() {
   const { list, activeId } = await loadApiKeys();
   if (!list.find(k => k.id === activeId)) {
     showToast('⚠ Önce Google Gemini API anahtarı ekleyin ve aktif yapın.', 'error');
+    activateTab('api');
     return false;
   }
   return true;
