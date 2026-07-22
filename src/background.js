@@ -3,8 +3,12 @@
 
 'use strict';
 
-const GEMINI_MODEL  = 'gemini-3.1-flash-lite';   // tek model — sabit
-const GEMINI_BASE   = 'https://generativelanguage.googleapis.com/v1beta/models';
+const GEMINI_MODELS = Object.freeze({
+  DEFAULT: 'gemini-3.5-flash-lite',
+  FALLBACK: 'gemini-3.1-flash-lite',
+});
+const GEMINI_MODEL_VALUES = Object.freeze(Object.values(GEMINI_MODELS));
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 const REQUEST_TIMEOUT = 45000;
 
@@ -79,7 +83,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // v2.5: API key test et
   if (message.type === 'TEST_API_KEY') {
     testApiKey(message.apiKey)
-      .then(r => sendResponse({ success: r.status === 'success', status: r.status, message: r.message }))
+      .then(r => sendResponse({ success: r.status === 'success', ...r }))
       .catch(err => sendResponse({ success: false, status: err.status || 'error', message: err.message }));
     return true;
   }
@@ -132,20 +136,25 @@ async function handleExtract({ dataUrl, w, h, translationMode, alternativeAttemp
   if (!apiKey) {
     throw new Error('Lutfen once Google Gemini API anahtari ekleyin ve aktif yapin.');
   }
+  const selectedModel = await getSelectedGeminiModel();
 
   console.log('[MangaLens-bg] handleExtract basladi, w=', w, 'h=', h, 'dataUrl uzunluk=', dataUrl.length);
 
   // v2: rate-limited queue uzerinden calistir
-  const bubbles = await enqueueWithRateLimit(() =>
-    callMultimodal(apiKey, dataUrl, w, h, translationMode, alternativeAttempt)
+  const result = await enqueueWithRateLimit(() =>
+    executeWithModelFallback(selectedModel, model =>
+      callMultimodal(apiKey, model, dataUrl, w, h, translationMode, alternativeAttempt)
+    )
   );
+  const bubbles = result.value;
 
-  console.log('[MangaLens-bg] Gemini dondu:', bubbles ? bubbles.length : 0, 'balon');
+  console.log('[MangaLens-bg] Gemini dondu:', bubbles ? bubbles.length : 0, 'balon', 'model=', result.model,
+    'fallback=', result.fallbackUsed);
   if (bubbles && bubbles.length > 0) {
     await incrementTranslationStats();
-    return { bubbles, model: GEMINI_MODEL };
+    return { bubbles, model: result.model, fallbackUsed: result.fallbackUsed };
   }
-  return { bubbles: [], model: GEMINI_MODEL };
+  return { bubbles: [], model: result.model, fallbackUsed: result.fallbackUsed };
 }
 
 function getMinuteBucket(date = new Date()) {
@@ -194,7 +203,7 @@ async function incrementTranslationStats() {
   return stats;
 }
 
-async function callMultimodal(apiKey, dataUrl, w, h, translationMode, alternativeAttempt) {
+async function callMultimodal(apiKey, model, dataUrl, w, h, translationMode, alternativeAttempt) {
   const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl);
   if (!m) throw new Error('Gecersiz dataUrl formati');
   const mime = m[1];
@@ -203,10 +212,11 @@ async function callMultimodal(apiKey, dataUrl, w, h, translationMode, alternativ
 
   const text = await callGemini({
     apiKey,
+    model,
     prompt: buildTranslationPrompt(translationMode, alternativeAttempt) + '\n[Image: ' + w + 'x' + h + ']',
     imageBase64: { mime, base64 },
     responseMimeType: 'application/json',
-    temperature: isAlternative ? 0.65 : 0.2,
+    temperature: model === GEMINI_MODELS.FALLBACK ? (isAlternative ? 0.65 : 0.2) : undefined,
   });
 
   console.log('[MangaLens-bg] Gemini dondu, raw:', String(text).slice(0, 200));
@@ -216,8 +226,9 @@ async function callMultimodal(apiKey, dataUrl, w, h, translationMode, alternativ
  * v2.7: Tek Gemini client helper.
  * Translation + test + response hardening (finishReason, candidates, empty).
  */
-async function callGemini({ apiKey, prompt, imageBase64, responseMimeType, temperature = 0.2 }) {
+async function callGemini({ apiKey, model, prompt, imageBase64, responseMimeType, temperature }) {
   if (!apiKey) throw new Error('API key eksik');
+  const normalizedModel = normalizeGeminiModel(model);
 
   const parts = [{ text: prompt }];
   if (imageBase64) {
@@ -227,13 +238,13 @@ async function callGemini({ apiKey, prompt, imageBase64, responseMimeType, tempe
   const body = {
     contents: [{ parts }],
     generationConfig: {
-      temperature,
       maxOutputTokens: 8192,
+      ...(normalizedModel === GEMINI_MODELS.FALLBACK && typeof temperature === 'number' ? { temperature } : {}),
       ...(responseMimeType ? { responseMimeType } : {}),
     },
   };
 
-  const url = GEMINI_BASE + '/' + GEMINI_MODEL + ':generateContent?key=' + apiKey;
+  const url = GEMINI_BASE + '/' + normalizedModel + ':generateContent?key=' + apiKey;
 
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT);
@@ -355,17 +366,68 @@ async function getActiveApiKey() {
   return active ? active.key : null;
 }
 
+function normalizeGeminiModel(model) {
+  return GEMINI_MODEL_VALUES.includes(model) ? model : GEMINI_MODELS.DEFAULT;
+}
+
+async function getSelectedGeminiModel() {
+  const data = await chrome.storage.sync.get({ geminiModel: GEMINI_MODELS.DEFAULT });
+  return normalizeGeminiModel(data.geminiModel);
+}
+
+async function executeWithModelFallback(selectedModel, operation) {
+  const primaryModel = normalizeGeminiModel(selectedModel);
+  try {
+    const value = await operation(primaryModel);
+    return { value, model: primaryModel, fallbackUsed: false };
+  } catch (primaryError) {
+    if (primaryModel !== GEMINI_MODELS.DEFAULT) throw primaryError;
+
+    console.warn('[MangaLens-bg] Primary model failed, trying fallback:', primaryError.message);
+    try {
+      const value = await operation(GEMINI_MODELS.FALLBACK);
+      return { value, model: GEMINI_MODELS.FALLBACK, fallbackUsed: true };
+    } catch (fallbackError) {
+      const error = new Error(
+        'Gemini 3.5 ve 3.1 istekleri basarisiz oldu. ' +
+        '3.5: ' + primaryError.message + ' | 3.1: ' + fallbackError.message
+      );
+      error.status = fallbackError.status || primaryError.status || 'error';
+      error.fallbackAttempted = true;
+      error.errors = {
+        primary: primaryError.message,
+        fallback: fallbackError.message,
+      };
+      throw error;
+    }
+  }
+}
+
 /**
  * v2.5: API key test et. Kisa "Reply with OK only." promptu, JSON yok.
  */
 async function testApiKey(apiKey) {
   if (!apiKey) throw new Error('API key bos');
+  const selectedModel = await getSelectedGeminiModel();
   try {
-    await callGemini({ apiKey, prompt: 'Reply with OK only.' });
-    return { status: 'success', message: 'API calisiyor.' };
+    const result = await executeWithModelFallback(selectedModel, model =>
+      callGemini({ apiKey, model, prompt: 'Reply with OK only.' })
+    );
+    return {
+      status: 'success',
+      message: result.fallbackUsed ? 'API, Gemini 3.1 yedek modeli ile calisiyor.' : 'API calisiyor.',
+      model: result.model,
+      fallbackUsed: result.fallbackUsed,
+    };
   } catch (e) {
     if (!e.status) e.status = 'error';
-    return { status: e.status, message: e.message };
+    return {
+      status: e.status,
+      message: e.message,
+      model: null,
+      fallbackUsed: false,
+      fallbackAttempted: e.fallbackAttempted === true,
+    };
   }
 }
 

@@ -4,12 +4,18 @@
 
 'use strict';
 
-
+const GEMINI_MODELS = Object.freeze({
+  DEFAULT: 'gemini-3.5-flash-lite',
+  FALLBACK: 'gemini-3.1-flash-lite',
+});
+const GEMINI_MODEL_LABELS = Object.freeze({
+  [GEMINI_MODELS.DEFAULT]: 'Gemini 3.5 Flash Lite',
+  [GEMINI_MODELS.FALLBACK]: 'Gemini 3.1 Flash Lite',
+});
 
 const DEFAULTS = {
   enabled:          true,
-
-
+  geminiModel:      GEMINI_MODELS.DEFAULT,
   translationFontSize: 16,
 };
 
@@ -25,7 +31,8 @@ const el = {
 
 
   resultLine:    $('result-line'),
-
+  modelSelect:   $('gemini-model'),
+  modelNote:     $('model-note'),
 
   fontSizeOptions: Array.from(document.querySelectorAll('input[name="translation-font-size"]')),
 
@@ -127,16 +134,17 @@ function saveSettings() {
   const selectedFontSize = el.fontSizeOptions.find(input => input.checked);
   const s = {
     enabled:          el.toggle.checked,
-
-
+    geminiModel:      normalizeGeminiModel(el.modelSelect?.value),
     translationFontSize: normalizeTranslationFontSize(selectedFontSize?.value),
   };
   return new Promise(resolve => chrome.storage.sync.set(s, () => resolve(s)));
 }
 
 function applySettingsToUI(s) {
-  el.toggle.checked         = s.enabled !== false;
-
+  el.toggle.checked = s.enabled !== false;
+  const model = normalizeGeminiModel(s.geminiModel);
+  if (el.modelSelect) el.modelSelect.value = model;
+  updateModelNote(model);
 
   const fontSize = normalizeTranslationFontSize(s.translationFontSize);
   el.fontSizeOptions.forEach(input => {
@@ -149,6 +157,19 @@ function normalizeTranslationFontSize(value) {
   return [16, 20].includes(size) ? size : 16;
 }
 
+function normalizeGeminiModel(model) {
+  return Object.prototype.hasOwnProperty.call(GEMINI_MODEL_LABELS, model)
+    ? model
+    : GEMINI_MODELS.DEFAULT;
+}
+
+function getGeminiModelLabel(model) {
+  return GEMINI_MODEL_LABELS[normalizeGeminiModel(model)];
+}
+
+function updateModelNote(model) {
+  if (el.modelNote) el.modelNote.textContent = getGeminiModelLabel(model);
+}
 
 function bindTabs() {
   tabButtons.forEach(btn => {
@@ -181,7 +202,9 @@ function updateStatus(s) {
     if (el.btnQuick) el.btnQuick.disabled = true;
     return;
   }
-  setStatus('active', 'Aktif — Gemini 3.1 Flash Lite');
+  const model = normalizeGeminiModel(s.geminiModel);
+  setStatus('active', 'Aktif — ' + getGeminiModelLabel(model));
+  updateModelNote(model);
   el.btnTranslate.disabled = false;
 
   if (el.btnQuick) el.btnQuick.disabled = false;
@@ -681,7 +704,7 @@ async function testApiKeyById(id) {
   const entry = list.find(k => k.id === id);
   if (!entry) return;
   const result = await chrome.runtime.sendMessage({ type: 'TEST_API_KEY', apiKey: entry.key });
-  if (!result || !result.success) {
+  if (!result) {
     showToast('Test çağrısı başarısız', 'error');
     return;
   }
@@ -697,7 +720,11 @@ async function testApiKeyById(id) {
   await renderApiKeyList();
 
   // v2.6: Status'a ozel toast mesajlari
-  if (result.status === 'success')             showToast('✓ API çalışıyor', 'success');
+  if (result.status === 'success' && result.fallbackUsed) {
+    showToast('✓ API, Gemini 3.1 yedek modeli ile çalışıyor', 'success');
+  }
+  else if (result.status === 'success')        showToast('✓ API çalışıyor — ' + getGeminiModelLabel(result.model), 'success');
+  else if (result.fallbackAttempted)           showToast('✗ ' + result.message, 'error');
   else if (result.status === 'invalid')        showToast('⛔ API key geçersiz', 'error');
   else if (result.status === 'rate_limited')   showToast('⏱ Rate limit / kota dolu', 'error');
   else if (result.status === 'error')          showToast('✗ ' + (result.message || 'Test başarısız'), 'error');

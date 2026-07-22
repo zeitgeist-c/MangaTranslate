@@ -1,4 +1,4 @@
-# MangaLens TR v3.0.0
+# MangaLens TR v3.1.0
 
 Google Chrome Manifest V3 tabanlı manga, manhwa ve manhua görsel çeviri uzantısı.
 
@@ -10,6 +10,7 @@ Google Chrome Manifest V3 tabanlı manga, manhwa ve manhua görsel çeviri uzant
 - **Sonuç kontrolü:** Her sonuç kutusu `Yeniden` ve `×` araçlarına sahiptir.
 - **Yazı boyutu:** Normal (16 px) ve Büyük (20 px) seçenekleri bütün sonuçlara uygulanır.
 - **Çoklu API anahtarı:** Google Gemini anahtarları popup üzerinden eklenebilir, test edilebilir ve aktifleştirilebilir.
+- **Model seçimi:** Gemini 3.5 Flash-Lite ve Gemini 3.1 Flash-Lite arasında popup üzerinden geçiş yapılabilir.
 - **Dayanıklı görsel yakalama:** Önce orijinal görsel denenir; CORS veya site kısıtında görünür sekme kırpma yöntemine geçilir.
 - **İstek kuyruğu:** Gemini istekleri rate limit ve geçici hata geri çekilmesiyle sıralı yürütülür.
 
@@ -33,9 +34,11 @@ Alternatif isteklerde daha yüksek yaratıcılık kullanılır. Bu yöntem farkl
 
 ## Teknik Notlar
 
-- **Model:** `gemini-3.1-flash-lite`
+- **Varsayılan model:** `gemini-3.5-flash-lite`
+- **Alternatif model:** `gemini-3.1-flash-lite`; 3.5 seçiliyken istek başarısız olursa aynı işlem 3.1 ile bir kez yeniden denenir.
+- **Model tercihi:** `chrome.storage.sync` içindeki `geminiModel` alanında saklanır.
 - **API anahtarları:** `chrome.storage.local` içinde saklanır; aktif anahtar service worker tarafından okunur.
-- **Kullanıcı tercihleri:** Etkinlik ve yazı boyutu `chrome.storage.sync` içinde saklanır.
+- **Kullanıcı tercihleri:** Etkinlik, yazı boyutu ve model seçimi `chrome.storage.sync` içinde saklanır.
 - **Capture:** Orijinal `img/canvas` veya görünür sekme kırpması.
 - **İstatistikler:** Başarılı Gemini çeviri istekleri dakika, gün ve toplam olarak yerel saklanır.
 - **Rate limit:** İstekler sıraya alınır; 429 ve geçici ağ hatalarında kontrollü geri çekilme uygulanır.
