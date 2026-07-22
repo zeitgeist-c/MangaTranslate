@@ -68,6 +68,14 @@
               <label><input type="radio" name="translation-font-size" value="20"><span>Büyük</span></label>
             </div>
           </div>
+          <div class="model-setting">
+            <label for="gemini-model"><strong>Gemini modeli</strong></label>
+            <select id="gemini-model" class="field-input">
+              <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite (Varsayılan)</option>
+              <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
+            </select>
+            <small>3.5 başarısız olursa 3.1 otomatik olarak bir kez denenir.</small>
+          </div>
           <button class="btn-primary btn-compact" id="btn-save" type="button">Kaydet</button>
         </div>
       </section>
@@ -96,7 +104,7 @@
           </button>
         </div>
 
-        <div class="note-line">Model: <code>Gemini 3.1 Flash Lite</code></div>
+        <div class="note-line">Seçili model: <code id="model-note">Gemini 3.5 Flash Lite</code></div>
       </section>
 
     </main>

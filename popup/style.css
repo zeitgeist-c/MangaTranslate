@@ -533,6 +533,10 @@ button:disabled {
 .font-size-options input:checked + span { border-color: var(--accent); background: rgba(79, 140, 255, 0.14); color: var(--text); }
 .font-size-options input:focus-visible + span { box-shadow: 0 0 0 2px rgba(79, 140, 255, 0.25); }
 
+.model-setting { padding: 11px 0; border-bottom: 1px solid var(--border); }
+.model-setting > label strong { display: block; margin-bottom: 7px; font-size: 13px; }
+.model-setting > small { display: block; margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+
 .toast {
   position: fixed;
   left: 12px;
