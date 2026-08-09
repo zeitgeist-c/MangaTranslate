@@ -1,4 +1,4 @@
-# MangaLens TR v3.1.0
+# MangaLens TR v3.1.1
 
 Google Chrome Manifest V3 tabanlı manga, manhwa ve manhua görsel çeviri uzantısı.
 
@@ -16,11 +16,22 @@ Google Chrome Manifest V3 tabanlı manga, manhwa ve manhua görsel çeviri uzant
 
 ## Kurulum
 
-1. `chrome://extensions` sayfasını açın.
-2. Geliştirici modunu etkinleştirin.
-3. **Paketlenmemiş öğe yükle** ile `MangaTranslate` klasörünü seçin.
-4. Popup içindeki API sekmesinden en az bir Gemini API anahtarı ekleyip aktif yapın.
-5. Manga sayfasında **Alan Seç** veya **Oto Çevir** modunu kullanın.
+1. `MangaLensTR-3.1.1.zip` dosyasını ayrı bir klasöre çıkarın.
+2. `chrome://extensions` sayfasını açın.
+3. Geliştirici modunu etkinleştirin.
+4. **Paketlenmemiş öğe yükle** ile ZIP'ten çıkardığınız ve `manifest.json` dosyasını içeren klasörü seçin.
+5. Popup içindeki API sekmesinden en az bir Gemini API anahtarı ekleyip aktif yapın.
+6. Manga sayfasında **Alan Seç** veya **Oto Çevir** modunu kullanın.
+
+## ZIP Paketini Oluşturma
+
+PowerShell'i proje klasöründe açıp çalıştırın:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\package.ps1
+```
+
+Betik sürümü `manifest.json` dosyasından okur, JavaScript sözdizimini denetler ve yalnızca uzantının çalışması için gereken dosyaları `MangaLensTR-<sürüm>.zip` paketine ekler.
 
 ## Yeniden Çevir Nasıl Çalışır?
 
