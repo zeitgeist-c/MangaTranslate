@@ -4,7 +4,9 @@ Bu klasör, MangaLens TR uzantısının Windows 10/11 için tek dosyalı kurulum
 
 ## Hazır kurulum dosyası
 
-`MangaLensTR-Setup-3.1.0.exe`
+`MangaLensTR-3.1.0.exe`
+
+Yanındaki `MangaLensTR-3.1.0.bat`, aynı sürüm kurulum dosyasını kendi klasöründen başlatır ve verilen komut satırı argümanlarını iletir.
 
 Kurulum dosyası uzantıyı kullanıcının şu klasörüne yerleştirir:
 
@@ -34,7 +36,8 @@ Betik:
 1. `manifest.json` içinden sürümü okur.
 2. Manifesti, gerekli klasörleri ve JavaScript sözdizimini doğrular.
 3. Kurulum yardımcısını ve kurulum simgesini `setup` altında derler.
-4. Inno Setup ile `setup\MangaLensTR-Setup-<sürüm>.exe` dosyasını üretir.
+4. Inno Setup ile `setup\MangaLensTR-<sürüm>.exe` dosyasını üretir.
+5. Aynı sürüm adına sahip `setup\MangaLensTR-<sürüm>.bat` başlatıcısını oluşturur ve hedefini doğrular.
 
 ## Başka projelere uyarlama
 
