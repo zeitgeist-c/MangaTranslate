@@ -2,9 +2,6 @@
 
 'use strict';
 
-console.log('[MangaLens] v3 minimal content.js yukleniyor...');
-
-
 
 
 
@@ -61,8 +58,6 @@ function applyTranslationFontSize(value) {
 // ── Mesaj dinleyici ──────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
-  console.log('[MangaLens] mesaj:', message.type);
-
   if (message.type === 'PING_CONTENT') {
     sendResponse({ ok: true, name: 'MangaLens content' });
     return true;
@@ -779,7 +774,6 @@ function startQuickTranslateMode() {
   window.addEventListener('blur', cancelQuickDrawing, true);
   window.addEventListener('resize', syncQuickJobLayers, true);
   window.addEventListener('scroll', syncQuickJobLayers, true);
-  console.log('[MangaLens] Quick mode started');
 }
 
 function stopQuickTranslateMode() {
@@ -799,7 +793,6 @@ function stopQuickTranslateMode() {
     quickTranslateMode.hitLayer = null;
   }
   cancelQuickDrawing();
-  console.log('[MangaLens] Quick mode stopped');
 }
 
 function createQuickHitLayer() {
@@ -901,7 +894,6 @@ function onQuickEnd(e) {
   }
   updateQuickJobState(draft, 'queued', 'Sirada...');
   quickTranslateMode.jobs.push(draft);
-  console.log('[MangaLens] Quick translate selection queued', draft);
   translateQuickJob(draft);
 }
 
@@ -1011,7 +1003,6 @@ async function translateQuickJob(job, translationMode, alternativeAttempt) {
   updateQuickJobState(job, 'processing', translationMode === 'alternative' ? 'Alternatif çeviri üretiliyor...' : 'Çeviriliyor...');
   try {
     await translateQuickJobFromViewport(job, translationMode, alternativeAttempt);
-    console.log('[MangaLens] Quick translate done', job.id, translationMode || 'standard');
   } catch (e) {
     updateQuickJobState(job, 'error', e.message || 'Çeviri hatası');
     console.warn('[MangaLens] Quick translate error', e.message);
@@ -1276,8 +1267,6 @@ function ensureRelativeParent(img) {
 async function translateOneSelection(selection, index, total, translationMode, alternativeAttempt) {
   if (!selection || selection.inFlight || !selection.boxEl || selection.captureDisposed) return;
   selection.inFlight = true;
-  console.log('[MangaLens] selection translate:', index, '/', total, translationMode || 'standard');
-
   try {
     if (selection.capturePromise) {
       setSelectionBoxState(selection, 'preparing', 'Alan hazırlanıyor...');
@@ -1359,4 +1348,3 @@ function setSelectionBoxState(selection, state, text) {
     ) + '!important;border-radius:2px!important;pointer-events:none!important;';
 }
 
-console.log('[MangaLens] v3 minimal content.js hazir');

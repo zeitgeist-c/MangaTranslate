@@ -11,8 +11,5 @@ Thumbs.db
 # Temp
 *.tmp
 *.log
-# Generated setup artifacts
-setup/build/
-setup/assets/MangaLensTR.ico
-setup/MangaLensTR-*.exe
-setup/MangaLensTR-*.bat
+# Generated extension packages
+MangaLensTR-*.zip

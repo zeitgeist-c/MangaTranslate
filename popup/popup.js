@@ -443,7 +443,6 @@ async function migrateLegacyApiKey() {
     // Yine de eski alanlari temizle (yine de kalma ihtimali var)
     if (data.googleApiKey || data.apiKey || data.geminiApiKey) {
       await chrome.storage.local.remove(['googleApiKey', 'apiKey', 'geminiApiKey']);
-      console.log('[MangaLens] Eski tekil alanlar temizlendi');
     }
     return;
   }
@@ -477,7 +476,6 @@ async function migrateLegacyApiKey() {
   // Eski alanlari temizle
   await chrome.storage.local.remove(['googleApiKey', 'apiKey', 'geminiApiKey']);
 
-  console.log('[MangaLens] Migrated legacy API key to googleApiKeys array');
 }
 
 async function loadApiKeys() {
@@ -610,10 +608,6 @@ async function addApiKey() {
     return;
   }
   const apiKey = validation.apiKey;
-
-  // Debug log (tam key YOK)
-  console.log('[MangaLens] API key add attempt: length=' + apiKey.length
-    + ', prefix=' + apiKey.slice(0, 4) + ', suffix=' + apiKey.slice(-4));
 
   const { list, activeId } = await loadApiKeys();
 

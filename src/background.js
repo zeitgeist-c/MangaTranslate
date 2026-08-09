@@ -138,8 +138,6 @@ async function handleExtract({ dataUrl, w, h, translationMode, alternativeAttemp
   }
   const selectedModel = await getSelectedGeminiModel();
 
-  console.log('[MangaLens-bg] handleExtract basladi, w=', w, 'h=', h, 'dataUrl uzunluk=', dataUrl.length);
-
   // v2: rate-limited queue uzerinden calistir
   const result = await enqueueWithRateLimit(() =>
     executeWithModelFallback(selectedModel, model =>
@@ -148,8 +146,6 @@ async function handleExtract({ dataUrl, w, h, translationMode, alternativeAttemp
   );
   const bubbles = result.value;
 
-  console.log('[MangaLens-bg] Gemini dondu:', bubbles ? bubbles.length : 0, 'balon', 'model=', result.model,
-    'fallback=', result.fallbackUsed);
   if (bubbles && bubbles.length > 0) {
     await incrementTranslationStats();
     return { bubbles, model: result.model, fallbackUsed: result.fallbackUsed };
@@ -199,7 +195,6 @@ async function incrementTranslationStats() {
   stats.lifetime.count += 1;
 
   await chrome.storage.local.set({ [TRANSLATION_STATS_KEY]: stats });
-  console.log('[MangaLens-bg] Translation stats updated', stats);
   return stats;
 }
 
@@ -219,7 +214,6 @@ async function callMultimodal(apiKey, model, dataUrl, w, h, translationMode, alt
     temperature: model === GEMINI_MODELS.FALLBACK ? (isAlternative ? 0.65 : 0.2) : undefined,
   });
 
-  console.log('[MangaLens-bg] Gemini dondu, raw:', String(text).slice(0, 200));
   return parseBubbleArray(text || '[]', w, h);
 }
 /**
@@ -271,13 +265,6 @@ async function callGemini({ apiKey, model, prompt, imageBase64, responseMimeType
 
   // v2.7: Parse response
   const json = await res.json();
-
-  // Debug: candidates, finishReason, parts count (key yok)
-  console.log('[MangaLens-bg] Gemini response meta:', {
-    candidates: json?.candidates?.length || 0,
-    finishReason: json?.candidates?.[0]?.finishReason,
-    partsCount: json?.candidates?.[0]?.content?.parts?.length || 0,
-  });
 
   const candidates = json?.candidates || [];
   if (candidates.length === 0) {
@@ -557,11 +544,8 @@ async function processRateLimitedQueue() {
     const elapsed = now - lastFinishTime;
     if (lastFinishTime > 0 && elapsed < MIN_INTERVAL_MS) {
       const wait = MIN_INTERVAL_MS - elapsed;
-      console.log('[MangaLens-bg] rate-limit bekleme:', wait, 'ms');
       await new Promise(r => setTimeout(r, wait));
     }
-
-    console.log('[MangaLens-bg] istek gonderiliyor, queue:', requestQueue.length);
 
     try {
       const result = await item.fn();
