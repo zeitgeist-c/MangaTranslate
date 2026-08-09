@@ -145,10 +145,26 @@ $iscc = Find-InnoCompiler
 & $iscc "/DMyAppVersion=$version" $issPath
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup derlemesi başarısız.' }
 
-$installerPath = Join-Path $setupRoot "MangaLensTR-Setup-$version.exe"
+$releaseStem = "MangaLensTR-$version"
+$installerPath = Join-Path $setupRoot "$releaseStem.exe"
+$launcherPath = Join-Path $setupRoot "$releaseStem.bat"
 Assert-Path $installerPath
 
-$unexpected = Get-ChildItem -LiteralPath $projectRoot -File -Filter 'MangaLensTR-Setup-*.exe'
+$launcherContent = @"
+@echo off
+setlocal
+cd /d "%~dp0"
+start "$releaseStem" "%~dp0$releaseStem.exe" %*
+"@
+[System.IO.File]::WriteAllText($launcherPath, $launcherContent.Replace("`n", "`r`n"), [System.Text.UTF8Encoding]::new($false))
+Assert-Path $launcherPath
+
+$launcherText = Get-Content -LiteralPath $launcherPath -Raw -Encoding UTF8
+if ($launcherText -notmatch [regex]::Escape("%~dp0$releaseStem.exe")) {
+    throw "Başlatıcı doğru EXE dosyasına başvurmuyor: $launcherPath"
+}
+
+$unexpected = Get-ChildItem -LiteralPath $projectRoot -File -Filter 'MangaLensTR-*.exe'
 if ($unexpected) {
     throw 'Kurulum çıktısı setup klasörü dışında bulundu.'
 }
@@ -156,3 +172,4 @@ if ($unexpected) {
 Write-Host ''
 Write-Host 'Kurulum paketi başarıyla oluşturuldu:' -ForegroundColor Green
 Write-Host $installerPath -ForegroundColor Green
+Write-Host $launcherPath -ForegroundColor Green
