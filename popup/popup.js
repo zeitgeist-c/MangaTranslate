@@ -350,24 +350,31 @@ async function notifyActiveTabPromise(message) {
     throw new Error('Bu sayfada MangaLens çalışmaz. Bir manga/web sayfası açıp tekrar deneyin.');
   }
 
-  try {
-    await chrome.tabs.sendMessage(tab.id, { type: 'PING_CONTENT' });
-  } catch (e) {
-    if (!isMissingContentScriptError(e)) throw normalizeTabMessageError(e);
-    await injectContentScript(tab.id);
-    await wait(120);
-  }
+  await pingContentScript(tab.id);
 
   try {
     return await chrome.tabs.sendMessage(tab.id, message);
   } catch (e) {
-    if (isMissingContentScriptError(e)) {
-      await injectContentScript(tab.id);
-      await wait(120);
-      return await chrome.tabs.sendMessage(tab.id, message);
-    }
     throw normalizeTabMessageError(e);
   }
+}
+
+// Enjeksiyon sonrasi content gec yuklenebilir: PING'i artan beklemeyle 3 kez dene.
+async function pingContentScript(tabId) {
+  const delays = [0, 150, 500];
+  let lastError = null;
+  for (let i = 0; i < delays.length; i++) {
+    if (delays[i] > 0) await wait(delays[i]);
+    try {
+      await chrome.tabs.sendMessage(tabId, { type: 'PING_CONTENT' });
+      return;
+    } catch (e) {
+      lastError = e;
+      if (!isMissingContentScriptError(e)) throw normalizeTabMessageError(e);
+      if (i === 0) await injectContentScript(tabId);
+    }
+  }
+  throw normalizeTabMessageError(lastError);
 }
 
 function canUseContentScriptOnTab(tab) {
