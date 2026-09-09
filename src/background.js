@@ -63,20 +63,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'CAPTURE_TAB') {
     try {
-      chrome.tabs.captureVisibleTab()
+      // Gonderen sekmenin penceresini yakala (cok pencerede yanlis ekran riski).
+      const captureTarget = sender && sender.tab && typeof sender.tab.windowId === 'number'
+        ? chrome.tabs.captureVisibleTab(sender.tab.windowId)
+        : chrome.tabs.captureVisibleTab();
+      captureTarget
         .then(dataUrl => sendResponse({ dataUrl }))
         .catch(e => sendResponse({ dataUrl: null, error: e.message }));
     } catch (e) {
       sendResponse({ dataUrl: null, error: e.message });
     }
-    return true;
-  }
-
-  // v2.5: Aktif API key sorgula
-  if (message.type === 'GET_ACTIVE_API_KEY') {
-    getActiveApiKey().then(key => {
-      sendResponse({ success: true, hasKey: !!key, keyLength: key ? key.length : 0 });
-    });
     return true;
   }
 
@@ -369,6 +365,8 @@ async function executeWithModelFallback(selectedModel, operation) {
     return { value, model: primaryModel, fallbackUsed: false };
   } catch (primaryError) {
     if (primaryModel !== GEMINI_MODELS.DEFAULT) throw primaryError;
+    // Gecersiz anahtar ayni kalir: yedek modeli bosuna deneme (kota israfi + yaniltici mesaj).
+    if (primaryError && primaryError.status === 'invalid') throw primaryError;
 
     console.warn('[MangaLens-bg] Primary model failed, trying fallback:', primaryError.message);
     try {
@@ -553,7 +551,11 @@ async function processRateLimitedQueue() {
       item.resolve(result);
     } catch (e) {
       // 429 veya timeout → backoff ile retry
-      const isRetryable = /429|rate|timeout/i.test(String(e.message));
+      // Retry edilebilir mi? status'e bak (mesaj dili degisebilir, regex tek basina yetmez).
+      const errText = String((e && e.message) || '');
+      const errStatus = e && e.status;
+      const isRetryable = errStatus === 'rate_limited' || errStatus === 'timeout' ||
+        /429|timeout|rate[\s_-]?limit|kota|zaman as/i.test(errText);
       if (isRetryable && item.retries < 3) {
         const backoff = Math.min(BACKOFF_INITIAL_MS * Math.pow(2, item.retries), BACKOFF_MAX_MS);
         console.warn('[MangaLens-bg] retryable hata:', e.message, '-> backoff:', backoff, 'ms');

@@ -1179,18 +1179,8 @@ function updateQuickJobState(job, state, text) {
 //  v2: Otomatik Sayfa Çevirisi (Grid Tabanlı)
 // ══════════════════════════════════════════════════════════════════════════════
 
-// v2.8: Dynamic grid. Accuracy is preferred over speed, but keep total cells bounded.
-
-
-
-
-
-
 const MIN_CELL_SIZE = 640; // px - upscale small cells for Gemini readability
 
-// SHA-256 hash (hex) - cache key uretimi
-
-// v2.8: Dynamic grid secimi - capture boyutuna gore
 function clampInt(v, min, max) {
   var n = Math.round(Number(v));
   if (!Number.isFinite(n)) return min;
@@ -1287,14 +1277,18 @@ async function translateOneSelection(selection, index, total, translationMode, a
       : 'Çeviriliyor ' + index + '/' + total + '...';
     setSelectionBoxState(selection, 'processing', statusText);
 
-    var aiResp = await chrome.runtime.sendMessage({
-      type: 'EXTRACT_BUBBLES',
-      dataUrl: selection.captureDataUrl,
-      w: selection.captureWidth,
-      h: selection.captureHeight,
-      translationMode: translationMode || 'standard',
-      alternativeAttempt: alternativeAttempt || 0,
-    });
+    var aiResp = await sendRuntimeMessageWithTimeout(
+      {
+        type: 'EXTRACT_BUBBLES',
+        dataUrl: selection.captureDataUrl,
+        w: selection.captureWidth,
+        h: selection.captureHeight,
+        translationMode: translationMode || 'standard',
+        alternativeAttempt: alternativeAttempt || 0,
+      },
+      QUICK_TRANSLATE_TIMEOUT_MS,
+      'Gemini zaman aşımı (kuyruk yoğunsa tekrar deneyin)'
+    );
 
     if (!aiResp || !aiResp.success) {
       throw new Error((aiResp && aiResp.error) || 'Gemini yanıt vermedi');
