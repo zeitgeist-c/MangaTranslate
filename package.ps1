@@ -33,7 +33,10 @@ $requiredFiles = @(
     'popup\popup.js',
     'popup\style.css',
     'src\background.js',
-    'src\content.js'
+    'src\content.js',
+    'src\pagemode-core.js',
+    'src\pagemode.js',
+    'styles\pagemode.css'
 )
 
 foreach ($relativePath in $requiredFiles) {
@@ -64,6 +67,7 @@ $archiveInputs = @(
     (Join-Path $projectRoot 'manifest.json'),
     (Join-Path $projectRoot 'assets'),
     (Join-Path $projectRoot 'popup'),
+    (Join-Path $projectRoot 'styles'),
     (Join-Path $projectRoot 'src')
 )
 Compress-Archive -LiteralPath $archiveInputs -DestinationPath $packagePath -CompressionLevel Optimal
@@ -72,7 +76,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [System.IO.Compression.ZipFile]::OpenRead($packagePath)
 try {
     $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
-    foreach ($requiredEntry in @('manifest.json', 'assets/icon16.png', 'assets/icon48.png', 'assets/icon128.png', 'popup/popup.html', 'popup/popup.js', 'popup/style.css', 'src/background.js', 'src/content.js')) {
+    foreach ($requiredEntry in @('manifest.json', 'assets/icon16.png', 'assets/icon48.png', 'assets/icon128.png', 'popup/popup.html', 'popup/popup.js', 'popup/style.css', 'src/background.js', 'src/content.js', 'src/pagemode-core.js', 'src/pagemode.js', 'styles/pagemode.css')) {
         if ($entries -notcontains $requiredEntry) {
             throw "ZIP içinde gerekli dosya bulunamadı: $requiredEntry"
         }
