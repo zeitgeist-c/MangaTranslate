@@ -17,6 +17,7 @@ const DEFAULTS = {
   enabled:          true,
   geminiModel:      GEMINI_MODELS.DEFAULT,
   translationFontSize: 16,
+  pageModeScope:    'onScroll',
 };
 
 const $ = id => document.getElementById(id);
@@ -53,6 +54,9 @@ const el = {
   newApiKey:     $('new-api-key'),
   newApiLabel:   $('new-api-label'),
   btnAddKey:     $('btn-add-key'),
+  // v3.2: sayfa modu
+  btnTranslatePages: $('btn-translate-pages'),
+  pageScopeSelect:   $('page-scope'),
 };
 
 const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
@@ -68,6 +72,7 @@ function setActiveTranslationMode(mode) {
   quickModeActive = mode === 'quick';
   el.btnTranslate?.classList.toggle('active', mode === 'selection');
   el.btnQuick?.classList.toggle('active', mode === 'quick');
+  el.btnTranslatePages?.classList.toggle('active', mode === 'page');
   if (el.btnQuick) {
     el.btnQuick.innerHTML = mode === 'quick'
       ? '<span class="btn-icon" aria-hidden="true">Q</span> Oto Açık'
@@ -136,6 +141,7 @@ function saveSettings() {
     enabled:          el.toggle.checked,
     geminiModel:      normalizeGeminiModel(el.modelSelect?.value),
     translationFontSize: normalizeTranslationFontSize(selectedFontSize?.value),
+    pageModeScope:    normalizePageScope(el.pageScopeSelect?.value),
   };
   return new Promise(resolve => chrome.storage.sync.set(s, () => resolve(s)));
 }
@@ -150,11 +156,18 @@ function applySettingsToUI(s) {
   el.fontSizeOptions.forEach(input => {
     input.checked = Number(input.value) === fontSize;
   });
+
+  if (el.pageScopeSelect) el.pageScopeSelect.value = normalizePageScope(s.pageModeScope);
 }
 
 function normalizeTranslationFontSize(value) {
   const size = Number(value);
   return [16, 20].includes(size) ? size : 16;
+}
+
+// v3.2: sayfa modu kapsami
+function normalizePageScope(value) {
+  return ['visible', 'onScroll', 'chapter'].includes(value) ? value : 'onScroll';
 }
 
 function normalizeGeminiModel(model) {
@@ -305,6 +318,24 @@ function bindEvents() {
       showToast(`✗ ${e.message}`, 'error');
         setActiveTranslationMode(null);
     }
+  });
+
+  // v3.2: Sayfayı Çevir (tek tuşla tüm sayfa)
+  el.btnTranslatePages?.addEventListener('click', async () => {
+    try {
+      if (!await checkApiKeyBefore()) return;
+      const scope = normalizePageScope(el.pageScopeSelect?.value);
+      await chrome.storage.sync.set({ pageModeScope: scope });
+      await notifyActiveTabPromise({ type: 'START_PAGE_MODE', scope });
+      showToast('✓ Sayfa çevirisi başladı — sayfadaki bar ilerlemeyi gösterir', 'success');
+      setTimeout(() => window.close(), 600);
+    } catch (e) {
+      showToast(`✗ ${e.message}`, 'error');
+    }
+  });
+
+  el.pageScopeSelect?.addEventListener('change', async () => {
+    await chrome.storage.sync.set({ pageModeScope: normalizePageScope(el.pageScopeSelect.value) });
   });
 
   // Kaydet

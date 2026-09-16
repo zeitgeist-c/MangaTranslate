@@ -35,6 +35,10 @@
             <div class="panel-title">Çeviri araçları</div>
           </div>
           <div class="action-grid mode-actions">
+            <button class="btn-primary mode-button span-2" id="btn-translate-pages" type="button">
+              <span class="btn-icon" aria-hidden="true">▤</span>
+              Sayfayı Çevir
+            </button>
             <button class="btn-secondary mode-button" id="btn-translate-page" type="button">
               <span class="btn-icon" aria-hidden="true">▣</span>
               Alan Seç
@@ -43,6 +47,14 @@
               <span class="btn-icon" aria-hidden="true">Q</span>
               Oto Çevir
             </button>
+          </div>
+          <div class="page-scope-row">
+            <label for="page-scope"><strong>Sayfa modu kapsamı</strong></label>
+            <select id="page-scope" class="field-input">
+              <option value="onScroll">Görünen + kaydırdıkça (önerilen)</option>
+              <option value="visible">Yalnız görünen sayfa</option>
+              <option value="chapter">Tüm bölüm (yavaş, kota yer)</option>
+            </select>
           </div>
         </div>
 
