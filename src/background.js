@@ -3,6 +3,10 @@
 
 'use strict';
 
+// v3.2: sayfa modu saf yardimcilari (bant/dedupe/dogrulama) — content ile ayni kaynak
+importScripts('/src/pagemode-core.js');
+const MLCore = self.MLPagemodeCore;
+
 const GEMINI_MODELS = Object.freeze({
   DEFAULT: 'gemini-3.5-flash-lite',
   FALLBACK: 'gemini-3.1-flash-lite',
@@ -11,6 +15,13 @@ const GEMINI_MODEL_VALUES = Object.freeze(Object.values(GEMINI_MODELS));
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 const REQUEST_TIMEOUT = 45000;
+
+// v3.2: sayfa modu sabitleri
+const PAGE_MAX_SIDE = 1600;              // AI'a gonderilen en uzun kenar
+const PAGE_BAND_MAX_HEIGHT = 1800;       // uzun seritte bant yuksekligi (content ile ayni deger)
+const PAGE_BAND_OVERLAP = 200;           // bantlar arasi ortusme
+const PAGE_MAX_TEXT = 600;               // sayfa modunda metin kesme siniri (200 degil)
+const PAGE_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 
 // v2: Rate limit yonetimi (Gemini 10 RPM = ~6sn minimum aralik)
 const MIN_INTERVAL_MS = 6000;        // istekler arasi minimum bekleme
@@ -76,6 +87,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // v3.2: orijinal gorseli SW'de indir (host_permissions <all_urls> sayesinde CORS engeli yok)
+  if (message.type === 'FETCH_IMAGE') {
+    fetchImageAsDataUrl(message.url)
+      .then(r => sendResponse(r))
+      .catch(err => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
   // v2.5: API key test et
   if (message.type === 'TEST_API_KEY') {
     testApiKey(message.apiKey)
@@ -107,6 +126,31 @@ const BASE_PROMPT = 'You are analyzing a manga/comic image.\n' +
   '- SFX: translate e.g. BOOM -> GUM, CRACK -> CAT. Keep short.\n' +
   '- If NO readable text, return {"balloons":[]}.\n' +
   '- NEVER return empty string. NEVER return markdown.';
+
+// v3.2: Sayfa modu prompt'u — koordinatlar NORMALIZE (0..1), tam sayfa tek istekte
+const PAGE_PROMPT = 'You are analyzing a manga/comic page image (the image may be a slice of a longer page).\n' +
+  'Detect EVERY visible speech bubble, narration box, sign and readable text.\n' +
+  'Return ONLY valid JSON. Do NOT use markdown. Do NOT explain.\n\n' +
+  'OUTPUT SCHEMA:\n' +
+  '{\n' +
+  '  "balloons": [\n' +
+  '    { "text": "English text", "translation": "Turkish translation",\n' +
+  '      "x": 0.1234, "y": 0.0567, "width": 0.0891, "height": 0.0234 }\n' +
+  '  ]\n' +
+  '}\n\n' +
+  'COORDINATE RULES:\n' +
+  '- x,y,width,height are NORMALIZED decimals between 0 and 1, relative to THIS image.\n' +
+  '- x,y = top-left corner of the bubble; width,height = its size. Round to 4 decimals.\n' +
+  '- Tight box: cover the bubble INCLUDING its border, NOT the surrounding art.\n' +
+  '- Order top-to-bottom, then left-to-right.\n\n' +
+  'TEXT RULES:\n' +
+  '- "translation" must be natural Turkish dialogue, short enough to fit a bubble.\n' +
+  '- SFX: translate (BOOM -> GUM, CRACK -> CAT). Keep short.\n' +
+  '- Never merge two bubbles into one entry. Never return an empty string.\n' +
+  '- If there is NO readable text, return {"balloons":[]}.\n' +
+  'NEVER return markdown.';
+
+function buildPagePrompt() { return PAGE_PROMPT; }
 
 function buildTranslationPrompt(translationMode, alternativeAttempt) {
   if (translationMode !== 'alternative') return BASE_PROMPT;
@@ -147,6 +191,44 @@ async function handleExtract({ dataUrl, w, h, translationMode, alternativeAttemp
     return { bubbles, model: result.model, fallbackUsed: result.fallbackUsed };
   }
   return { bubbles: [], model: result.model, fallbackUsed: result.fallbackUsed };
+}
+
+/**
+ * v3.2: Gorsel URL'ini SW'de indir (CORS engeli yok) ve dataUrl'e cevir.
+ * Cerezler gonderilmez (credentials: omit) — oturum isteyen CDN'lerde content tarafi
+ * gorunur-alan kirpmasina duser.
+ * Doner: { ok, dataUrl, width, height, bytes } veya { ok: false, error }.
+ */
+async function fetchImageAsDataUrl(url) {
+  if (!url || !/^https?:/i.test(url)) return { ok: false, error: 'desteklenmeyen url' };
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT);
+  try {
+    const res = await fetch(url, { credentials: 'omit', cache: 'force-cache', signal: ctrl.signal });
+    if (!res.ok) return { ok: false, error: 'HTTP ' + res.status };
+    const blob = await res.blob();
+    if (blob.size > PAGE_MAX_IMAGE_BYTES) return { ok: false, error: 'gorsel cok buyuk (' + blob.size + ' bayt)' };
+    const bitmap = await createImageBitmap(blob).catch(() => null);
+    const buf = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    return {
+      ok: true,
+      dataUrl: 'data:' + (blob.type || 'image/jpeg') + ';base64,' + btoa(bin),
+      width: bitmap ? bitmap.width : 0,
+      height: bitmap ? bitmap.height : 0,
+      bytes: blob.size,
+    };
+  } catch (e) {
+    const msg = (e && e.name === 'AbortError') ? 'gorsel indirme zaman asimi' : String((e && e.message) || e);
+    return { ok: false, error: msg };
+  } finally {
+    clearTimeout(tid);
+  }
 }
 
 function getMinuteBucket(date = new Date()) {
@@ -417,7 +499,7 @@ async function testApiKey(apiKey) {
 }
 
 // v2.7: parseBubbleArray boş/geçersiz girişte hata fırlatır → cache yazılmaz
-function parseBubbleArray(raw, w, h) {
+function parseBubbleArray(raw, w, h, opts) {
   if (!raw || !String(raw).trim()) {
     throw new Error('parseBubbleArray: bos giris');
   }
@@ -433,23 +515,37 @@ function parseBubbleArray(raw, w, h) {
   if (first >= 0 && last > first) {
     try {
       var arr = JSON.parse(s.slice(first, last + 1));
-      if (Array.isArray(arr)) return validateBubbles(arr, w, h);
+      if (Array.isArray(arr)) return validateBubbles(arr, w, h, opts);
     } catch (e) { /* fall through to object format */ }
   }
 
   // Try object format: {"balloons": [...]} veya {"texts": [...]}
   try {
     var obj = JSON.parse(s);
-    if (Array.isArray(obj.balloons)) return validateBubbles(obj.balloons, w, h);
-    if (Array.isArray(obj.texts)) return validateBubbles(obj.texts, w, h);
+    if (Array.isArray(obj.balloons)) return validateBubbles(obj.balloons, w, h, opts);
+    if (Array.isArray(obj.texts)) return validateBubbles(obj.texts, w, h, opts);
   } catch (e) { /* fall through */ }
 
   throw new Error('parseBubbleArray: JSON array veya {balloons:[]} bulunamadi. raw=' + s.slice(0, 120));
 }
 
 // v2.7: Ortak bubble validation — her kaynaktan gelen bubble'i ayni mantikla dogrula
-function validateBubbles(arr, w, h) {
+function validateBubbles(arr, w, h, opts) {
   if (!Array.isArray(arr)) throw new Error('validateBubbles: array degil');
+  const o = opts || {};
+  if (o.coordSpace === 'auto' || o.coordSpace === 'normalized') {
+    // v3.2: sayfa modu yolu — normalize/piksel tespiti + kirpma + tekrar birlestirme.
+    // Resim disina tasan kutu ATILMAZ, iceri kaydirilir (ceviri kaybi olmasin).
+    const space = o.coordSpace === 'auto' ? MLCore.detectCoordSpace(arr) : 'normalized';
+    const clean = MLCore.sanitizeBubbles(arr, {
+      w: w,
+      h: h,
+      coordSpace: space,
+      maxLen: o.maxLen || PAGE_MAX_TEXT,
+      minSizePct: 0.004,
+    });
+    return MLCore.dedupeBubbles(clean, { iouThreshold: 0.6 });
+  }
   return arr
     .filter(it => it && typeof it === 'object')
     .map(it => {
