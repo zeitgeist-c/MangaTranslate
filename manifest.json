@@ -26,7 +26,12 @@
         "<all_urls>"
       ],
       "js": [
-        "src/content.js"
+        "src/content.js",
+        "src/pagemode-core.js",
+        "src/pagemode.js"
+      ],
+      "css": [
+        "styles/pagemode.css"
       ],
       "run_at": "document_idle",
       "all_frames": false

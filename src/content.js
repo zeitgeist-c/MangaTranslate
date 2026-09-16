@@ -66,7 +66,9 @@ chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
   if (message.type === 'GET_TRANSLATION_MODE') {
     sendResponse({
       ok: true,
-      mode: selectionMode.active ? 'selection' : (quickTranslateMode.active ? 'quick' : null),
+      mode: selectionMode.active ? 'selection'
+          : (quickTranslateMode.active ? 'quick'
+          : (typeof pageMode !== 'undefined' && pageMode.active ? 'page' : null)),
     });
     return true;
   }
@@ -95,7 +97,16 @@ chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
     return true;
   }
 
-  return true;
+  // v3.2: sayfa modu kontrol mesajlari (pagemode.js yuklendiyse o yanitlar)
+  if (message && typeof message.type === 'string' &&
+      (message.type === 'START_PAGE_MODE' || message.type === 'STOP_PAGE_MODE' || message.type === 'GET_PAGE_MODE_STATUS')) {
+    if (typeof pmHandleControlMessage === 'function' && pmHandleControlMessage(message, sendResponse)) return true;
+  }
+
+  // Bu dosya mesaji tanimiyor: diger listener'lar (pagemode.js) yanitlasin.
+  // (Eskiden burada kosulsuz 'return true' vardi; taninmayan mesajda kanal acik
+  //  kalip gonderilen taraf yanitsiz bekliyordu.)
+  return false;
 });
 
 // ── Selection Mode UI ────────────────────────────────────────────────────────
