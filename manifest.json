@@ -50,7 +50,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "assets/*"
+        "assets/*",
+        "styles/pagemode.css"
       ],
       "matches": [
         "<all_urls>"

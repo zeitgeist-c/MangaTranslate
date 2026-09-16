@@ -114,4 +114,7 @@ test('isMangaCandidate: reklam/avatar elenir, sayfa gorseli gecer', () => {
   assert.equal(core.isMangaCandidate({ w: 900, h: 60, src: 'https://x/banner.jpg', cls: 'banner' }), false);
   assert.equal(core.isMangaCandidate({ w: 90, h: 90, src: 'https://x/avatar.jpg', cls: '' }), false);
   assert.equal(core.isMangaCandidate({ w: 1000, h: 1500, src: 'data:image/jpeg;base64,AAAA', cls: '' }), true);
+  // uzun serit webtoon sayfasi (800x4800) elenmemeli
+  assert.equal(core.isMangaCandidate({ w: 800, h: 4800, src: 'https://x/long.jpg', cls: 'reader-page' }), true);
+  assert.equal(core.isMangaCandidate({ w: 800, h: 26000, src: 'https://x/very-long.jpg', cls: 'page' }), true);
 });

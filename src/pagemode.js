@@ -19,6 +19,7 @@ const PM_JPEG_QUALITY = 0.82;
 const PM_MAX_PAYLOAD = 4 * 1024 * 1024;
 const PM_MIN_AREA_RATIO = 0.25;         // 'gorunen sayfa' esigi
 const PM_TALL_STRIP_RATIO = 2.0;        // h/w bu orandan buyukse bantlara bol
+const PM_MAX_BANDS = 6;                 // sayfa basina en fazla bant (kota korumasi)
 
 const pageMode = {
   active: false,
@@ -33,6 +34,33 @@ const pageMode = {
 };
 
 function pmJobKey(pageId, bandIndex) { return String(pageId) + '#' + Number(bandIndex || 0); }
+
+// ── Stiller ────────────────────────────────────────────────────────────────
+// styles/pagemode.css manifest uzerinden enjekte edilir. Bazi ortamlarda (headless/
+// bilesen eksikligi) manifest CSS'i sayfaya uygulanmaz; o durumda dosyayi kendimiz
+// cekip <style> olarak basariz. Tek kaynak yine styles/pagemode.css'dir.
+const PM_STYLE_ID = 'ml-pagemode-style';
+
+async function pmEnsureStyles() {
+  try {
+    const applied = Array.prototype.some.call(document.styleSheets, function (s) {
+      return s.href && String(s.href).indexOf('pagemode.css') !== -1;
+    });
+    if (applied || document.getElementById(PM_STYLE_ID)) return;
+    const resp = await fetch(chrome.runtime.getURL('styles/pagemode.css'));
+    if (!resp.ok) return;
+    const css = await resp.text();
+    if (document.getElementById(PM_STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = PM_STYLE_ID;
+    style.textContent = css;
+    (document.head || document.documentElement).appendChild(style);
+    // Stil sonradan geldiyse yerlesim degisti: kutulari yeniden olcup yaziyi sigdir.
+    if (typeof pmSyncAutoLayers === 'function') pmSyncAutoLayers();
+  } catch (e) {
+    console.warn('[MangaLens-pm] stil enjeksiyonu basarisiz:', e.message);
+  }
+}
 
 function pmDebounce(fn, ms) {
   let t = null;
@@ -178,7 +206,12 @@ async function pmAcquireImage(page) {
 function pmPlanSlices(width, height) {
   const tallStrip = height > PM_MAX_SIDE && (height / width) > PM_TALL_STRIP_RATIO;
   if (!tallStrip) return [{ index: 0, count: 1, x: 0, y: 0, width: width, height: height }];
-  return PM.planBands(width, height, { maxHeight: PM_BAND_MAX_HEIGHT, overlapPx: PM_BAND_OVERLAP });
+  let maxHeight = PM_BAND_MAX_HEIGHT;
+  const naiveCount = Math.ceil((height - maxHeight) / (maxHeight - PM_BAND_OVERLAP)) + 1;
+  if (naiveCount > PM_MAX_BANDS) {                    // cok uzun serit: bant yuksekligini buyut, sayiyi sinirla
+    maxHeight = Math.round((height + (PM_MAX_BANDS - 1) * PM_BAND_OVERLAP) / PM_MAX_BANDS);
+  }
+  return PM.planBands(width, height, { maxHeight: maxHeight, overlapPx: PM_BAND_OVERLAP });
 }
 
 function pmBuildJobs(page, img) {
@@ -272,7 +305,15 @@ function pmFitBubbleText(box) {
   if (!text) return;
   const w = box.clientWidth;
   const h = box.clientHeight;
-  if (!w || !h) return;
+  if (!w || !h) {
+    // Stil/yarlestim henuz hazir degil: zamanlayici ile tekrar dene (gizli sekmede rAF calismaz)
+    const tries = Number(box.dataset.mlFitTries || 0);
+    if (tries > 30) return;
+    box.dataset.mlFitTries = String(tries + 1);
+    setTimeout(function () { pmFitBubbleText(box); }, 120);
+    return;
+  }
+  box.dataset.mlFitTries = '0';
   let size = PM.estimateFontSize(w, h, text.length, { min: 9, max: 18 });
   box.style.setProperty('font-size', size + 'px', 'important');
   for (let i = 0; i < 10; i++) {
@@ -320,10 +361,18 @@ function pmLayoutPage(page) {
     box.style.setProperty('width', w + 'px', 'important');
     box.style.setProperty('height', h + 'px', 'important');
   }
-  requestAnimationFrame(function () {
+  pmScheduleFit(layer);
+}
+
+// Kutu yazilarini sigdir: rAF + zamanlayici (gizli sekmede rAF calismaz)
+function pmScheduleFit(layer) {
+  if (!layer) return;
+  const run = function () {
     if (!layer.isConnected) return;
     Array.prototype.forEach.call(layer.children, pmFitBubbleText);
-  });
+  };
+  requestAnimationFrame(run);
+  setTimeout(run, 300);
 }
 
 function pmSyncAutoLayers() {
@@ -413,8 +462,19 @@ function pmHandleResult(msg) {
   const imageW = job ? job.imageW : page.imageWidth;
   const imageH = job ? job.imageH : page.imageHeight;
 
+  // Model koordinatlari GONDERILEN (olceklenmis) bant uzayindadir; once dogal uzaya cevrilir.
+  const fx = (job && job.w) ? (slice.width / job.w) : 1;
+  const fy = (job && job.h) ? (slice.height / job.h) : 1;
   const globalBubbles = (msg.bubbles || []).map(function (b) {
-    const g = PM.bandToGlobal(b, slice, imageW, imageH);
+    const natural = {
+      text: b.text,
+      translation: b.translation,
+      x: Number(b.x) * fx,
+      y: Number(b.y) * fy,
+      width: Number(b.width) * fx,
+      height: Number(b.height) * fy,
+    };
+    const g = PM.bandToGlobal(natural, slice, imageW, imageH);
     return { text: g.text, translation: g.translation, xPct: g.xPct, yPct: g.yPct, wPct: g.wPct, hPct: g.hPct };
   });
   page.bubbles = page.bubbles.concat(globalBubbles);
@@ -455,7 +515,8 @@ function pmFinalizePage(page) {
   page.state = page.bubbles.length ? 'done' : 'empty';
   pageMode.stats.done++;
   pageMode.stats.bubbles += page.bubbles.length;
-  pmLayoutPage(page);
+  if (page.bubbles.length) pmLayoutPage(page);
+  else pmClearPageOverlay(page);          // bos sonuc: gereksiz katman birakma
 }
 
 function pmDedupeGlobal(list) {
@@ -553,6 +614,7 @@ function pmSetupObservers() {
 // ── Pill (alt bar) ─────────────────────────────────────────────────────────
 
 function pmEnsurePill() {
+  pmEnsureStyles();
   let pill = document.getElementById('ml-pill');
   if (pill) return pill;
   pill = document.createElement('div');
@@ -591,13 +653,14 @@ function pmUpdatePill(note) {
   const parts = [pageMode.stats.done + '/' + Math.max(pageMode.stats.total, pageMode.stats.done) + ' sayfa',
                  pageMode.stats.bubbles + ' balon'];
   if (pageMode.stats.errors) parts.push(pageMode.stats.errors + ' hata');
-  if (note) parts.push(note);
+  if (note && !(note === 'hata' && pageMode.stats.errors)) parts.push(note);
   text.textContent = 'MangaLens: ' + parts.join(' · ');
 }
 
 // ── Baslat / durdur ────────────────────────────────────────────────────────
 
 function pmStartPageMode(scope) {
+  pmEnsureStyles();
   if (typeof selectionMode !== 'undefined' && selectionMode.active && typeof exitSelectionMode === 'function') exitSelectionMode();
   if (typeof quickTranslateMode !== 'undefined' && quickTranslateMode.active && typeof stopQuickTranslateMode === 'function') stopQuickTranslateMode();
 

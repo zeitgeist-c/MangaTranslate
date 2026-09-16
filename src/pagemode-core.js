@@ -216,7 +216,7 @@
     if (w < 150 || h < 150) return false;
     if (w * h < 150 * 150) return false;
     const ratio = w / h;
-    if (ratio < 0.2 || ratio > 8) return false;
+    if (ratio < 0.02 || ratio > 8) return false;       // uzun serit (webtoon) de gecerli: 1:50'ye kadar
     const sig = (String(i.src || '') + ' ' + String(i.cls || '') + ' ' + String(i.alt || '')).toLowerCase();
     const hasPositive = POSITIVE.some(function (k) { return sig.indexOf(k) !== -1; });
     const hasNegative = NEGATIVE.some(function (k) { return sig.indexOf(k) !== -1; });
