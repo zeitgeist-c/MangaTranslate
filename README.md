@@ -10,7 +10,7 @@ Chrome Manifest V3 extension. Translates English speech bubbles on manga/manhwa/
 
 ## Install
 
-1. Extract `MangaLensTR-3.2.0.zip`.
+1. Extract `MangaLensTR-3.2.1.zip`.
 2. `chrome://extensions` → Developer mode → Load unpacked (folder with `manifest.json`).
 3. Popup → API tab → add at least one Gemini key, test, activate.
 4. On a page: Page Translate / Select Area / Auto Translate.
@@ -20,7 +20,7 @@ Packaging: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\package.ps
 ## Features
 
 - **Page mode (one button)** — translates the visible page first, then keeps going as you scroll (or the whole chapter); every bubble gets a Turkish overlay box with auto-fitted text, the English original on hover, and results cached per page.
-- **Bubble snapping (no extra requests)** — box positions are corrected locally: the real image content area is computed (object-fit/borders) and each box is snapped onto the white balloon region with a pixel analysis, removing drift and overlaps at zero extra Gemini cost.
+- **Bubble snapping (no extra requests)** — every box is corrected locally: the real image content area is computed (object-fit, borders, padding, transformed/zoomed containers) and each box is snapped onto the **bubble outline** by a pixel analysis; panels and page background are not mistaken for bubbles, drift and overlaps are removed at zero extra API cost.
 - **Region select** — draw up to 12 areas (min 24px), Enter translates in batch.
 - **Auto translate** — every drawn area translated without waiting.
 - **Retry variants** — `Retry` re-reads the image without sending the previous result; 3 strategies (casual tone / tone-emotion-context / short-bubble fit), high creativity on the fallback model.

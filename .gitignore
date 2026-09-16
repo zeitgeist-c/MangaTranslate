@@ -11,5 +11,9 @@ Thumbs.db
 # Temp
 *.tmp
 *.log
+
+# Yerel calisma dosyalari (plan, E2E araclari) - repoya girmez
+.hermes/
+
 # Generated extension packages
 MangaLensTR-*.zip
