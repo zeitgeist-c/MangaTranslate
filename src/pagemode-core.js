@@ -264,6 +264,189 @@
     };
   }
 
+  // ── Piksel analiziyle balona oturtma (saf; DOM/canvas yok) ────────────────
+  const SNAP_DEFAULTS = {
+    brightLuma: 205,      // beyaz esigi
+    brightSpread: 45,     // beyaz sayilmasi icin kanal farki
+    inkLuma: 120,         // yazi/siyah esigi
+    minAreaRatio: 0.25,   // dolgu alani / model kutusu alani alt siniri
+    maxAreaRatio: 3.5,    // ust sinir
+    runawayRatio: 0.35,   // pencere alanina gore bunu asarsa "arka plan"
+    margin: 3,            // bulunan bolgeye eklenecek kenar payi (px)
+    minSide: 8,
+    textPad: 0.35,        // yazi bbox'ina eklenecek oransal pay
+    mergeIou: 0.5,
+    budgetPx: 1500000,    // toplam islenen piksel butcesi
+  };
+
+  function floodFillBright(seed, isBright, wx0, wy0, wx1, wy1, runawayArea) {
+    const w = wx1 - wx0 + 1;
+    const seen = new Uint8Array(w * (wy1 - wy0 + 1));
+    const stack = [((seed.y - wy0) * w) + (seed.x - wx0)];
+    seen[stack[0]] = 1;
+    let area = 0, x0 = wx1, y0 = wy1, x1 = wx0, y1 = wy0, aborted = false;
+    while (stack.length) {
+      const idx = stack.pop();
+      const lx = idx % w;
+      const ly = (idx - lx) / w;
+      const x = wx0 + lx, y = wy0 + ly;
+      area++;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+      if (runawayArea && area > runawayArea) { aborted = true; break; }
+      const nb = [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]];
+      for (let i = 0; i < 4; i++) {
+        const nx = nb[i][0], ny = nb[i][1];
+        if (nx < wx0 || ny < wy0 || nx > wx1 || ny > wy1) continue;
+        const nidx = (ny - wy0) * w + (nx - wx0);
+        if (seen[nidx]) continue;
+        seen[nidx] = 1;
+        if (isBright(nx, ny)) stack.push(nidx);
+      }
+    }
+    return { area: area, bbox: { x0: x0, y0: y0, x1: x1, y1: y1 }, aborted: aborted };
+  }
+
+  function snapBubbles(input) {
+    const opts = Object.assign({}, SNAP_DEFAULTS, (input && input.opts) || {});
+    const data = input && input.data;
+    const W = Math.max(1, Number(input && input.width) || 0);
+    const H = Math.max(1, Number(input && input.height) || 0);
+    const src = Array.isArray(input && input.bubbles) ? input.bubbles : [];
+    const stats = { snapped: 0, text: 0, kept: 0, merged: 0, rejected: 0, pixels: 0 };
+    if (!data || !W || !H || !src.length) return { bubbles: src.slice(), stats: stats };
+
+    const isBright = function (x, y) {
+      const i = (y * W + x) * 4;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+      return (0.299 * r + 0.587 * g + 0.114 * b) >= opts.brightLuma && (mx - mn) <= opts.brightSpread;
+    };
+    const isInk = function (x, y) {
+      const i = (y * W + x) * 4;
+      return (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) <= opts.inkLuma;
+    };
+
+    const out = src.map(function (b) {
+      const bx = Math.round(Number(b.x) || 0), by = Math.round(Number(b.y) || 0);
+      const bw = Math.max(1, Math.round(Number(b.width) || 1)), bh = Math.max(1, Math.round(Number(b.height) || 1));
+      const x0 = Math.max(0, bx), y0 = Math.max(0, by);
+      const x1 = Math.min(W - 1, bx + bw - 1), y1 = Math.min(H - 1, by + bh - 1);
+      if (x1 <= x0 || y1 <= y0) { stats.kept++; return Object.assign({}, b, { snap: 'model' }); }
+
+      const pad = Math.max(24, Math.min(160, Math.round(0.9 * Math.max(bw, bh))));
+      const wx0 = Math.max(0, x0 - pad), wy0 = Math.max(0, y0 - pad);
+      const wx1 = Math.min(W - 1, x1 + pad), wy1 = Math.min(H - 1, y1 + pad);
+      const winArea = (wx1 - wx0 + 1) * (wy1 - wy0 + 1);
+      if (stats.pixels + winArea > opts.budgetPx) { stats.kept++; return Object.assign({}, b, { snap: 'model' }); }
+
+      // 1) tohum: kutu icinde, yoksa pencerede parlak piksel
+      const step = Math.max(2, Math.round(Math.min(bw, bh) / 6));
+      let seed = null;
+      for (let y = y0; y <= y1 && !seed; y += step) {
+        for (let x = x0; x <= x1; x += step) { if (isBright(x, y)) { seed = { x: x, y: y }; break; } }
+      }
+      if (!seed) {
+        for (let y = wy0; y <= wy1 && !seed; y += step) {
+          for (let x = wx0; x <= wx1; x += step) { if (isBright(x, y)) { seed = { x: x, y: y }; break; } }
+        }
+      }
+
+      let snapped = null;
+      if (seed) {
+        const filled = floodFillBright(seed, isBright, wx0, wy0, wx1, wy1, winArea * opts.runawayRatio);
+        stats.pixels += filled.area;
+        const bot = filled.bbox;
+        const bw2 = bot.x1 - bot.x0 + 1, bh2 = bot.y1 - bot.y0 + 1;
+        const areaRatio = filled.area / (bw * bh);
+        const edgeCount = (bot.x0 <= wx0 + 1 ? 1 : 0) + (bot.x1 >= wx1 - 1 ? 1 : 0) + (bot.y0 <= wy0 + 1 ? 1 : 0) + (bot.y1 >= wy1 - 1 ? 1 : 0);
+        const ok = !filled.aborted && areaRatio >= opts.minAreaRatio && areaRatio <= opts.maxAreaRatio && bw2 >= opts.minSide && bh2 >= opts.minSide && edgeCount < 3;
+        if (ok) {
+          snapped = { x: bot.x0 - opts.margin, y: bot.y0 - opts.margin, width: bw2 + 2 * opts.margin, height: bh2 + 2 * opts.margin, snap: 'bubble' };
+        } else {
+          stats.rejected++;
+        }
+      }
+
+      // 2) yazi (ink) kutusu yedegi — balonsuz yazi / SFX
+      if (!snapped) {
+        const ix0 = Math.max(0, x0 - Math.round(bw * 0.2)), iy0 = Math.max(0, y0 - Math.round(bh * 0.2));
+        const ix1 = Math.min(W - 1, x1 + Math.round(bw * 0.2)), iy1 = Math.min(H - 1, y1 + Math.round(bh * 0.2));
+        const searched = (ix1 - ix0 + 1) * (iy1 - iy0 + 1);
+        let inkCount = 0, tx0 = W, ty0 = H, tx1 = -1, ty1 = -1;
+        for (let y = iy0; y <= iy1; y++) {
+          for (let x = ix0; x <= ix1; x++) {
+            if (!isInk(x, y)) continue;
+            inkCount++;
+            if (x < tx0) tx0 = x;
+            if (x > tx1) tx1 = x;
+            if (y < ty0) ty0 = y;
+            if (y > ty1) ty1 = y;
+          }
+        }
+        // koyu zemin "tamamen murekkep" sayilmasin: alanin en fazla %60'i yazi olabilir
+        if (inkCount >= 12 && inkCount <= searched * 0.6 && tx1 > tx0 && ty1 > ty0) {
+          const padX = Math.max(4, Math.round((tx1 - tx0 + 1) * opts.textPad));
+          const padY = Math.max(4, Math.round((ty1 - ty0 + 1) * opts.textPad));
+          snapped = { x: tx0 - padX, y: ty0 - padY, width: (tx1 - tx0 + 1) + 2 * padX, height: (ty1 - ty0 + 1) + 2 * padY, snap: 'text' };
+        }
+      }
+
+      if (!snapped) { stats.kept++; return Object.assign({}, b, { snap: 'model' }); }
+      if (snapped.snap === 'bubble') stats.snapped++; else stats.text++;
+      const cx = Math.max(0, Math.min(W - 1, Math.round(snapped.x)));
+      const cy = Math.max(0, Math.min(H - 1, Math.round(snapped.y)));
+      const cw = Math.max(4, Math.min(W - cx, Math.round(snapped.width)));
+      const ch = Math.max(4, Math.min(H - cy, Math.round(snapped.height)));
+      return Object.assign({}, b, { x: cx, y: cy, width: cw, height: ch, snap: snapped.snap });
+    });
+
+    // 3) ayni bolgeye oturanlari birlestir (buyuk kutunun cevirisi korunur)
+    const merged = [];
+    out.slice().sort(function (a, b) { return (b.width * b.height) - (a.width * a.height); }).forEach(function (b) {
+      const hit = merged.find(function (m) { return iou(m, b) >= opts.mergeIou; });
+      if (hit) {
+        if (b.translation && hit.translation.indexOf(b.translation) === -1) hit.translation = (hit.translation + ' ' + b.translation).trim();
+        if (b.text && hit.text.indexOf(b.text) === -1) hit.text = (hit.text + ' ' + b.text).trim();
+        stats.merged++;
+      } else {
+        merged.push(Object.assign({}, b));
+      }
+    });
+    return { bubbles: merged, stats: stats };
+  }
+
+  // ── Ortusen kutulari ayir (kucuk kutudan ortusen serit kesilir) ────────────
+  function resolveOverlaps(list, opts) {
+    const o = opts || {};
+    const maxRatio = o.maxRatio == null ? 0.25 : o.maxRatio;
+    const minW = o.minWidth || 24, minH = o.minHeight || 14;
+    const out = (Array.isArray(list) ? list : []).map(function (b) { return Object.assign({}, b); });
+    const order = out.slice().sort(function (a, b) { return (b.width * b.height) - (a.width * a.height); });
+    for (let i = 0; i < order.length; i++) {
+      for (let j = i + 1; j < order.length; j++) {
+        const big = order[i], small = order[j];
+        const ox = Math.min(big.x + big.width, small.x + small.width) - Math.max(big.x, small.x);
+        const oy = Math.min(big.y + big.height, small.y + small.height) - Math.max(big.y, small.y);
+        if (ox <= 0 || oy <= 0) continue;
+        const ratio = (ox * oy) / Math.max(1, Math.min(big.width * big.height, small.width * small.height));
+        if (ratio <= maxRatio) continue;
+        if (ox <= oy) {
+          const amount = Math.min(ox, Math.max(0, small.width - minW));
+          if (big.x <= small.x) { small.x += amount; small.width -= amount; }
+          else { small.width -= amount; }
+        } else {
+          const amount = Math.min(oy, Math.max(0, small.height - minH));
+          if (big.y <= small.y) { small.y += amount; small.height -= amount; }
+          else { small.height -= amount; }
+        }
+      }
+    }
+    return out;
+  }
+
   // ── Manga gorseli adayi mi? (v2.7 isMangaImage fikri, DOM'suz halde) ──
   const NEGATIVE = ['avatar', 'icon', 'logo', 'banner', 'advert', 'sponsor', 'thumbnail', 'profile', 'button', 'navbar', 'footer', 'sidebar', 'comment', 'emoji', 'flag', 'favicon', 'loading', 'spinner', 'placeholder'];
   const POSITIVE = ['page', 'chapter', 'manga', 'manhwa', 'manhua', 'webtoon', 'comic', 'panel', 'reader', 'scan', 'episode', 'viewer', 'images'];
@@ -298,6 +481,8 @@
     sortPagesForTranslation: sortPagesForTranslation,
     estimateFontSize: estimateFontSize,
     contentRectOf: contentRectOf,
+    snapBubbles: snapBubbles,
+    resolveOverlaps: resolveOverlaps,
     isMangaCandidate: isMangaCandidate,
   };
 

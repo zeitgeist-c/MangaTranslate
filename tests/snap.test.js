@@ -76,3 +76,112 @@ test('contentRectOf: % ve px object-position', () => {
   const b = core.contentRectOf({ boxW: 800, boxH: 700, naturalW: 800, naturalH: 600, objectFit: 'contain', objectPosition: 'center 10px' });
   assert.equal(b.y, 10);
 });
+
+// ── B) snapBubbles ─────────────────────────────────────────────────────────
+function baseOpts() { return { brightLuma: 205, brightSpread: 45, inkLuma: 120, margin: 3 }; }
+
+test('snapBubbles: kaymis kutu beyaz balona oturur', () => {
+  const W = 300, H = 200;
+  const d = grayPage(W, H, 90);
+  ellipse(d, W, H, 120, 90, 45, 30, 250, 30);      // gercek balon: beyaz govde
+  inkText(d, W, 100, 85, 8);
+  const model = { text: 'A', translation: 'B', x: 132, y: 99, width: 84, height: 56 };  // +12/+9 kaymis
+  const out = core.snapBubbles({ data: d, width: W, height: H, bubbles: [model], opts: baseOpts() });
+  const b = out.bubbles[0];
+  assert.equal(out.bubbles.length, 1);
+  assert.ok(b.snap === 'bubble' || b.snap === 'text', 'snap uygulanmali: ' + b.snap);
+  assert.ok(Math.abs((b.x + b.width / 2) - 120) <= 4, 'merkez x kaymasi: ' + JSON.stringify(b));
+  assert.ok(Math.abs((b.y + b.height / 2) - 90) <= 4, 'merkez y kaymasi: ' + JSON.stringify(b));
+});
+
+test('snapBubbles: ayni balona iki kutu → tek kutuda birlesir', () => {
+  const W = 300, H = 200;
+  const d = grayPage(W, H, 90);
+  ellipse(d, W, H, 120, 90, 45, 30, 250, 30);
+  inkText(d, W, 100, 85, 8);
+  const a = { text: 'A', translation: 'BIR', x: 80, y: 62, width: 80, height: 56 };
+  const b = { text: 'C', translation: 'IKI', x: 84, y: 64, width: 78, height: 54 };
+  const out = core.snapBubbles({ data: d, width: W, height: H, bubbles: [a, b], opts: baseOpts() });
+  assert.equal(out.bubbles.length, 1);
+  assert.equal(out.stats.merged, 1);
+  assert.ok(out.bubbles[0].translation.includes('BIR') && out.bubbles[0].translation.includes('IKI'));
+});
+
+test('snapBubbles: balon yoksa (duz zemin) model kutusu korunur', () => {
+  const W = 300, H = 200;
+  const d = grayPage(W, H, 200);                       // ne beyaz ne yazi: bos zemin
+  const model = { text: 'A', translation: 'B', x: 100, y: 80, width: 60, height: 40 };
+  const out = core.snapBubbles({ data: d, width: W, height: H, bubbles: [model], opts: baseOpts() });
+  const b = out.bubbles[0];
+  assert.equal(b.snap, 'model');
+  assert.equal(b.x, 100); assert.equal(b.y, 80);
+});
+
+test('snapBubbles: SFX (balonsuz yazi) yazi kutusuna oturur', () => {
+  const W = 300, H = 120;
+  const d = grayPage(W, H, 140);
+  inkText(d, W, 100, 60, 10, 6);                        // iki satir yazi: x 100..118, y 60..66
+  const model = { text: 'BOOM', translation: 'GUM', x: 88, y: 40, width: 60, height: 40 };
+  const out = core.snapBubbles({ data: d, width: W, height: H, bubbles: [model], opts: baseOpts() });
+  const b = out.bubbles[0];
+  assert.equal(b.snap, 'text');
+  assert.ok(b.x <= 100 && b.x + b.width >= 119, 'yazi kutusunu kapsamali: ' + JSON.stringify(b));
+  assert.ok(b.width < 60, 'model kutusundan daha dar olmali: ' + JSON.stringify(b));
+});
+
+test('snapBubbles: dev beyaz zeminde runaway dolgu balona donusmez', () => {
+  const W = 400, H = 300;
+  const d = grayPage(W, H, 245);                       // her yer beyaz (zemin), balon yok
+  const model = { text: 'A', translation: 'B', x: 150, y: 120, width: 60, height: 40 };
+  const out = core.snapBubbles({ data: d, width: W, height: H, bubbles: [model], opts: baseOpts() });
+  const b = out.bubbles[0];
+  assert.ok(b.width <= 120 && b.height <= 80, 'kutu buyumemeli: ' + JSON.stringify(b));
+  assert.ok(out.stats.rejected + out.stats.kept >= 1);
+});
+
+test('snapBubbles: koyu zeminde model kutusu korunur (her yer murekkep sayilmaz)', () => {
+  const W = 300, H = 200;
+  const d = grayPage(W, H, 90);                        // tum zemin koyu
+  const model = { text: 'A', translation: 'B', x: 100, y: 80, width: 60, height: 40 };
+  const out = core.snapBubbles({ data: d, width: W, height: H, bubbles: [model], opts: baseOpts() });
+  assert.equal(out.bubbles[0].snap, 'model');
+});
+
+test('snapBubbles: deterministik', () => {
+  const W = 200, H = 150;
+  const d = grayPage(W, H, 90);
+  ellipse(d, W, H, 100, 70, 40, 26, 250, 30);
+  const m = { text: 'A', translation: 'B', x: 70, y: 50, width: 70, height: 44 };
+  const a = core.snapBubbles({ data: d, width: W, height: H, bubbles: [m], opts: baseOpts() });
+  const b = core.snapBubbles({ data: d, width: W, height: H, bubbles: [m], opts: baseOpts() });
+  assert.deepEqual(a.bubbles, b.bubbles);
+});
+
+// ── C) resolveOverlaps ─────────────────────────────────────────────────────
+test('resolveOverlaps: kucuk (%2) ortusme dokunulmaz', () => {
+  const a = { x: 0, y: 0, width: 100, height: 100 };
+  const b = { x: 94, y: 94, width: 40, height: 40 };
+  const out = core.resolveOverlaps([a, b], { maxRatio: 0.25 });
+  assert.deepEqual(out[1], b);
+});
+
+test('resolveOverlaps: buyuk ortusmede kucuk kutu kesilir, ortusme kalmaz', () => {
+  const big = { x: 100, y: 100, width: 120, height: 100 };
+  const small = { x: 160, y: 120, width: 120, height: 100 };
+  const out = core.resolveOverlaps([big, small], { maxRatio: 0.25, minWidth: 24, minHeight: 14 });
+  const s = out[1];
+  const x0 = Math.max(big.x, s.x), y0 = Math.max(big.y, s.y);
+  const x1 = Math.min(big.x + big.width, s.x + s.width), y1 = Math.min(big.y + big.height, s.y + s.height);
+  assert.equal(Math.max(0, x1 - x0) * Math.max(0, y1 - y0), 0, 'ortusme sifirlanmali: ' + JSON.stringify(s));
+  assert.ok(s.width >= 24 && s.height >= 14);
+});
+
+test('resolveOverlaps: ic ice kutuda ortusme kalkar veya taban boyutta kalir', () => {
+  const big = { x: 0, y: 0, width: 200, height: 160 };
+  const small = { x: 20, y: 20, width: 180, height: 140 };
+  const out = core.resolveOverlaps([big, small], { maxRatio: 0.25, minWidth: 24, minHeight: 14 });
+  const s = out[1];
+  const ix = Math.max(0, Math.min(big.x + big.width, s.x + s.width) - Math.max(big.x, s.x));
+  const iy = Math.max(0, Math.min(big.y + big.height, s.y + s.height) - Math.max(big.y, s.y));
+  assert.ok(ix * iy === 0 || s.width === 24 || s.height === 14, 'kesisim yok veya taban boyutta: ' + JSON.stringify(s));
+});
