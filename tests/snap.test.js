@@ -34,6 +34,19 @@ function inkText(d, w, x, y, len, lineH) {
   for (let i = 0; i < len; i++) setPx(d, w, x + i * 2, y, 20);
   if (lineH) for (let i = 0; i < len; i++) setPx(d, w, x + i * 2, y + lineH, 20);
 }
+function fillRect(d, w, h, x0, y0, x1, y1, v) {
+  for (let y = Math.max(0, y0); y <= Math.min(h - 1, y1); y++) {
+    for (let x = Math.max(0, x0); x <= Math.min(w - 1, x1); x++) setPx(d, w, x, y, v);
+  }
+}
+// panel: beyaz ic + kalin koyu cerceve (manga paneli taklidi)
+function panel(d, w, h, x0, y0, x1, y1, inner, frame) {
+  fillRect(d, w, h, x0, y0, x1, y1, inner);
+  fillRect(d, w, h, x0, y0, x1, y0 + 4, frame);
+  fillRect(d, w, h, x0, y1 - 4, x1, y1, frame);
+  fillRect(d, w, h, x0, y0, x0 + 4, y1, frame);
+  fillRect(d, w, h, x1 - 4, y0, x1, y1, frame);
+}
 
 // ── A) contentRectOf ───────────────────────────────────────────────────────
 test('contentRectOf: fill → icerik kutusu elemanla ayni', () => {
@@ -197,6 +210,100 @@ test('resolveOverlaps: buyuk ortusmede kucuk kutu kesilir, ortusme kalmaz', () =
   const x1 = Math.min(big.x + big.width, s.x + s.width), y1 = Math.min(big.y + big.height, s.y + s.height);
   assert.equal(Math.max(0, x1 - x0) * Math.max(0, y1 - y0), 0, 'ortusme sifirlanmali: ' + JSON.stringify(s));
   assert.ok(s.width >= 24 && s.height >= 14);
+});
+
+// ── D) gercek sayfa kosullari: panel, metne siki kutu, cok balon, SFX ──────
+test('contentRectOf: padding + border icerik alanini daraltir', () => {
+  const r = core.contentRectOf({
+    boxW: 800, boxH: 600, naturalW: 400, naturalH: 300, objectFit: 'contain',
+    borderTop: 4, borderLeft: 4, borderRight: 4, borderBottom: 4,
+    paddingTop: 6, paddingLeft: 6, paddingRight: 6, paddingBottom: 6,
+  });
+  assert.equal(r.h, 580);                                  // 600 - 2*4 - 2*6
+  assert.ok(Math.abs(r.y - 10) < 0.1, JSON.stringify(r));
+  assert.ok(Math.abs(r.x - 13.33) < 0.2, JSON.stringify(r));
+  assert.ok(Math.abs(r.w - 773.33) < 0.5, JSON.stringify(r));
+});
+
+test('snapBubbles: panel icindeki balon panele degil BALONA oturur', () => {
+  const W = 420, H = 320;
+  const d = grayPage(W, H, 60);
+  panel(d, W, H, 20, 20, 400, 300, 245, 15);                // panel (kapali beyaz alan)
+  ellipse(d, W, H, 210, 160, 80, 55, 255, 20);              // balon
+  inkText(d, W, 190, 156, 9);
+  const model = { text: 'A', translation: 'B', x: 255, y: 120, width: 110, height: 80 };   // sag-ust kaymis
+  const out = core.snapBubbles({ data: d, width: W, height: H, bubbles: [model], opts: baseOpts() });
+  const b = out.bubbles[0];
+  assert.equal(b.snap, 'bubble', JSON.stringify(b));
+  assert.ok(b.width < 200, 'panel kutusu secilmemeli: ' + JSON.stringify(b));
+  assert.ok(Math.abs((b.x + b.width / 2) - 210) <= 6 && Math.abs((b.y + b.height / 2) - 160) <= 6, JSON.stringify(b));
+});
+
+test('snapBubbles: model kutusu metne siki otursa da balon bulunur', () => {
+  const W = 420, H = 320;
+  const d = grayPage(W, H, 60);
+  panel(d, W, H, 20, 20, 400, 300, 245, 15);
+  ellipse(d, W, H, 210, 160, 80, 55, 255, 20);
+  inkText(d, W, 178, 152, 16, 10);
+  const model = { text: 'A', translation: 'B', x: 158, y: 138, width: 104, height: 44 };   // sadece yazi
+  const out = core.snapBubbles({ data: d, width: W, height: H, bubbles: [model], opts: baseOpts() });
+  const b = out.bubbles[0];
+  assert.equal(b.snap, 'bubble', JSON.stringify(b));
+  assert.ok(b.width > 120 && b.height > 80, 'kutu balonu kaplamali: ' + JSON.stringify(b));
+});
+
+test('snapBubbles: cok balonlu sayfada hicbir balon atlanmaz', () => {
+  const W = 600, H = 900;
+  const d = grayPage(W, H, 70);
+  const truths = [];
+  for (let i = 0; i < 12; i++) {
+    const cx = 100 + (i % 3) * 200, cy = 90 + Math.floor(i / 3) * 220;
+    ellipse(d, W, H, cx, cy, 60, 42, 255, 20);
+    inkText(d, W, cx - 20, cy - 4, 8);
+    truths.push({ cx: cx, cy: cy });
+  }
+  const models = truths.map(function (t, i) {
+    return { text: 'T' + i, translation: 'C' + i, x: t.cx - 24, y: t.cy - 16, width: 60 * 1.1, height: 42 * 1.1 };
+  });
+  const out = core.snapBubbles({ data: d, width: W, height: H, bubbles: models, opts: baseOpts() });
+  assert.equal(out.bubbles.length, 12);
+  out.bubbles.forEach(function (b, i) {
+    const dx = Math.abs((b.x + b.width / 2) - truths[i].cx);
+    const dy = Math.abs((b.y + b.height / 2) - truths[i].cy);
+    assert.ok(dx <= 6 && dy <= 6, 'balon ' + i + ' oturmadi: ' + JSON.stringify(b));
+  });
+});
+
+test('snapBubbles: SFX (balonsuz yazi) yazi kutusuna oturur', () => {
+  const W = 420, H = 320;
+  const d = grayPage(W, H, 60);
+  panel(d, W, H, 20, 20, 400, 300, 245, 15);
+  fillRect(d, W, H, 200, 150, 260, 180, 15);                // kalin harf blogu (balon yok)
+  const model = { text: 'BOOM', translation: 'GUM', x: 198, y: 148, width: 64, height: 34 };
+  const out = core.snapBubbles({ data: d, width: W, height: H, bubbles: [model], opts: baseOpts() });
+  const b = out.bubbles[0];
+  assert.equal(b.snap, 'text', JSON.stringify(b));
+  assert.ok(Math.abs(b.x - 200) <= 8 && Math.abs(b.y - 150) <= 8, JSON.stringify(b));
+});
+
+test('snapBubbles: acik renkli (krem) balon da bulunur', () => {
+  const W = 320, H = 240;
+  const d = grayPage(W, H, 90);
+  ellipse(d, W, H, 160, 120, 60, 40, 255, 20);
+  for (let y = 80; y <= 160; y++) {                           // balon govdesi: krem tonu
+    for (let x = 100; x <= 220; x++) {
+      const v = ((x - 160) ** 2) / (60 * 60) + ((y - 120) ** 2) / (40 * 40);
+      if (v > 0.7 || v > 1) continue;
+      const i = (y * W + x) * 4;
+      d[i] = 255; d[i + 1] = 250; d[i + 2] = 195;             // spread 60 -> varsayilan 80 ile gecer
+    }
+  }
+  inkText(d, W, 140, 118, 8);
+  const model = { text: 'A', translation: 'B', x: 172, y: 129, width: 84, height: 56 };
+  const out = core.snapBubbles({ data: d, width: W, height: H, bubbles: [model], opts: Object.assign({}, baseOpts(), { brightSpread: 80 }) });
+  const b = out.bubbles[0];
+  assert.ok(b.snap === 'bubble' || b.snap === 'text', JSON.stringify(b));
+  assert.ok(Math.abs((b.x + b.width / 2) - 160) <= 6, JSON.stringify(b));
 });
 
 test('resolveOverlaps: ic ice kutuda ortusme kalkar veya taban boyutta kalir', () => {

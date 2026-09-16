@@ -232,12 +232,16 @@
     const bl = Number(i.borderLeft) || 0;
     const br = Number(i.borderRight) || 0;
     const bb = Number(i.borderBottom) || 0;
-    const innerW = Math.max(1, boxW - bl - br);
-    const innerH = Math.max(1, boxH - bt - bb);
+    const pt = Number(i.paddingTop) || 0;
+    const pl = Number(i.paddingLeft) || 0;
+    const pr = Number(i.paddingRight) || 0;
+    const pb = Number(i.paddingBottom) || 0;
+    const innerW = Math.max(1, boxW - bl - br - pl - pr);
+    const innerH = Math.max(1, boxH - bt - bb - pt - pb);
     const nw = Number(i.naturalW) || 0;
     const nh = Number(i.naturalH) || 0;
     if (!nw || !nh) {
-      return { x: bl, y: bt, w: innerW, h: innerH, visible: { x: bl, y: bt, w: innerW, h: innerH }, clipped: false };
+      return { x: bl + pl, y: bt + pt, w: innerW, h: innerH, visible: { x: bl + pl, y: bt + pt, w: innerW, h: innerH }, clipped: false };
     }
     const fit = String(i.objectFit || 'fill').toLowerCase();
     let drawW = innerW, drawH = innerH;
@@ -253,34 +257,39 @@
       drawH = nh * scale;
     }
     const pos = parseObjectPosition(i.objectPosition);
-    const x = bl + pos.x.f * (innerW - drawW) + pos.x.px;
-    const y = bt + pos.y.f * (innerH - drawH) + pos.y.px;
-    const ix0 = Math.max(bl, x), iy0 = Math.max(bt, y);
-    const ix1 = Math.min(bl + innerW, x + drawW), iy1 = Math.min(bt + innerH, y + drawH);
+    const x = bl + pl + pos.x.f * (innerW - drawW) + pos.x.px;
+    const y = bt + pt + pos.y.f * (innerH - drawH) + pos.y.px;
+    const ix0 = Math.max(bl + pl, x), iy0 = Math.max(bt + pt, y);
+    const ix1 = Math.min(bl + pl + innerW, x + drawW), iy1 = Math.min(bt + pt + innerH, y + drawH);
     return {
       x: x, y: y, w: drawW, h: drawH,
       visible: { x: ix0, y: iy0, w: Math.max(0, ix1 - ix0), h: Math.max(0, iy1 - iy0) },
-      clipped: x < bl - 0.5 || y < bt - 0.5 || x + drawW > bl + innerW + 0.5 || y + drawH > bt + innerH + 0.5,
+      clipped: x < bl + pl - 0.5 || y < bt + pt - 0.5 || x + drawW > bl + pl + innerW + 0.5 || y + drawH > bt + pt + innerH + 0.5,
     };
   }
 
   // ── Piksel analiziyle balona oturtma (saf; DOM/canvas yok) ────────────────
   const SNAP_DEFAULTS = {
     brightLuma: 205,      // beyaz esigi
-    brightSpread: 45,     // beyaz sayilmasi icin kanal farki
+    brightSpread: 80,     // beyaz sayilmasi icin kanal farki (renkli/acik balonlar da gecsin)
     inkLuma: 120,         // yazi/siyah esigi
     minAreaRatio: 0.25,   // dolgu alani / model kutusu alani alt siniri
-    maxAreaRatio: 3.5,    // ust sinir
+    maxAreaRatio: 10,     // aday bolge alani / model kutusu alani ust siniri
+    minOutline: 0.5,      // bolgenin cerceveyle kapali olma orani (panel/zemin ayrimi)
+    maxCost: 1.1,         // kabul edilen adayin en yuksek maliyeti
+    goodCost: 0.35,       // bu maliyetin altinda aday bulunca erken cik
+    seedsPerBubble: 8,    // balon basina en fazla tohum denemesi
+    maxRegionInkRatio: 8, // bolge alani / icindeki yazi bbox alani: buyukse panel/zemin
     runawayRatio: 0.35,   // pencere alanina gore bunu asarsa "arka plan"
     margin: 3,            // bulunan bolgeye eklenecek kenar payi (px)
     minSide: 8,
     textPad: 0.35,        // yazi bbox'ina eklenecek oransal pay
     mergeIou: 0.5,
-    maxFills: 40,         // sayfa basina en fazla dolgu denemesi (maliyet siniri)
+    maxFills: 200,        // sayfa basina en fazla dolgu denemesi (maliyet siniri)
     budgetPx: 1500000,    // toplam islenen piksel butcesi
   };
 
-  function floodFillBright(seed, isBright, wx0, wy0, wx1, wy1, runawayArea, seen) {
+  function floodFillBright(seed, isBright, wx0, wy0, wx1, wy1, runawayArea, seen, rowMin, rowMax) {
     const w = wx1 - wx0 + 1;
     const start = ((seed.y - wy0) * w) + (seed.x - wx0);
     if (seen[start]) return null;                            // bu bolge zaten tarandi
@@ -297,6 +306,8 @@
       if (x > x1) x1 = x;
       if (y < y0) y0 = y;
       if (y > y1) y1 = y;
+      if (rowMin && lx < rowMin[ly]) rowMin[ly] = lx;         // kenar (cerceve) testi icin satir sinirlari
+      if (rowMax && lx > rowMax[ly]) rowMax[ly] = lx;
       if (runawayArea && area > runawayArea) { aborted = true; break; }
       const nb = [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]];
       for (let i = 0; i < 4; i++) {
@@ -330,6 +341,21 @@
       const i = (y * W + x) * 4;
       return (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) <= opts.inkLuma;
     };
+    // Bir dikdortgendeki murekkep (yazi) piksellerinin sayimi + bbox'i
+    const inkIn = function (ix0, iy0, ix1, iy1) {
+      let count = 0, bx0 = W, by0 = H, bx1 = -1, by1 = -1;
+      for (let y = iy0; y <= iy1; y++) {
+        for (let x = ix0; x <= ix1; x++) {
+          if (!isInk(x, y)) continue;
+          count++;
+          if (x < bx0) bx0 = x;
+          if (x > bx1) bx1 = x;
+          if (y < by0) by0 = y;
+          if (y > by1) by1 = y;
+        }
+      }
+      return { count: count, bx0: bx0, by0: by0, bx1: bx1, by1: by1 };
+    };
 
     const out = src.map(function (b) {
       const bx = Math.round(Number(b.x) || 0), by = Math.round(Number(b.y) || 0);
@@ -338,78 +364,113 @@
       const x1 = Math.min(W - 1, bx + bw - 1), y1 = Math.min(H - 1, by + bh - 1);
       if (x1 <= x0 || y1 <= y0) { stats.kept++; return Object.assign({}, b, { snap: 'model' }); }
 
-      const pad = Math.max(24, Math.min(160, Math.round(0.9 * Math.max(bw, bh))));
+      // Pencere, model kutusunun ~1.3 kati kadar genis olsun: balon kutunun biraz disinda kalabilir
+      const pad = Math.max(28, Math.min(300, Math.round(1.3 * Math.max(bw, bh))));
       const wx0 = Math.max(0, x0 - pad), wy0 = Math.max(0, y0 - pad);
       const wx1 = Math.min(W - 1, x1 + pad), wy1 = Math.min(H - 1, y1 + pad);
       const winArea = (wx1 - wx0 + 1) * (wy1 - wy0 + 1);
       if (stats.pixels + winArea > opts.budgetPx) { stats.kept++; return Object.assign({}, b, { snap: 'model' }); }
 
-      // 1) tohum adaylari: merkez -> capraz -> kenar ortasi -> ceyrek halka.
-      //    Beyaz sayfa zemininde merkez zemine dusebilir; sirayla denenir, ilk KABUL edilen kazanir.
+      // 1) Dolgu adaylari: merkez -> ceyrek -> kenar ortasi -> genis capraz.
+      //    Her aday olculur; yeterince iyi aday bulununca erken cikilir (maliyet siniri).
       const ccx = Math.round((x0 + x1) / 2);
       const ccy = Math.round((y0 + y1) / 2);
       const hx = Math.max(2, Math.round(bw / 2)), hy = Math.max(2, Math.round(bh / 2));
-      const dx = Math.max(2, Math.round(bw * 0.85)), dy = Math.max(2, Math.round(bh * 0.85));
+      const dxs = Math.max(2, Math.round(bw * 0.85)), dys = Math.max(2, Math.round(bh * 0.85));
       const qx = Math.max(2, Math.round(bw * 0.25)), qy = Math.max(2, Math.round(bh * 0.25));
       const seedList = [
         [ccx, ccy],
-        [ccx - dx, ccy - dy], [ccx + dx, ccy - dy], [ccx - dx, ccy + dy], [ccx + dx, ccy + dy],
-        [ccx - hx, ccy], [ccx + hx, ccy], [ccx, ccy - hy], [ccx, ccy + hy],
         [ccx - qx, ccy - qy], [ccx + qx, ccy - qy], [ccx - qx, ccy + qy], [ccx + qx, ccy + qy],
+        [ccx - hx, ccy], [ccx + hx, ccy], [ccx, ccy - hy], [ccx, ccy + hy],
+        [ccx - dxs, ccy - dys], [ccx + dxs, ccy - dys], [ccx - dxs, ccy + dys], [ccx + dxs, ccy + dys],
       ];
-      const seen = new Uint8Array((wx1 - wx0 + 1) * (wy1 - wy0 + 1));
-      let snapped = null;
+      const wW = wx1 - wx0 + 1, wH = wy1 - wy0 + 1;
+      const seen = new Uint8Array(wW * wH);
+      const rowMin = new Int32Array(wH), rowMax = new Int32Array(wH);
+      const boxArea = Math.max(1, bw * bh);
+      const boxDiag = Math.max(1, Math.sqrt(bw * bw + bh * bh));
+      // Model kutusu cevresindeki yazi (murekkep) olcumu: yazi yedegi icin bir kez
+      const inx0 = Math.max(0, x0 - Math.round(bw * 0.2)), iny0 = Math.max(0, y0 - Math.round(bh * 0.2));
+      const inx1 = Math.min(W - 1, x1 + Math.round(bw * 0.2)), iny1 = Math.min(H - 1, y1 + Math.round(bh * 0.2));
+      const inkNear = inkIn(inx0, iny0, inx1, iny1);
+      const cands = [];
       let tried = 0;
-      for (let si = 0; si < seedList.length && !snapped; si++) {
-        if (stats.fills >= opts.maxFills) break;
+      const maxAttempts = Math.min(seedList.length, opts.seedsPerBubble);
+      for (let si = 0; si < seedList.length; si++) {
+        if (tried >= maxAttempts) break;
+        if (stats.fills >= opts.maxFills) break;         // sayfa geneli guvenlik siniri
         const sx = seedList[si][0], sy = seedList[si][1];
         if (sx < wx0 || sx > wx1 || sy < wy0 || sy > wy1) continue;
         if (!isBright(sx, sy)) continue;
         stats.fills++;
         tried++;
-        const filled = floodFillBright({ x: sx, y: sy }, isBright, wx0, wy0, wx1, wy1, winArea * opts.runawayRatio, seen);
+        for (let k = 0; k < wH; k++) { rowMin[k] = wW; rowMax[k] = -1; }
+        const filled = floodFillBright({ x: sx, y: sy }, isBright, wx0, wy0, wx1, wy1, winArea * opts.runawayRatio, seen, rowMin, rowMax);
         if (!filled) continue;
         stats.pixels += filled.area;
+        if (filled.aborted) continue;
+        if (filled.area > boxArea * opts.maxAreaRatio) continue;
         const bot = filled.bbox;
-        const bw2 = bot.x1 - bot.x0 + 1, bh2 = bot.y1 - bot.y0 + 1;
-        const areaRatio = filled.area / (bw * bh);
+        const rw = bot.x1 - bot.x0 + 1, rh = bot.y1 - bot.y0 + 1;
+        if (rw < opts.minSide || rh < opts.minSide) continue;
+        if (filled.area < boxArea * opts.minAreaRatio * 0.5) continue;
         const edgeCount = (bot.x0 <= wx0 + 1 ? 1 : 0) + (bot.x1 >= wx1 - 1 ? 1 : 0) + (bot.y0 <= wy0 + 1 ? 1 : 0) + (bot.y1 >= wy1 - 1 ? 1 : 0);
-        const ok = !filled.aborted && areaRatio >= opts.minAreaRatio && areaRatio <= opts.maxAreaRatio && bw2 >= opts.minSide && bh2 >= opts.minSide && edgeCount < 3;
-        if (ok) {
-          snapped = { x: bot.x0 - opts.margin, y: bot.y0 - opts.margin, width: bw2 + 2 * opts.margin, height: bh2 + 2 * opts.margin, snap: 'bubble' };
+        if (edgeCount >= 3) continue;
+        // cerceve testi: bolgenin sol/sag komsulari cogunlukla murekkep olmali (balon hatti)
+        let dark = 0, total = 0;
+        for (let k = 0; k < wH; k++) {
+          if (rowMax[k] < 0) continue;
+          const yy = wy0 + k;
+          total += 2;
+          if (rowMin[k] > 0 && isInk(wx0 + rowMin[k] - 1, yy)) dark++;
+          if (rowMax[k] < wW - 1 && isInk(wx0 + rowMax[k] + 1, yy)) dark++;
         }
+        const coverage = total ? dark / total : 0;
+        if (coverage < opts.minOutline) continue;
+        // boyut cezasi: dolgu alani degil KUTU alani model kutusuna ne kadar yakin
+        const bboxRatio = (rw * rh) / boxArea;
+        const areaPenalty = bboxRatio > 1 ? Math.log(bboxRatio) * 0.55 : -Math.log(bboxRatio) * 0.10;
+        const dist = Math.sqrt(Math.pow(bot.x0 + rw / 2 - ccx, 2) + Math.pow(bot.y0 + rh / 2 - ccy, 2));
+        const cost = (dist / boxDiag) * 0.9 + areaPenalty + (1 - coverage) * 0.6;
+        cands.push({ x: bot.x0, y: bot.y0, width: rw, height: rh, area: filled.area, coverage: coverage, cost: cost });
+        if (cost <= opts.goodCost) break;                // yeterince iyi aday: erken cik
       }
-      if (!snapped && tried) stats.rejected++;
+      cands.sort(function (a, b) { return a.cost - b.cost; });
+      if (!cands.length && tried) stats.rejected++;
+      if (opts.debug) stats.cands = (stats.cands || []).concat([{ id: b.id || null, list: cands.slice(0, 6).map(function (c) { return { x: c.x, y: c.y, w: c.width, h: c.height, cost: Math.round(c.cost * 100) / 100, cov: Math.round(c.coverage * 100) / 100 }; }) }]);
 
-      // 2) yazi (ink) kutusu yedegi — balonsuz yazi / SFX
-      if (!snapped) {
-        const ix0 = Math.max(0, x0 - Math.round(bw * 0.2)), iy0 = Math.max(0, y0 - Math.round(bh * 0.2));
-        const ix1 = Math.min(W - 1, x1 + Math.round(bw * 0.2)), iy1 = Math.min(H - 1, y1 + Math.round(bh * 0.2));
-        const searched = (ix1 - ix0 + 1) * (iy1 - iy0 + 1);
-        let inkCount = 0, tx0 = W, ty0 = H, tx1 = -1, ty1 = -1;
-        for (let y = iy0; y <= iy1; y++) {
-          for (let x = ix0; x <= ix1; x++) {
-            if (!isInk(x, y)) continue;
-            inkCount++;
-            if (x < tx0) tx0 = x;
-            if (x > tx1) tx1 = x;
-            if (y < ty0) ty0 = y;
-            if (y > ty1) ty1 = y;
-          }
+      // 2) En iyi aday: en yakin + boyutu model kutusuna en yakin olan.
+      //    Bolge, icindeki yaziya gore cok buyukse (panel/zemin) balon sayilmaz.
+      let snapped = null;
+      for (let ci = 0; ci < cands.length; ci++) {
+        const c = cands[ci];
+        if (c.cost > opts.maxCost) break;
+        const ink = inkIn(c.x, c.y, c.x + c.width - 1, c.y + c.height - 1);
+        if (ink.count) {
+          const inkBoxArea = Math.max(1, (ink.bx1 - ink.bx0 + 1) * (ink.by1 - ink.by0 + 1));
+          if ((c.width * c.height) / inkBoxArea > opts.maxRegionInkRatio) continue;
         }
-        // koyu zemin "tamamen murekkep" sayilmasin: alanin en fazla %60'i yazi olabilir
-        if (inkCount >= 12 && inkCount <= searched * 0.6 && tx1 > tx0 && ty1 > ty0) {
-          const padX = Math.max(4, Math.round((tx1 - tx0 + 1) * opts.textPad));
-          const padY = Math.max(4, Math.round((ty1 - ty0 + 1) * opts.textPad));
-          const cand = {
-            x: tx0 - padX, y: ty0 - padY,
-            width: (tx1 - tx0 + 1) + 2 * padX, height: (ty1 - ty0 + 1) + 2 * padY,
-          };
-          // Yazi yedegi model kutusunu BUYUTMEZ (en fazla %15) ve alani 3 katini gecmez;
-          // aksi halde bulunan sey sanat/zemin olur, model kutusu korunur.
-          if (cand.width <= bw * 1.15 && cand.height <= bh * 1.15 && (cand.width * cand.height) <= (bw * bh * 3)) {
-            snapped = Object.assign({}, cand, { snap: 'text' });
-          }
+        snapped = {
+          x: c.x - opts.margin, y: c.y - opts.margin,
+          width: c.width + 2 * opts.margin, height: c.height + 2 * opts.margin, snap: 'bubble',
+        };
+        break;
+      }
+
+      // 3) Yazi (ink) yedegi — balonsuz yazi / SFX
+      if (!snapped && inkNear.count >= 12 && inkNear.count <= ((inx1 - inx0 + 1) * (iny1 - iny0 + 1)) * 0.6 && inkNear.bx1 > inkNear.bx0 && inkNear.by1 > inkNear.by0) {
+        const inkW = inkNear.bx1 - inkNear.bx0 + 1, inkH = inkNear.by1 - inkNear.by0 + 1;
+        // pay: oransal, ama model kutusunun %15 buyume sinirini asmamali
+        const padX = Math.max(2, Math.min(Math.round(inkW * opts.textPad), Math.floor((bw * 1.15 - inkW) / 2)));
+        const padY = Math.max(2, Math.min(Math.round(inkH * opts.textPad), Math.floor((bh * 1.15 - inkH) / 2)));
+        const cand = {
+          x: inkNear.bx0 - padX, y: inkNear.by0 - padY,
+          width: inkW + 2 * padX, height: inkH + 2 * padY,
+        };
+        // Yazi yedegi model kutusunu BUYUTMEZ (en fazla %15) ve alani 3 katini gecmez;
+        // aksi halde bulunan sey sanat/zemin olur, model kutusu korunur.
+        if (cand.width <= bw * 1.15 && cand.height <= bh * 1.15 && (cand.width * cand.height) <= (bw * bh * 3)) {
+          snapped = Object.assign({}, cand, { snap: 'text' });
         }
       }
 

@@ -363,10 +363,13 @@ function pmLayoutPage(page) {
     if (box.title !== (b.text || '')) box.title = b.text || '';
     if (box.dataset.snap !== (b.snap || 'model')) box.dataset.snap = b.snap || 'model';
 
-    const x = Math.round(content.x + b.xPct * content.w);
-    const y = Math.round(content.y + b.yPct * content.h);
-    const w = Math.max(20, Math.round(b.wPct * content.w));
-    const h = Math.max(14, Math.round(b.hPct * content.h));
+    // Katman zaten resmin ICERIK dikdortgeninde konumlu; kutular katmana GORE yuzde ile yerlestirilir
+    const kk = pmLayerScale(layer);
+    const cw = content.w / kk, ch = content.h / kk;
+    const x = Math.round(b.xPct * cw);
+    const y = Math.round(b.yPct * ch);
+    const w = Math.max(20, Math.round(b.wPct * cw));
+    const h = Math.max(14, Math.round(b.hPct * ch));
 
     box.style.setProperty('left', x + 'px', 'important');
     box.style.setProperty('top', y + 'px', 'important');
@@ -375,7 +378,9 @@ function pmLayoutPage(page) {
 
     // object-fit: cover/none -> resmin bir kismi kirpilir; gorunmeyen kutuyu gizle
     const v = content.visible;
-    const outside = v && (x + w <= v.x || x >= v.x + v.w || y + h <= v.y || y >= v.y + v.h);
+    const vx = (v.x - content.x) / kk, vy = (v.y - content.y) / kk;
+    const vw = v.w / kk, vh = v.h / kk;
+    const outside = v && (x + w <= vx || x >= vx + vw || y + h <= vy || y >= vy + vh);
     if (outside) box.style.setProperty('display', 'none', 'important');
     else box.style.removeProperty('display');
   }
@@ -393,6 +398,17 @@ function pmScheduleFit(layer) {
   setTimeout(run, 300);
 }
 
+// Katman px'leri ebeveynin YEREL uzayindadir; ebeveyn transform/zoom'lu ise gorsel px'i bole
+function pmLayerScale(layer) {
+  const parent = layer && layer.parentElement;
+  if (!parent) return 1;
+  const r = parent.getBoundingClientRect();
+  const w = parent.offsetWidth || 0;
+  if (!w || !r.width) return 1;
+  const k = r.width / w;
+  return (isFinite(k) && k > 0.01) ? k : 1;
+}
+
 // Katmani resmin ICERIK dikdortgenine hizala (eleman kutusu degil)
 function pmPositionLayer(page, layer) {
   const parent = layer.parentElement;
@@ -401,10 +417,17 @@ function pmPositionLayer(page, layer) {
   if (!content) return;
   const imgRect = page.el.getBoundingClientRect();
   const parentRect = parent.getBoundingClientRect();
-  layer.style.left = (imgRect.left - parentRect.left + parent.scrollLeft + content.x) + 'px';
-  layer.style.top = (imgRect.top - parentRect.top + parent.scrollTop + content.y) + 'px';
-  layer.style.width = content.w + 'px';
-  layer.style.height = content.h + 'px';
+  const k = pmLayerScale(layer);
+  let borderLeft = 0, borderTop = 0;
+  try {
+    const cs = window.getComputedStyle(parent);
+    borderLeft = parseFloat(cs.borderLeftWidth) || 0;
+    borderTop = parseFloat(cs.borderTopWidth) || 0;
+  } catch (e) { borderLeft = 0; borderTop = 0; }
+  layer.style.left = ((imgRect.left - parentRect.left - borderLeft) / k + content.x / k) + 'px';
+  layer.style.top = ((imgRect.top - parentRect.top - borderTop) / k + content.y / k) + 'px';
+  layer.style.width = (content.w / k) + 'px';
+  layer.style.height = (content.h / k) + 'px';
 }
 
 // Sayfanin resim icerik dikdortgeni (object-fit farkindalikli)
@@ -427,6 +450,10 @@ function pmContentRectFor(page) {
     borderLeft: cs ? num(cs.borderLeftWidth) : 0,
     borderRight: cs ? num(cs.borderRightWidth) : 0,
     borderBottom: cs ? num(cs.borderBottomWidth) : 0,
+    paddingTop: cs ? num(cs.paddingTop) : 0,
+    paddingLeft: cs ? num(cs.paddingLeft) : 0,
+    paddingRight: cs ? num(cs.paddingRight) : 0,
+    paddingBottom: cs ? num(cs.paddingBottom) : 0,
   });
 }
 
