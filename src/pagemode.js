@@ -20,8 +20,8 @@ const PM_MAX_PAYLOAD = 4 * 1024 * 1024;
 const PM_MIN_AREA_RATIO = 0.25;         // 'gorunen sayfa' esigi
 const PM_TALL_STRIP_RATIO = 2.0;        // h/w bu orandan buyukse bantlara bol
 const PM_MAX_BANDS = 6;                 // sayfa basina en fazla bant (kota korumasi)
-const PM_ANALYSIS_MAX = 1600;           // analiz gorseli: en uzun kenar siniri
-const PM_ANALYSIS_MIN = 480;            // analiz gorseli: en kisa kenar alt siniri (ince seritler)
+const PM_SNAP_WINDOW = 1200;            // oturtma kumesi: tek tuvalde islenecek en buyuk alan (px)
+const PM_SNAP_PAD = 220;                // kume cevresine eklenecek pay (px)
 
 const pageMode = {
   active: false,
@@ -87,7 +87,7 @@ function pmPageRecord(el, pageId) {
     layer: null,
     imageWidth: 0,
     imageHeight: 0,
-    analysis: null,          // { canvas } — balona oturtma icin kucultulmus gorsel
+    image: null,             // { canvas, width, height } — oturtma kaynagi (finalize'da birakilir)
     snapStats: null,
   };
 }
@@ -142,14 +142,6 @@ function pmResizeCanvas(canvas, maxSide) {
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(canvas, 0, 0, s.width, s.height);
   return out;
-}
-
-// Analiz gorselinin uzun kenari: ince seritlerde kisa kenar 480'in altina dusmesin
-function pmAnalysisSide(w, h) {
-  const longSide = Math.max(w, h), shortSide = Math.min(w, h);
-  let scale = longSide > PM_ANALYSIS_MAX ? PM_ANALYSIS_MAX / longSide : 1;
-  if (shortSide * scale < PM_ANALYSIS_MIN) scale = Math.min(2, PM_ANALYSIS_MIN / shortSide);
-  return Math.max(1, Math.round(longSide * scale));
 }
 
 function pmCanvasToJpegDataUrl(canvas) {
@@ -233,7 +225,7 @@ function pmBuildJobs(page, img) {
   page.cacheKey = PM.pageCacheKey({ src: src, w: img.width, h: img.height });
   page.imageWidth = img.width;
   page.imageHeight = img.height;
-  page.analysis = { canvas: pmResizeCanvas(img.canvas, pmAnalysisSide(img.width, img.height)) };
+  page.image = img;                       // oturtma icin kaynak tuval (tam cozunurluk, kopya yok)
 
   return slices.map(function (slice) {
     const scaled = PM.scaleForMaxSide(slice.width, slice.height, PM_MAX_SIDE);
@@ -557,7 +549,23 @@ function pmHandleResult(msg) {
       height: Number(b.height) * fy,
     };
     const g = PM.bandToGlobal(natural, slice, imageW, imageH);
-    return { text: g.text, translation: g.translation, xPct: g.xPct, yPct: g.yPct, wPct: g.wPct, hPct: g.hPct };
+    const out = { text: g.text, translation: g.translation, xPct: g.xPct, yPct: g.yPct, wPct: g.wPct, hPct: g.hPct };
+    // Model 0-1000 (binde-birim) koordinat dondurmus olabilir: alternatif yorumu da sakla.
+    // Karar, kutularin icindeki yazi miktarina bakilarak sayfa duzeyinde verilir.
+    const vals = [Number(b.x), Number(b.y), Number(b.width), Number(b.height)];
+    const maxV = Math.max.apply(null, vals);
+    const allFinite = vals.every(function (v) { return Number.isFinite(v) && v >= 0; });
+    if (allFinite && maxV <= 1000 && maxV >= 250 && (slice.width > 1000 || slice.height > 1000)) {
+      const nat2 = {
+        x: Number(b.x) / 1000 * slice.width,
+        y: Number(b.y) / 1000 * slice.height,
+        width: Number(b.width) / 1000 * slice.width,
+        height: Number(b.height) / 1000 * slice.height,
+      };
+      const g2 = PM.bandToGlobal(nat2, slice, imageW, imageH);
+      out.alt = { xPct: g2.xPct, yPct: g2.yPct, wPct: g2.wPct, hPct: g2.hPct };
+    }
+    return out;
   });
   page.bubbles = page.bubbles.concat(globalBubbles);
   page.received++;
@@ -591,42 +599,156 @@ function pmDropJob(key, reason) {
   pmPump();
 }
 
-// Yuzdedeki kutulari gercek balon bolgesine oturt (analiz gorseli uzerinde piksel analizi)
+// Yuzdedeki kutulari gercek balon bolgesine oturt.
+// Dev sayfalarda (webtoon 900x16000 gibi) tek tuval belleği patlatıyordu; bu yuzden
+// balonlar konum komsuluguna gore KUMELENIR ve her kume icin kucuk bir tuval cizilir.
 function pmSnapPageBubbles(page, bubbles) {
-  const analysis = page && page.analysis;
-  if (!analysis || !analysis.canvas || !bubbles.length) return bubbles;
-  try {
-    const cw = analysis.canvas.width;
-    const ch = analysis.canvas.height;
-    const img = analysis.canvas.getContext('2d').getImageData(0, 0, cw, ch);
-    const pixelSpace = bubbles.map(function (b) {
-      return {
-        text: b.text, translation: b.translation,
-        x: b.xPct * cw, y: b.yPct * ch,
-        width: Math.max(1, b.wPct * cw), height: Math.max(1, b.hPct * ch),
-      };
+  const src = page && page.image;
+  const W = src && src.width, H = src && src.height;
+  if (!src || !src.canvas || !W || !H || !bubbles.length) return bubbles;
+
+  // 1) kumeleme: y sirali, pencereye sigani ayni kumeye at.
+  //    Koordinat yorumu secildikten SONRA cagrilir (bubbles dizisi guncellenmis olabilir).
+  function buildGroups() {
+    const items = bubbles.map(function (b, i) {
+      return { idx: i, x: b.xPct * W, y: b.yPct * H, w: Math.max(1, b.wPct * W), h: Math.max(1, b.hPct * H) };
     });
-    const snapped = PM.snapBubbles({
-      data: img.data, width: cw, height: ch, bubbles: pixelSpace,
-      opts: { margin: Math.max(1, Math.round(3 * (cw / Math.max(1, page.imageWidth || cw)))) },
+    items.sort(function (a, b) { return a.y - b.y; });
+    const gs = [];
+    items.forEach(function (it) {
+      let g = gs[gs.length - 1];
+      const fits = g && ((it.y + it.h) - g.y0) <= PM_SNAP_WINDOW &&
+                       Math.abs((it.x + it.w / 2) - g.cx) <= PM_SNAP_WINDOW;
+      if (!fits) {
+        g = { items: [], x0: it.x, y0: it.y, x1: it.x + it.w, y1: it.y + it.h, cx: it.x + it.w / 2 };
+        gs.push(g);
+      }
+      g.items.push(it);
+      g.x0 = Math.min(g.x0, it.x);
+      g.y0 = Math.min(g.y0, it.y);
+      g.x1 = Math.max(g.x1, it.x + it.w);
+      g.y1 = Math.max(g.y1, it.y + it.h);
+      g.cx = (g.x0 + g.x1) / 2;
     });
-    const resolved = PM.resolveOverlaps(snapped.bubbles, { maxRatio: 0.25, minWidth: 24, minHeight: 14 });
-    page.snapStats = snapped.stats;
-    console.log('[MangaLens-pm] snap:', JSON.stringify(snapped.stats));
-    return resolved.map(function (b) {
-      return {
-        text: b.text, translation: b.translation,
-        xPct: b.x / cw, yPct: b.y / ch,
-        wPct: b.width / cw, hPct: b.height / ch,
-        snap: b.snap || 'model',
-      };
-    });
-  } catch (e) {
-    console.warn('[MangaLens-pm] snap atlandi:', e.message);
-    return bubbles;
-  } finally {
-    page.analysis = null;                 // bellegi serbest birak
+    return gs;
   }
+
+  const out = bubbles.slice();
+  const stats = { groups: 0, snapped: 0, text: 0, kept: 0, merged: 0, pixels: 0, fills: 0 };
+
+  // ── Koordinat uzayi secimi ────────────────────────────────────────────────
+  // Model bazen piksel yerine 0-1000 (binde-birim) koordinat dondurur. Iki yorum
+  // kutularin icindeki YAZI miktariyla karsilastirilir; binde yorumu belirgin
+  // sekilde daha iyiyse kutular o yoruma cevrilir (eski onbellek girdileri de duzelir).
+  let mapping = 'primary';
+  const withAlt = bubbles.filter(function (b) { return b.alt; });
+  if (withAlt.length >= Math.max(2, Math.ceil(bubbles.length * 0.5))) {
+    // Her aday KENDI penceresinde puanlanir (iki adayin birlesik penceresi sanatla dolar, skoru bozar).
+    const scoreBox = function (bx, by, bw2, bh2) {
+      const pad = 0.18;
+      const x0 = Math.max(0, Math.floor(bx - bw2 * pad));
+      const y0 = Math.max(0, Math.floor(by - bh2 * pad));
+      const x1 = Math.min(W, Math.ceil(bx + bw2 + bw2 * pad));
+      const y1 = Math.min(H, Math.ceil(by + bh2 + bh2 * pad));
+      const gw2 = x1 - x0, gh2 = y1 - y0;
+      if (gw2 < 8 || gh2 < 8 || gw2 * gh2 > 1200000) return null;
+      let d2 = null;
+      try {
+        const c = document.createElement('canvas');
+        c.width = gw2; c.height = gh2;
+        const cx = c.getContext('2d', { willReadFrequently: true });
+        cx.drawImage(src.canvas, x0, y0, gw2, gh2, 0, 0, gw2, gh2);
+        d2 = cx.getImageData(0, 0, gw2, gh2).data;
+      } catch (e) { return null; }
+      return PM.textScoreIn(d2, gw2, gh2, [{ x: bx - x0, y: by - y0, width: bw2, height: bh2 }]);
+    };
+    let sPri = 0, sAlt = 0, used = 0;
+    withAlt.slice(0, 12).forEach(function (b) {
+      const a = scoreBox(b.xPct * W, b.yPct * H, Math.max(8, b.wPct * W), Math.max(8, b.hPct * H));
+      const c2 = scoreBox(b.alt.xPct * W, b.alt.yPct * H, Math.max(8, b.alt.wPct * W), Math.max(8, b.alt.hPct * H));
+      if (a == null || c2 == null) return;
+      sPri += a; sAlt += c2; used++;
+    });
+    if (used && sAlt > sPri * 1.25) mapping = 'alt';
+    console.log('[MangaLens-pm] koordinat yorumu: ' + mapping + ' (piksel=' + sPri.toFixed(3) + ' binde=' + sAlt.toFixed(3) + ', ' + used + ' ornek)');
+  }
+  if (mapping === 'alt') {
+    for (let i = 0; i < bubbles.length; i++) {
+      const b = bubbles[i];
+      if (!b.alt) continue;
+      // Dizi elemanini da guncelle: kumeleme ve oturtma bu diziden okur.
+      bubbles[i] = Object.assign({}, b, { xPct: b.alt.xPct, yPct: b.alt.yPct, wPct: b.alt.wPct, hPct: b.alt.hPct });
+      out[i] = bubbles[i];
+    }
+  }
+  stats.mapping = mapping;
+  const groups = buildGroups();            // secilen yoruma gore kumeler yeniden kurulur
+
+  groups.forEach(function (g) {
+    const gx0 = Math.max(0, Math.floor(g.x0 - PM_SNAP_PAD));
+    const gy0 = Math.max(0, Math.floor(g.y0 - PM_SNAP_PAD));
+    const gx1 = Math.min(W, Math.ceil(g.x1 + PM_SNAP_PAD));
+    const gy1 = Math.min(H, Math.ceil(g.y1 + PM_SNAP_PAD));
+    const gw = gx1 - gx0, gh = gy1 - gy0;
+    if (gw < 8 || gh < 8) return;
+    const scale = Math.min(1, PM_SNAP_WINDOW / Math.max(gw, gh));
+    const cw = Math.max(8, Math.round(gw * scale));
+    const ch = Math.max(8, Math.round(gh * scale));
+    let data = null;
+    try {
+      const cell = document.createElement('canvas');
+      cell.width = cw;
+      cell.height = ch;
+      const ctx = cell.getContext('2d', { willReadFrequently: true });
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(src.canvas, gx0, gy0, gw, gh, 0, 0, cw, ch);
+      data = ctx.getImageData(0, 0, cw, ch).data;
+    } catch (e) {
+      console.warn('[MangaLens-pm] snap tuvali kurulamadi:', e.message);
+      return;
+    }
+    const local = g.items.map(function (it) {
+      return {
+        id: it.idx, text: bubbles[it.idx].text, translation: bubbles[it.idx].translation,
+        x: (it.x - gx0) * scale, y: (it.y - gy0) * scale,
+        width: Math.max(1, it.w * scale), height: Math.max(1, it.h * scale),
+      };
+    });
+    let snapped = null;
+    try {
+      snapped = PM.snapBubbles({
+        data: data, width: cw, height: ch, bubbles: local,
+        opts: { margin: Math.max(1, Math.round(3 * scale)) },
+      });
+    } catch (e) {
+      console.warn('[MangaLens-pm] snap atlandi:', e.message);
+      return;
+    }
+    stats.groups++;
+    stats.snapped += snapped.stats.snapped || 0;
+    stats.text += snapped.stats.text || 0;
+    stats.kept += snapped.stats.kept || 0;
+    stats.merged += snapped.stats.merged || 0;
+    stats.pixels += snapped.stats.pixels || 0;
+    stats.fills += snapped.stats.fills || 0;
+    const resolved = PM.resolveOverlaps(snapped.bubbles, { maxRatio: 0.25, minWidth: 24, minHeight: 14 });
+    resolved.forEach(function (rb) {
+      const idx = (typeof rb.id === 'number') ? rb.id : -1;
+      if (idx < 0 || idx >= out.length) return;
+      out[idx] = Object.assign({}, out[idx], {
+        xPct: (gx0 + rb.x / scale) / W,
+        yPct: (gy0 + rb.y / scale) / H,
+        wPct: (rb.width / scale) / W,
+        hPct: (rb.height / scale) / H,
+        snap: rb.snap || 'model',
+      });
+    });
+  });
+  page.snapStats = stats;
+  console.log('[MangaLens-pm] snap:', JSON.stringify(stats));
+  page.image = null;                      // kaynak tuvali birak
+  return out;
 }
 
 function pmFinalizePage(page) {
@@ -642,10 +764,14 @@ function pmFinalizePage(page) {
 
 function pmDedupeGlobal(list) {
   const scaled = list.map(function (b) {
-    return { text: b.text, translation: b.translation, x: b.xPct * 10000, y: b.yPct * 10000, width: b.wPct * 10000, height: b.hPct * 10000 };
+    const s = { text: b.text, translation: b.translation, x: b.xPct * 10000, y: b.yPct * 10000, width: b.wPct * 10000, height: b.hPct * 10000 };
+    if (b.alt) s.alt = b.alt;                    // koordinat yorumu secimi icin tasinir
+    return s;
   });
   return PM.dedupeBubbles(scaled, { iouThreshold: 0.6 }).map(function (b) {
-    return { text: b.text, translation: b.translation, xPct: b.x / 10000, yPct: b.y / 10000, wPct: b.width / 10000, hPct: b.height / 10000 };
+    const out = { text: b.text, translation: b.translation, xPct: b.x / 10000, yPct: b.y / 10000, wPct: b.width / 10000, hPct: b.height / 10000 };
+    if (b.alt) out.alt = b.alt;
+    return out;
   });
 }
 

@@ -158,8 +158,11 @@ const PAGE_PROMPT = 'You are analyzing ONE image: a page (or a slice of a longer
   '  ]\n' +
   '}\n\n' +
   'COORDINATE RULES:\n' +
-  '- x,y,width,height are PIXEL coordinates of THIS image (integers, top-left origin).\n' +
-  '- Each box must be the BUBBLE REGION itself: the white balloon shape INCLUDING its outline.\n' +
+  '- x,y,width,height are NORMALIZED fractions of THIS image: 0.0 = left/top edge, 1.0 = right/bottom edge.\n' +
+  '  Use decimals with up to 3 digits (example: 0.235). Do NOT use pixel values and do NOT use 0-1000 values.\n' +
+  '- Example: a bubble whose left edge is 23% from the left and top edge 41% down, 30% wide, 8% tall:\n' +
+  '  { "text": "...", "translation": "...", "x": 0.23, "y": 0.41, "width": 0.30, "height": 0.08 }\n' +
+  '- Each box must be the BUBBLE REGION itself: the balloon shape INCLUDING its outline.\n' +
   '  Never box only the text glyphs, and never box the surrounding artwork.\n' +
   '- Boxes must be tight: their edges sit on the bubble border.\n' +
   '- Order top-to-bottom, then left-to-right.\n\n' +

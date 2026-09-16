@@ -315,3 +315,59 @@ test('resolveOverlaps: ic ice kutuda ortusme kalkar veya taban boyutta kalir', (
   const iy = Math.max(0, Math.min(big.y + big.height, s.y + s.height) - Math.max(big.y, s.y));
   assert.ok(ix * iy === 0 || s.width === 24 || s.height === 14, 'kesisim yok veya taban boyutta: ' + JSON.stringify(s));
 });
+
+// ── Renkli sanat / polarite / haritalama testleri (gercek manhwa kosullari) ──
+
+test('inkBlocksIn: koyu balon icindeki ACIK yazi bulunur (polarite)', () => {
+  const W = 240, H = 160;
+  const d = grayPage(W, H, 235);
+  fillRect(d, W, H, 60, 40, 180, 120, 25);                   // siyah balon govdesi
+  for (let i = 0; i < 8; i++) {                              // beyaz harfler
+    fillRect(d, W, H, 72 + i * 13, 70, 72 + i * 13 + 7, 92, 245);
+  }
+  const blocks = core.inkBlocksIn(d, W, H, { x: 60, y: 40, width: 120, height: 80 });
+  assert.ok(blocks.length >= 1, 'blok bulunamadi');
+  const b = blocks[0];
+  assert.ok(b.y >= 60 && b.y <= 80, 'blok yazinin uzerinde olmali: ' + JSON.stringify(b));
+  assert.ok(b.x <= 80 && b.x + b.w >= 160, 'blok harf satirini kapsamali: ' + JSON.stringify(b));
+});
+
+test('textScoreIn: dogru konumdaki kutu daha yuksek puan alir', () => {
+  const W = 400, H = 400;
+  const d = grayPage(W, H, 210);
+  for (let i = 0; i < 10; i++) fillRect(d, W, H, 240 + i * 9, 250, 240 + i * 9 + 5, 268, 30);
+  const right = core.textScoreIn(d, W, H, [{ x: 236, y: 240, width: 110, height: 60 }]);
+  const wrong = core.textScoreIn(d, W, H, [{ x: 236, y: 80, width: 110, height: 60 }]);
+  assert.ok(right > wrong, 'dogru kutu daha yuksek olmali: ' + right + ' vs ' + wrong);
+});
+
+test('snapBubbles: renkli sanatta balon cercevesi yoksa METIN bloguna oturur', () => {
+  const W = 300, H = 220;
+  const d = grayPage(W, H, 118);                             // renkli/orta ton sanat zemini
+  for (let y = 0; y < H; y++) {                              // hafif doku (gradyan)
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      d[i] = 110 + (y % 7); d[i + 1] = 96 + (x % 5); d[i + 2] = 78;
+    }
+  }
+  for (let i = 0; i < 12; i++) {                             // koyu yazi (balonsuz)
+    fillRect(d, W, H, 80 + i * 10, 100, 80 + i * 10 + 6, 120, 18);
+  }
+  const model = { text: 'A', translation: 'B', x: 84, y: 96, width: 130, height: 30 };
+  const out = core.snapBubbles({ data: d, width: W, height: H, bubbles: [model], opts: baseOpts() });
+  const b = out.bubbles[0];
+  assert.equal(b.snap, 'text', 'metin bloguna oturmali: ' + JSON.stringify(b));
+  assert.ok(Math.abs((b.x + b.width / 2) - (80 + 6 * 10)) <= 14, 'kutu yaziya yakin olmali: ' + JSON.stringify(b));
+  assert.ok(Math.abs((b.y + b.height / 2) - 110) <= 14, 'kutu yaziya yakin olmali: ' + JSON.stringify(b));
+});
+
+test('snapBubbles: uzaktaki parlak bolgeye atlamaz (kayma tavani)', () => {
+  const W = 400, H = 400;
+  const d = grayPage(W, H, 60);
+  ellipse(d, W, H, 320, 320, 55, 40, 250, 15);               // model kutusundan uzak balon
+  const model = { text: 'A', translation: 'B', x: 60, y: 60, width: 80, height: 60 };
+  const out = core.snapBubbles({ data: d, width: W, height: H, bubbles: [model], opts: baseOpts() });
+  const b = out.bubbles[0];
+  assert.equal(b.snap, 'model', 'uzaga atlamamali: ' + JSON.stringify(b));
+  assert.equal(Math.round(b.x), 60);
+});

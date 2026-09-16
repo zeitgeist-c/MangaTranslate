@@ -10,7 +10,7 @@ Chrome Manifest V3 extension. Translates English speech bubbles on manga/manhwa/
 
 ## Install
 
-1. Extract `MangaLensTR-3.2.1.zip`.
+1. Extract `MangaLensTR-3.2.2.zip`.
 2. `chrome://extensions` → Developer mode → Load unpacked (folder with `manifest.json`).
 3. Popup → API tab → add at least one Gemini key, test, activate.
 4. On a page: Page Translate / Select Area / Auto Translate.

@@ -277,13 +277,17 @@
     maxAreaRatio: 10,     // aday bolge alani / model kutusu alani ust siniri
     minOutline: 0.5,      // bolgenin cerceveyle kapali olma orani (panel/zemin ayrimi)
     maxCost: 1.1,         // kabul edilen adayin en yuksek maliyeti
-    goodCost: 0.35,       // bu maliyetin altinda aday bulunca erken cik
+    goodCost: 0.35,       // bu maliyetin altinda aday "yeterince iyi": erken cik
+    maxShiftRatio: 1.2,   // aday merkezi model kutusundan en fazla bu kadar (kosegen orani) uzak olabilir
     seedsPerBubble: 8,    // balon basina en fazla tohum denemesi
     maxRegionInkRatio: 8, // bolge alani / icindeki yazi bbox alani: buyukse panel/zemin
     runawayRatio: 0.35,   // pencere alanina gore bunu asarsa "arka plan"
     margin: 3,            // bulunan bolgeye eklenecek kenar payi (px)
     minSide: 8,
     textPad: 0.35,        // yazi bbox'ina eklenecek oransal pay
+    textPadRatio: 0.28,   // metin blogu bulundugunda eklenecek pay (blok yuksekligine oranla)
+    textMinInk: 40,       // metin blogu sayilmasi icin en az murekkep pikseli
+    textMinCover: 0.10,   // blok, model kutusunun en az bu oranini kaplamali
     mergeIou: 0.5,
     maxFills: 200,        // sayfa basina en fazla dolgu denemesi (maliyet siniri)
     budgetPx: 1500000,    // toplam islenen piksel butcesi
@@ -320,6 +324,154 @@
       }
     }
     return { area: area, bbox: { x0: x0, y0: y0, x1: x1, y1: y1 }, aborted: aborted };
+  }
+
+  // ── Metin blogu bulma (renkli sanatta da calisir; balon cercevesi gerektirmez) ──
+  // Model kutusu cevresindeki murekkep bilesenlerini bulur, satirlara/bloklara kumeler.
+  function inkBlocksIn(data, W, H, box, opts) {
+    const o = opts || {};
+    const bx0 = Math.max(0, Math.floor(box.x)), by0 = Math.max(0, Math.floor(box.y));
+    const bx1 = Math.min(W - 1, Math.ceil(box.x + box.width)), by1 = Math.min(H - 1, Math.ceil(box.y + box.height));
+    const w = bx1 - bx0 + 1, h = by1 - by0 + 1;
+    if (w < 6 || h < 6 || w * h > 4000000) return [];
+    const lumaAt = function (x, y) {
+      const i = (y * W + x) * 4;
+      return 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    };
+    // Pencerenin ortalama parlakligi: kutupluluk karari icin
+    let sum = 0, cnt = 0;
+    for (let y = 0; y < h; y += 3) {
+      for (let x = 0; x < w; x += 3) { sum += lumaAt(bx0 + x, by0 + y); cnt++; }
+    }
+    const bgLuma = cnt ? sum / cnt : 255;
+    const maxGh = Math.max(12, Math.round(0.5 * box.height));
+    const maxGw = Math.max(12, Math.round(1.0 * box.width));
+
+    // Bilesenleri verilen kutuplulukta cikar (koyu murekkep ya da acik murekkep)
+    function compsFor(mode) {
+      const thr = mode === 'dark'
+        ? Math.max(40, Math.min(200, bgLuma - 30))
+        : Math.min(240, Math.max(60, bgLuma + 30));
+      const seen = new Uint8Array(w * h);
+      const list = [];
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = y * w + x;
+          if (seen[idx]) { continue; }
+          seen[idx] = 1;
+          const l0 = lumaAt(bx0 + x, by0 + y);
+          if (mode === 'dark' ? l0 > thr : l0 < thr) continue;
+          const stack = [idx];
+          let n = 0, cx0 = x, cx1 = x, cy0 = y, cy1 = y;
+          while (stack.length) {
+            const cur = stack.pop();
+            const lx = cur % w, ly = (cur - lx) / w;
+            n++;
+            if (lx < cx0) cx0 = lx;
+            if (lx > cx1) cx1 = lx;
+            if (ly < cy0) cy0 = ly;
+            if (ly > cy1) cy1 = ly;
+            const nb = [[lx - 1, ly], [lx + 1, ly], [lx, ly - 1], [lx, ly + 1]];
+            for (let k = 0; k < 4; k++) {
+              const nx = nb[k][0], ny = nb[k][1];
+              if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+              const nidx = ny * w + nx;
+              if (seen[nidx]) continue;
+              seen[nidx] = 1;
+              const l1 = lumaAt(bx0 + nx, by0 + ny);
+              if (mode === 'dark' ? l1 <= thr : l1 >= thr) stack.push(nidx);
+            }
+          }
+          const cw = cx1 - cx0 + 1, ch = cy1 - cy0 + 1;
+          if (n < 4 || ch > maxGh || cw > maxGw) continue;        // sanat cizgilerini ele
+          list.push({ x: bx0 + cx0, y: by0 + cy0, w: cw, h: ch, n: n });
+        }
+      }
+      return list;
+    }
+
+    // "Yaziya benzerlik": ayni boyutta cok sayida kucuk bilesen = harfler
+    function textiness(list) {
+      if (list.length < 4) return 0;
+      const hs = list.map(function (c) { return c.h; }).sort(function (a, b) { return a - b; });
+      const med = hs[Math.floor(hs.length / 2)] || 1;
+      let good = 0, area = 0;
+      list.forEach(function (c) {
+        if (c.h >= med * 0.5 && c.h <= med * 1.8) good++;
+        area += c.n;
+      });
+      return good * Math.log(1 + area);
+    }
+
+    const darkComps = compsFor('dark');
+    const lightComps = compsFor('light');
+    const useDark = textiness(darkComps) >= textiness(lightComps);
+    const comps = useDark ? darkComps : lightComps;
+    if (!comps.length) return [];
+    // satirlara kumele
+    const merge = function (list, gapX, gapY, minOverlap) {
+      let changed = true;
+      let cur = list.slice();
+      while (changed) {
+        changed = false;
+        const out = [];
+        for (let i = 0; i < cur.length; i++) {
+          let a = cur[i];
+          let merged = false;
+          for (let j = 0; j < out.length; j++) {
+            const b = out[j];
+            const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+            const oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+            const nearX = (b.x - (a.x + a.w)) <= gapX && (a.x - (b.x + b.w)) <= gapX;
+            const nearY = (b.y - (a.y + a.h)) <= gapY && (a.y - (b.y + b.h)) <= gapY;
+            const okOverlap = minOverlap ? (ox >= minOverlap * Math.min(a.w, b.w)) : true;
+            if (ox > -gapX && oy > -gapY && nearX && nearY && okOverlap) {
+              out[j] = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y),
+                         w: Math.max(a.x + a.w, b.x + b.w) - Math.min(a.x, b.x),
+                         h: Math.max(a.y + a.h, b.y + b.h) - Math.min(a.y, b.y),
+                         n: a.n + b.n };
+              merged = true;
+              changed = true;
+              break;
+            }
+          }
+          if (!merged) out.push(a);
+        }
+        cur = out;
+      }
+      return cur;
+    };
+    const lines = merge(comps, Math.round(maxGh * 1.4), Math.round(maxGh * 0.6), 0);
+    const blocks = merge(lines, Math.round(maxGh * 2.2), Math.round(maxGh * 1.2), 0.35);
+    // pencere kenarina yapisik bloklar zemin/sanat olur; kac kenara dokundugunu isaretle
+    return blocks.filter(function (b) { return b.n >= (o.textMinInk || 40); }).map(function (b) {
+      const touch = (b.x <= bx0 + 1 ? 1 : 0) + (b.y <= by0 + 1 ? 1 : 0) +
+                    (b.x + b.w >= bx1 ? 1 : 0) + (b.y + b.h >= by1 ? 1 : 0);
+      return { x: b.x, y: b.y, w: b.w, h: b.h, n: b.n, touch: touch };
+    });
+  }
+
+  // Haritalama kalitesi: kutularin icindeki "yazi gibi" murekkep orani (kutupluluk farkindalikli).
+  // Iki farkli koordinat yorumunu (ornegin piksel ve binde-birim) karsilastirmak icin kullanilir.
+  function textScoreIn(data, W, H, boxes, opts) {
+    const o = opts || {};
+    let total = 0, used = 0;
+    (boxes || []).forEach(function (b) {
+      const x0 = Math.max(0, Math.floor(b.x)), y0 = Math.max(0, Math.floor(b.y));
+      const w = Math.max(1, Math.round(b.width)), h = Math.max(1, Math.round(b.height));
+      const area = w * h;
+      if (area < 400) return;
+      const blocks = inkBlocksIn(data, W, H, { x: x0, y: y0, width: w, height: h }, o);
+      let ink = 0;
+      blocks.forEach(function (bl) {
+        const ox = Math.min(bl.x + bl.w, x0 + w) - Math.max(bl.x, x0);
+        const oy = Math.min(bl.y + bl.h, y0 + h) - Math.max(bl.y, y0);
+        if (ox > 0 && oy > 0) ink += bl.n;
+      });
+      total += Math.min(0.5, ink / area);
+      used++;
+    });
+    return used ? total / used : 0;
   }
 
   function snapBubbles(input) {
@@ -431,6 +583,7 @@
         const bboxRatio = (rw * rh) / boxArea;
         const areaPenalty = bboxRatio > 1 ? Math.log(bboxRatio) * 0.55 : -Math.log(bboxRatio) * 0.10;
         const dist = Math.sqrt(Math.pow(bot.x0 + rw / 2 - ccx, 2) + Math.pow(bot.y0 + rh / 2 - ccy, 2));
+        if (dist > boxDiag * (opts.maxShiftRatio || 0.6)) continue;   // baska ogeye atlamayi engelle
         const cost = (dist / boxDiag) * 0.9 + areaPenalty + (1 - coverage) * 0.6;
         cands.push({ x: bot.x0, y: bot.y0, width: rw, height: rh, area: filled.area, coverage: coverage, cost: cost });
         if (cost <= opts.goodCost) break;                // yeterince iyi aday: erken cik
@@ -455,6 +608,39 @@
           width: c.width + 2 * opts.margin, height: c.height + 2 * opts.margin, snap: 'bubble',
         };
         break;
+      }
+
+      // 3a) Metin blogu oturtma — renkli sanatta balon cercevesi bulunamazsa yaziya otur.
+      //     Model kutusu cevresindeki murekkep bilesenleri satir/blok olarak kumelenir,
+      //     model kutusunun icinde kalan en iyi blok yeni kutu olur.
+      if (!snapped) {
+        const tpadX = Math.round(bw * 0.25), tpadY = Math.round(bh * 0.25);
+        const blocks = inkBlocksIn(data, W, H,
+          { x: x0 - tpadX, y: y0 - tpadY, width: bw + 2 * tpadX, height: bh + 2 * tpadY }, opts);
+        let best = null, bestScore = 0;
+        for (let bi2 = 0; bi2 < blocks.length; bi2++) {
+          const bl = blocks[bi2];
+          if (bl.touch >= 2) continue;                            // zemin/sanat blogu
+          const ox = Math.min(bl.x + bl.w, x1 + 1) - Math.max(bl.x, x0);
+          const oy = Math.min(bl.y + bl.h, y1 + 1) - Math.max(bl.y, y0);
+          const inter = Math.max(0, ox) * Math.max(0, oy);
+          const cover = inter / Math.max(1, bl.w * bl.h);         // blogun ne kadari model kutusunda
+          if (cover < 0.55) continue;                             // blok buyuk olcude kutunun icinde olmali
+          const rel = (bl.w * bl.h) / Math.max(1, bw * bh);
+          if (rel < 0.12 || rel > 1.4) continue;                  // boyut benzer olmali (parca/panel degil)
+          const bdcx = bl.x + bl.w / 2, bdcy = bl.y + bl.h / 2;
+          const dist = Math.sqrt(Math.pow(bdcx - (x0 + bw / 2), 2) + Math.pow(bdcy - (y0 + bh / 2), 2));
+          if (dist > boxDiag * (opts.maxShiftRatio || 0.6)) continue;  // uzaktaki bloga atlama
+          const score = cover * Math.min(1, rel) * (1 - dist / (1.2 * boxDiag));
+          if (score > bestScore) { bestScore = score; best = bl; }
+        }
+        if (best && bestScore >= (opts.textMinCover || 0.10)) {
+          const pad = Math.max(2, Math.round(best.h * (opts.textPadRatio || 0.28)));
+          const cand = { x: best.x - pad, y: best.y - pad, width: best.w + 2 * pad, height: best.h + 2 * pad };
+          if (cand.width <= bw * 1.6 && cand.height <= bh * 1.6 && cand.width >= opts.minSide && cand.height >= opts.minSide) {
+            snapped = Object.assign({}, cand, { snap: 'text' });
+          }
+        }
       }
 
       // 3) Yazi (ink) yedegi — balonsuz yazi / SFX
@@ -562,6 +748,8 @@
     estimateFontSize: estimateFontSize,
     contentRectOf: contentRectOf,
     snapBubbles: snapBubbles,
+    inkBlocksIn: inkBlocksIn,
+    textScoreIn: textScoreIn,
     resolveOverlaps: resolveOverlaps,
     isMangaCandidate: isMangaCandidate,
   };

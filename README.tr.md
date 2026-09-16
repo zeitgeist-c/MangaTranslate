@@ -10,7 +10,7 @@ Chrome Manifest V3 uzantısı. Manga/manhwa/manhua sitelerindeki İngilizce konu
 
 ## Kurulum
 
-1. `MangaLensTR-3.2.1.zip` klasöre çıkarılır.
+1. `MangaLensTR-3.2.2.zip` klasöre çıkarılır.
 2. `chrome://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle (`manifest.json` içeren klasör).
 3. Popup → API sekmesi → en az 1 Gemini anahtarı ekle/test et/aktif yap.
 4. Sayfada: Sayfayı Çevir / Alan Seç / Oto Çevir.
@@ -21,6 +21,7 @@ Paketleme: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\package.ps
 
 - **Sayfa modu (tek tuş)** — önce görünen sayfayı çevirir, kaydırdıkça devam eder (ya da tüm bölümü); her balonun üstüne yazısı otomatik sığan Türkçe kutu koyar, üzerine gelince İngilizce orijinal görünür, sonuçlar sayfa bazında önbelleğe alınır.
 - **Balona oturtma (ek istek yok)** — her kutu, resmin gerçek içerik alanı hesaplanarak (object-fit, kenarlık, dolgu; transform/zoom'lu kaplar dahil) yerel piksel analiziyle **balon çerçevesine** oturtulur; panel ve sayfa zemini balon sanılmaz, kayma ve üst üste binme giderilir, gemini kotası değişmez.
+- **Koordinat doğrulama** — modelin döndürdüğü koordinatlar (piksel / 0-1 / 0-1000) kutuların içindeki gerçek yazı miktarına bakılarak otomatik çözülür; yanlış yorumda kutular sayfada kaymaz. Balon çerçevesi bulunamayan renkli sayfalarda (siyah balon, balonsuz yazı) kutu **metin bloğuna** oturtulur. Model kutusu 1.2 köşegen sınırından fazla kaydırılmaz.
 - **Alan seçimi** — en fazla 12 alan (min 24px), Enter ile toplu çeviri.
 - **Oto çeviri** — çizilen her alan beklemeden çevrilir.
 - **Alternatif varyant** — `Yeniden` önceki sonucu göndermeden görseli yeniden okur; 3 strateji (günlük dil / ton-duygu-bağlam / kısa balon uyumu), yüksek yaratıcılık yedek modelde.
