@@ -147,6 +147,29 @@ test('snapBubbles: koyu zeminde model kutusu korunur (her yer murekkep sayilmaz)
   assert.equal(out.bubbles[0].snap, 'model');
 });
 
+test('snapBubbles: beyaz sayfa zemininde de balona oturur (coklu tohum)', () => {
+  const W = 320, H = 240;
+  const d = grayPage(W, H, 238);                        // manga sayfasi zemini: beyaz
+  ellipse(d, W, H, 160, 120, 60, 40, 255, 20);          // balon: beyaz govde + koyu cerceve
+  inkText(d, W, 140, 118, 8);
+  const model = { text: 'A', translation: 'B', x: 172, y: 129, width: 84, height: 56 };   // +12/+9 kaymis
+  const out = core.snapBubbles({ data: d, width: W, height: H, bubbles: [model], opts: baseOpts() });
+  const b = out.bubbles[0];
+  assert.equal(b.snap, 'bubble', JSON.stringify(b));
+  assert.ok(Math.abs((b.x + b.width / 2) - 160) <= 5, JSON.stringify(b));
+  assert.ok(Math.abs((b.y + b.height / 2) - 120) <= 5, JSON.stringify(b));
+});
+
+test('snapBubbles: yazi yedegi model kutusunu buyutmez', () => {
+  const W = 320, H = 240;
+  const d = grayPage(W, H, 238);
+  for (let y = 100; y < 200; y++) for (let x = 100; x < 260; x++) setPx(d, W, x, y, 60);   // koyu sanat alani
+  const model = { text: 'A', translation: 'B', x: 130, y: 120, width: 60, height: 40 };
+  const out = core.snapBubbles({ data: d, width: W, height: H, bubbles: [model], opts: baseOpts() });
+  const b = out.bubbles[0];
+  assert.ok(b.width <= 60 * 1.15 + 1 && b.height <= 40 * 1.15 + 1, 'model kutusu buyumemeli: ' + JSON.stringify(b));
+});
+
 test('snapBubbles: deterministik', () => {
   const W = 200, H = 150;
   const d = grayPage(W, H, 90);

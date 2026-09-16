@@ -276,14 +276,16 @@
     minSide: 8,
     textPad: 0.35,        // yazi bbox'ina eklenecek oransal pay
     mergeIou: 0.5,
+    maxFills: 40,         // sayfa basina en fazla dolgu denemesi (maliyet siniri)
     budgetPx: 1500000,    // toplam islenen piksel butcesi
   };
 
-  function floodFillBright(seed, isBright, wx0, wy0, wx1, wy1, runawayArea) {
+  function floodFillBright(seed, isBright, wx0, wy0, wx1, wy1, runawayArea, seen) {
     const w = wx1 - wx0 + 1;
-    const seen = new Uint8Array(w * (wy1 - wy0 + 1));
-    const stack = [((seed.y - wy0) * w) + (seed.x - wx0)];
-    seen[stack[0]] = 1;
+    const start = ((seed.y - wy0) * w) + (seed.x - wx0);
+    if (seen[start]) return null;                            // bu bolge zaten tarandi
+    seen[start] = 1;
+    const stack = [start];
     let area = 0, x0 = wx1, y0 = wy1, x1 = wx0, y1 = wy0, aborted = false;
     while (stack.length) {
       const idx = stack.pop();
@@ -315,7 +317,7 @@
     const W = Math.max(1, Number(input && input.width) || 0);
     const H = Math.max(1, Number(input && input.height) || 0);
     const src = Array.isArray(input && input.bubbles) ? input.bubbles : [];
-    const stats = { snapped: 0, text: 0, kept: 0, merged: 0, rejected: 0, pixels: 0 };
+    const stats = { snapped: 0, text: 0, kept: 0, merged: 0, rejected: 0, pixels: 0, fills: 0 };
     if (!data || !W || !H || !src.length) return { bubbles: src.slice(), stats: stats };
 
     const isBright = function (x, y) {
@@ -342,21 +344,31 @@
       const winArea = (wx1 - wx0 + 1) * (wy1 - wy0 + 1);
       if (stats.pixels + winArea > opts.budgetPx) { stats.kept++; return Object.assign({}, b, { snap: 'model' }); }
 
-      // 1) tohum: kutu icinde, yoksa pencerede parlak piksel
-      const step = Math.max(2, Math.round(Math.min(bw, bh) / 6));
-      let seed = null;
-      for (let y = y0; y <= y1 && !seed; y += step) {
-        for (let x = x0; x <= x1; x += step) { if (isBright(x, y)) { seed = { x: x, y: y }; break; } }
-      }
-      if (!seed) {
-        for (let y = wy0; y <= wy1 && !seed; y += step) {
-          for (let x = wx0; x <= wx1; x += step) { if (isBright(x, y)) { seed = { x: x, y: y }; break; } }
-        }
-      }
-
+      // 1) tohum adaylari: merkez -> capraz -> kenar ortasi -> ceyrek halka.
+      //    Beyaz sayfa zemininde merkez zemine dusebilir; sirayla denenir, ilk KABUL edilen kazanir.
+      const ccx = Math.round((x0 + x1) / 2);
+      const ccy = Math.round((y0 + y1) / 2);
+      const hx = Math.max(2, Math.round(bw / 2)), hy = Math.max(2, Math.round(bh / 2));
+      const dx = Math.max(2, Math.round(bw * 0.85)), dy = Math.max(2, Math.round(bh * 0.85));
+      const qx = Math.max(2, Math.round(bw * 0.25)), qy = Math.max(2, Math.round(bh * 0.25));
+      const seedList = [
+        [ccx, ccy],
+        [ccx - dx, ccy - dy], [ccx + dx, ccy - dy], [ccx - dx, ccy + dy], [ccx + dx, ccy + dy],
+        [ccx - hx, ccy], [ccx + hx, ccy], [ccx, ccy - hy], [ccx, ccy + hy],
+        [ccx - qx, ccy - qy], [ccx + qx, ccy - qy], [ccx - qx, ccy + qy], [ccx + qx, ccy + qy],
+      ];
+      const seen = new Uint8Array((wx1 - wx0 + 1) * (wy1 - wy0 + 1));
       let snapped = null;
-      if (seed) {
-        const filled = floodFillBright(seed, isBright, wx0, wy0, wx1, wy1, winArea * opts.runawayRatio);
+      let tried = 0;
+      for (let si = 0; si < seedList.length && !snapped; si++) {
+        if (stats.fills >= opts.maxFills) break;
+        const sx = seedList[si][0], sy = seedList[si][1];
+        if (sx < wx0 || sx > wx1 || sy < wy0 || sy > wy1) continue;
+        if (!isBright(sx, sy)) continue;
+        stats.fills++;
+        tried++;
+        const filled = floodFillBright({ x: sx, y: sy }, isBright, wx0, wy0, wx1, wy1, winArea * opts.runawayRatio, seen);
+        if (!filled) continue;
         stats.pixels += filled.area;
         const bot = filled.bbox;
         const bw2 = bot.x1 - bot.x0 + 1, bh2 = bot.y1 - bot.y0 + 1;
@@ -365,10 +377,9 @@
         const ok = !filled.aborted && areaRatio >= opts.minAreaRatio && areaRatio <= opts.maxAreaRatio && bw2 >= opts.minSide && bh2 >= opts.minSide && edgeCount < 3;
         if (ok) {
           snapped = { x: bot.x0 - opts.margin, y: bot.y0 - opts.margin, width: bw2 + 2 * opts.margin, height: bh2 + 2 * opts.margin, snap: 'bubble' };
-        } else {
-          stats.rejected++;
         }
       }
+      if (!snapped && tried) stats.rejected++;
 
       // 2) yazi (ink) kutusu yedegi — balonsuz yazi / SFX
       if (!snapped) {
@@ -390,7 +401,15 @@
         if (inkCount >= 12 && inkCount <= searched * 0.6 && tx1 > tx0 && ty1 > ty0) {
           const padX = Math.max(4, Math.round((tx1 - tx0 + 1) * opts.textPad));
           const padY = Math.max(4, Math.round((ty1 - ty0 + 1) * opts.textPad));
-          snapped = { x: tx0 - padX, y: ty0 - padY, width: (tx1 - tx0 + 1) + 2 * padX, height: (ty1 - ty0 + 1) + 2 * padY, snap: 'text' };
+          const cand = {
+            x: tx0 - padX, y: ty0 - padY,
+            width: (tx1 - tx0 + 1) + 2 * padX, height: (ty1 - ty0 + 1) + 2 * padY,
+          };
+          // Yazi yedegi model kutusunu BUYUTMEZ (en fazla %15) ve alani 3 katini gecmez;
+          // aksi halde bulunan sey sanat/zemin olur, model kutusu korunur.
+          if (cand.width <= bw * 1.15 && cand.height <= bh * 1.15 && (cand.width * cand.height) <= (bw * bh * 3)) {
+            snapped = Object.assign({}, cand, { snap: 'text' });
+          }
         }
       }
 

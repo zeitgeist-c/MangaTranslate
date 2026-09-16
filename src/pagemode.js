@@ -20,7 +20,8 @@ const PM_MAX_PAYLOAD = 4 * 1024 * 1024;
 const PM_MIN_AREA_RATIO = 0.25;         // 'gorunen sayfa' esigi
 const PM_TALL_STRIP_RATIO = 2.0;        // h/w bu orandan buyukse bantlara bol
 const PM_MAX_BANDS = 6;                 // sayfa basina en fazla bant (kota korumasi)
-const PM_ANALYSIS_SIDE = 1000;          // balona oturtma icin kucultulmus analiz gorseli
+const PM_ANALYSIS_MAX = 1600;           // analiz gorseli: en uzun kenar siniri
+const PM_ANALYSIS_MIN = 480;            // analiz gorseli: en kisa kenar alt siniri (ince seritler)
 
 const pageMode = {
   active: false,
@@ -143,6 +144,14 @@ function pmResizeCanvas(canvas, maxSide) {
   return out;
 }
 
+// Analiz gorselinin uzun kenari: ince seritlerde kisa kenar 480'in altina dusmesin
+function pmAnalysisSide(w, h) {
+  const longSide = Math.max(w, h), shortSide = Math.min(w, h);
+  let scale = longSide > PM_ANALYSIS_MAX ? PM_ANALYSIS_MAX / longSide : 1;
+  if (shortSide * scale < PM_ANALYSIS_MIN) scale = Math.min(2, PM_ANALYSIS_MIN / shortSide);
+  return Math.max(1, Math.round(longSide * scale));
+}
+
 function pmCanvasToJpegDataUrl(canvas) {
   const q = PM_JPEG_QUALITY;
   let dataUrl = canvas.toDataURL('image/jpeg', q);
@@ -224,7 +233,7 @@ function pmBuildJobs(page, img) {
   page.cacheKey = PM.pageCacheKey({ src: src, w: img.width, h: img.height });
   page.imageWidth = img.width;
   page.imageHeight = img.height;
-  page.analysis = { canvas: pmResizeCanvas(img.canvas, PM_ANALYSIS_SIDE) };
+  page.analysis = { canvas: pmResizeCanvas(img.canvas, pmAnalysisSide(img.width, img.height)) };
 
   return slices.map(function (slice) {
     const scaled = PM.scaleForMaxSide(slice.width, slice.height, PM_MAX_SIDE);
@@ -572,7 +581,7 @@ function pmSnapPageBubbles(page, bubbles) {
     });
     const snapped = PM.snapBubbles({
       data: img.data, width: cw, height: ch, bubbles: pixelSpace,
-      opts: { margin: Math.max(2, Math.round(cw / 400)) },
+      opts: { margin: Math.max(1, Math.round(3 * (cw / Math.max(1, page.imageWidth || cw)))) },
     });
     const resolved = PM.resolveOverlaps(snapped.bubbles, { maxRatio: 0.25, minWidth: 24, minHeight: 14 });
     page.snapStats = snapped.stats;
