@@ -205,6 +205,65 @@
     return clampInt(Math.min(byHeight, byWidth), min, max);
   }
 
+  // ── Resim icerik dikdortgeni (object-fit / object-position / border farkindalikli) ──
+  // Doner: { x, y, w, h, visible:{x,y,w,h}, clipped }  (x,y elemanin border-box'una gore CSS px)
+  function parseObjectPosition(value) {
+    const KW = { left: 0, right: 1, top: 0, bottom: 1, center: 0.5 };
+    const parts = String(value || '50% 50%').trim().split(/\s+/);
+    const one = function (token, fallback) {
+      if (!token) return { f: fallback, px: 0 };
+      const t = String(token).toLowerCase();
+      if (t in KW) return { f: KW[t], px: 0 };
+      const m = /^(-?[\d.]+)(px|%)?$/.exec(t);
+      if (!m) return { f: fallback, px: 0 };
+      const n = Number(m[1]);
+      if (!Number.isFinite(n)) return { f: fallback, px: 0 };
+      return m[2] === 'px' ? { f: 0, px: n } : { f: n / 100, px: 0 };
+    };
+    return { x: one(parts[0], 0.5), y: one(parts[1] || 'center', 0.5) };
+  }
+
+  function contentRectOf(info) {
+    const i = info || {};
+    const boxW = Number(i.boxW) || 0;
+    const boxH = Number(i.boxH) || 0;
+    if (!boxW || !boxH) return null;
+    const bt = Number(i.borderTop) || 0;
+    const bl = Number(i.borderLeft) || 0;
+    const br = Number(i.borderRight) || 0;
+    const bb = Number(i.borderBottom) || 0;
+    const innerW = Math.max(1, boxW - bl - br);
+    const innerH = Math.max(1, boxH - bt - bb);
+    const nw = Number(i.naturalW) || 0;
+    const nh = Number(i.naturalH) || 0;
+    if (!nw || !nh) {
+      return { x: bl, y: bt, w: innerW, h: innerH, visible: { x: bl, y: bt, w: innerW, h: innerH }, clipped: false };
+    }
+    const fit = String(i.objectFit || 'fill').toLowerCase();
+    let drawW = innerW, drawH = innerH;
+    if (fit !== 'fill') {
+      const sx = innerW / nw, sy = innerH / nh;
+      const contain = Math.min(sx, sy);
+      const cover = Math.max(sx, sy);
+      let scale = contain;
+      if (fit === 'cover') scale = cover;
+      else if (fit === 'none') scale = 1;
+      else if (fit === 'scale-down') scale = Math.min(1, contain);
+      drawW = nw * scale;
+      drawH = nh * scale;
+    }
+    const pos = parseObjectPosition(i.objectPosition);
+    const x = bl + pos.x.f * (innerW - drawW) + pos.x.px;
+    const y = bt + pos.y.f * (innerH - drawH) + pos.y.px;
+    const ix0 = Math.max(bl, x), iy0 = Math.max(bt, y);
+    const ix1 = Math.min(bl + innerW, x + drawW), iy1 = Math.min(bt + innerH, y + drawH);
+    return {
+      x: x, y: y, w: drawW, h: drawH,
+      visible: { x: ix0, y: iy0, w: Math.max(0, ix1 - ix0), h: Math.max(0, iy1 - iy0) },
+      clipped: x < bl - 0.5 || y < bt - 0.5 || x + drawW > bl + innerW + 0.5 || y + drawH > bt + innerH + 0.5,
+    };
+  }
+
   // ── Manga gorseli adayi mi? (v2.7 isMangaImage fikri, DOM'suz halde) ──
   const NEGATIVE = ['avatar', 'icon', 'logo', 'banner', 'advert', 'sponsor', 'thumbnail', 'profile', 'button', 'navbar', 'footer', 'sidebar', 'comment', 'emoji', 'flag', 'favicon', 'loading', 'spinner', 'placeholder'];
   const POSITIVE = ['page', 'chapter', 'manga', 'manhwa', 'manhua', 'webtoon', 'comic', 'panel', 'reader', 'scan', 'episode', 'viewer', 'images'];
@@ -238,6 +297,7 @@
     bandToGlobal: bandToGlobal,
     sortPagesForTranslation: sortPagesForTranslation,
     estimateFontSize: estimateFontSize,
+    contentRectOf: contentRectOf,
     isMangaCandidate: isMangaCandidate,
   };
 
