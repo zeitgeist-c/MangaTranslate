@@ -95,6 +95,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // v3.2: sayfa modu — bant istegi (asenkron sonuc itme + iptal)
+  if (message.type === 'TRANSLATE_PAGE') {
+    handleTranslatePage(message, sender)
+      .then(r => sendResponse(r))
+      .catch(err => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'CANCEL_PAGE_JOBS') {
+    let cancelled = 0;
+    for (const item of requestQueue) {
+      if (!item) continue;
+      const match = message.all || (item.meta && item.meta.pageKey === message.pageKey);
+      if (match && item.meta) { item.cancelled = true; cancelled++; }
+    }
+    pageJobs.forEach(job => {
+      if (message.all || job.pageKey === message.pageKey) job.state = 'cancelled';
+    });
+    sendResponse({ ok: true, cancelled });
+    return true;
+  }
+
   // v2.5: API key test et
   if (message.type === 'TEST_API_KEY') {
     testApiKey(message.apiKey)
@@ -619,9 +641,9 @@ function clampInt(v, min, max) {
 //  v2: Rate-Limited Sequential Queue
 // ══════════════════════════════════════════════════════════════════════════════
 
-function enqueueWithRateLimit(fn) {
+function enqueueWithRateLimit(fn, meta) {
   return new Promise((resolve, reject) => {
-    requestQueue.push({ fn, resolve, reject, retries: 0 });
+    requestQueue.push({ fn, resolve, reject, retries: 0, meta: meta || null, cancelled: false });
     processRateLimitedQueue();
   });
 }
@@ -633,6 +655,12 @@ async function processRateLimitedQueue() {
   activeRequest = true;
 
   try {
+    // v3.2: iptal edilen is hic calismaz (sayfa modu "Durdur")
+    if (item.cancelled) {
+      item.resolve({ cancelled: true });
+      return;
+    }
+
     // onceki istek BITTIKTEN sonra MIN_INTERVAL_MS gecmis mi?
     const now = Date.now();
     const elapsed = now - lastFinishTime;
@@ -640,11 +668,16 @@ async function processRateLimitedQueue() {
       const wait = MIN_INTERVAL_MS - elapsed;
       await new Promise(r => setTimeout(r, wait));
     }
+    if (item.cancelled) {
+      item.resolve({ cancelled: true });
+      return;
+    }
 
     try {
       const result = await item.fn();
       saveRateState(Date.now());
       item.resolve(result);
+      if (item.meta && typeof item.meta.onSettled === 'function') item.meta.onSettled(null, result);
     } catch (e) {
       // 429 veya timeout → backoff ile retry
       // Retry edilebilir mi? status'e bak (mesaj dili degisebilir, regex tek basina yetmez).
@@ -660,6 +693,8 @@ async function processRateLimitedQueue() {
       } else {
         saveRateState(Date.now());
         item.reject(e);
+        // v3.2: sayfa isi ise sonucu sayfaya bildir (retry yolunda bildirim YOK)
+        if (item.meta && typeof item.meta.onSettled === 'function') item.meta.onSettled(e, null);
       }
     }
   } finally {
@@ -668,6 +703,145 @@ async function processRateLimitedQueue() {
       processRateLimitedQueue();
     }
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  v3.2: Sayfa Modu Isleri (asenkron teslim: sonuc sayfaya itilir)
+// ══════════════════════════════════════════════════════════════════════════════
+
+const pageJobs = new Map();   // jobId -> { tabId, cacheKey, pageKey, bandIndex, state }
+
+function notifyTab(tabId, payload) {
+  if (typeof tabId !== 'number') return;
+  chrome.tabs.sendMessage(tabId, payload).catch(() => {});   // sayfa kapandi/degisti
+}
+
+function findQueuedDuplicate(cacheKey) {
+  const queued = requestQueue.some(i => i.meta && i.meta.cacheKey === cacheKey && !i.cancelled);
+  if (queued) return true;
+  for (const job of pageJobs.values()) {
+    if (job.cacheKey === cacheKey && job.state === 'running') return true;
+  }
+  return false;
+}
+
+/**
+ * v3.2: Bir bant istegi. Cache HIT ise hemen cevap doner (istek yok);
+ * degilse kuyruga girer, sonuc PAGE_RESULT / PAGE_JOB_FAILED ile sayfaya itilir.
+ */
+function handleTranslatePage(message, sender) {
+  const tabId = sender && sender.tab ? sender.tab.id : null;
+  const cacheKey = String(message.cacheKey || '');
+  const pageKey = String(message.pageKey || '');
+  const bandIndex = Number(message.bandIndex || 0);
+
+  if (!message.dataUrl) return Promise.resolve({ ok: false, error: 'dataUrl eksik' });
+  if (!cacheKey) return Promise.resolve({ ok: false, error: 'cacheKey eksik' });
+  if (findQueuedDuplicate(cacheKey)) return Promise.resolve({ ok: true, duplicate: true });
+
+  return pageCacheGet(cacheKey).then(cached => {
+    if (cached) return { ok: true, cached: true, bubbles: cached.bubbles, model: cached.model };
+
+    const jobId = crypto.randomUUID();
+    const meta = {
+      cacheKey: cacheKey,
+      onSettled: (err, result) => {
+        pageJobs.delete(jobId);
+        if (err) {
+          notifyTab(tabId, {
+            type: 'PAGE_JOB_FAILED', jobId, pageKey, bandIndex,
+            error: err.message, status: err.status || 'error',
+          });
+        } else {
+          notifyTab(tabId, {
+            type: 'PAGE_RESULT', jobId, pageKey, bandIndex,
+            bubbles: result.bubbles, model: result.model, fallbackUsed: result.fallbackUsed,
+          });
+        }
+      },
+    };
+    pageJobs.set(jobId, { tabId, cacheKey, pageKey, bandIndex, state: 'running' });
+    enqueueWithRateLimit(() => runPageJob(message, cacheKey, bandIndex), meta).catch(() => {});
+    return { ok: true, jobId, position: requestQueue.length + 1, bandIndex };
+  });
+}
+
+async function runPageJob(message, cacheKey, bandIndex) {
+  const apiKey = await getActiveApiKey();
+  if (!apiKey) {
+    const e = new Error('Lutfen once Google Gemini API anahtari ekleyin ve aktif yapin.');
+    e.status = 'invalid';
+    throw e;
+  }
+  const selectedModel = await getSelectedGeminiModel();
+  const bandNote = message.bandCount > 1 ? '\n[Slice ' + (bandIndex + 1) + '/' + message.bandCount + ']' : '';
+
+  const result = await executeWithModelFallback(selectedModel, model =>
+    callGemini({
+      apiKey,
+      model,
+      prompt: buildPagePrompt() + '\n[Image: ' + message.w + 'x' + message.h + ']' + bandNote,
+      imageBase64: { mime: 'image/jpeg', base64: String(message.dataUrl).split(',')[1] || '' },
+      responseMimeType: 'application/json',
+    })
+  );
+
+  const bubbles = parseBubbleArray(result.value, message.w, message.h, { coordSpace: 'auto', maxLen: PAGE_MAX_TEXT });
+  if (bubbles.length > 0) {
+    await incrementTranslationStats();
+    await pageCacheSet(cacheKey, bubbles, result.model);
+  }
+  return { bubbles, model: result.model, fallbackUsed: result.fallbackUsed };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  v3.2: Sayfa Cache (balon JSON'u; gorsel DEGIL — kota dostu)
+// ══════════════════════════════════════════════════════════════════════════════
+
+const PAGE_CACHE_KEY = 'ml_page_cache_v1';
+const PAGE_CACHE_META = 'ml_page_cache_meta_v1';
+const PAGE_CACHE_MAX_ENTRIES = 400;      // ~3 KB/girdi → 1.2 MB; storage.local 10 MB sinirinin cok altinda
+const PAGE_CACHE_EVICT_RATIO = 0.20;
+
+function pageCacheEvictOldest(map) {
+  const victims = Object.keys(map)
+    .sort((a, b) => ((map[a] && map[a].ts) || 0) - ((map[b] && map[b].ts) || 0))
+    .slice(0, Math.max(1, Math.ceil(Object.keys(map).length * PAGE_CACHE_EVICT_RATIO)));
+  victims.forEach(k => delete map[k]);
+  return victims.length;
+}
+
+async function pageCacheRead() {
+  const data = await chrome.storage.local.get([PAGE_CACHE_KEY, PAGE_CACHE_META]);
+  return { map: data[PAGE_CACHE_KEY] || {}, meta: data[PAGE_CACHE_META] || { count: 0 } };
+}
+
+async function pageCacheGet(cacheKey) {
+  if (!cacheKey) return null;
+  const { map } = await pageCacheRead();
+  const hit = map[cacheKey];
+  return hit && Array.isArray(hit.bubbles) ? { bubbles: hit.bubbles, model: hit.model || null } : null;
+}
+
+async function pageCacheSet(cacheKey, bubbles, model) {
+  if (!cacheKey) return { ok: false, error: 'cacheKey eksik' };
+  const { map } = await pageCacheRead();
+  map[cacheKey] = { bubbles: bubbles, model: model || null, ts: Date.now() };
+  if (Object.keys(map).length > PAGE_CACHE_MAX_ENTRIES) pageCacheEvictOldest(map);
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await chrome.storage.local.set({
+        [PAGE_CACHE_KEY]: map,
+        [PAGE_CACHE_META]: { count: Object.keys(map).length, updatedAt: Date.now() },
+      });
+      return { ok: true, count: Object.keys(map).length };
+    } catch (e) {
+      // kota dolu → en eski %20'yi at, tekrar dene
+      if (pageCacheEvictOldest(map) === 0) return { ok: false, error: e.message };
+    }
+  }
+  return { ok: false, error: 'cache yazilamadi' };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
