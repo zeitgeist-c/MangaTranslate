@@ -146,26 +146,30 @@ const BASE_PROMPT = 'You are analyzing a manga/comic image.\n' +
   '- If NO readable text, return {"balloons":[]}.\n' +
   '- NEVER return empty string. NEVER return markdown.';
 
-// v3.2: Sayfa modu prompt'u — koordinatlar NORMALIZE (0..1), tam sayfa tek istekte
-const PAGE_PROMPT = 'You are analyzing a manga/comic page image (the image may be a slice of a longer page).\n' +
-  'Detect EVERY visible speech bubble, narration box, sign and readable text.\n' +
+// v3.2: Sayfa modu prompt'u — PIKSEl koordinati + balon bolgesi + komsu birlestirme yasagi
+const PAGE_PROMPT = 'You are analyzing ONE image: a page (or a slice of a longer page) of a manga/comic.\n' +
+  'Find EVERY speech bubble, thought bubble, narration box, sign and readable text.\n' +
   'Return ONLY valid JSON. Do NOT use markdown. Do NOT explain.\n\n' +
   'OUTPUT SCHEMA:\n' +
   '{\n' +
   '  "balloons": [\n' +
   '    { "text": "English text", "translation": "Turkish translation",\n' +
-  '      "x": 0.1234, "y": 0.0567, "width": 0.0891, "height": 0.0234 }\n' +
+  '      "x": 120, "y": 340, "width": 210, "height": 96 }\n' +
   '  ]\n' +
   '}\n\n' +
   'COORDINATE RULES:\n' +
-  '- x,y,width,height are NORMALIZED decimals between 0 and 1, relative to THIS image.\n' +
-  '- x,y = top-left corner of the bubble; width,height = its size. Round to 4 decimals.\n' +
-  '- Tight box: cover the bubble INCLUDING its border, NOT the surrounding art.\n' +
+  '- x,y,width,height are PIXEL coordinates of THIS image (integers, top-left origin).\n' +
+  '- Each box must be the BUBBLE REGION itself: the white balloon shape INCLUDING its outline.\n' +
+  '  Never box only the text glyphs, and never box the surrounding artwork.\n' +
+  '- Boxes must be tight: their edges sit on the bubble border.\n' +
   '- Order top-to-bottom, then left-to-right.\n\n' +
-  'TEXT RULES:\n' +
-  '- "translation" must be natural Turkish dialogue, short enough to fit a bubble.\n' +
+  'CONTENT RULES:\n' +
+  '- ONE bubble = ONE entry. Never merge two adjacent bubbles into one entry, even when they touch.\n' +
+  '- Never split one bubble into two entries.\n' +
+  '- For lettering without a bubble (SFX, background text), box exactly the lettering.\n' +
+  '- "translation" must be natural Turkish dialogue, short enough to fit the bubble.\n' +
   '- SFX: translate (BOOM -> GUM, CRACK -> CAT). Keep short.\n' +
-  '- Never merge two bubbles into one entry. Never return an empty string.\n' +
+  '- If the lettering is unreadable, skip that bubble instead of inventing text.\n' +
   '- If there is NO readable text, return {"balloons":[]}.\n' +
   'NEVER return markdown.';
 
