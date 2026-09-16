@@ -20,6 +20,7 @@ const PM_MAX_PAYLOAD = 4 * 1024 * 1024;
 const PM_MIN_AREA_RATIO = 0.25;         // 'gorunen sayfa' esigi
 const PM_TALL_STRIP_RATIO = 2.0;        // h/w bu orandan buyukse bantlara bol
 const PM_MAX_BANDS = 6;                 // sayfa basina en fazla bant (kota korumasi)
+const PM_ANALYSIS_SIDE = 1000;          // balona oturtma icin kucultulmus analiz gorseli
 
 const pageMode = {
   active: false,
@@ -85,6 +86,8 @@ function pmPageRecord(el, pageId) {
     layer: null,
     imageWidth: 0,
     imageHeight: 0,
+    analysis: null,          // { canvas } — balona oturtma icin kucultulmus gorsel
+    snapStats: null,
   };
 }
 
@@ -221,6 +224,7 @@ function pmBuildJobs(page, img) {
   page.cacheKey = PM.pageCacheKey({ src: src, w: img.width, h: img.height });
   page.imageWidth = img.width;
   page.imageHeight = img.height;
+  page.analysis = { canvas: pmResizeCanvas(img.canvas, PM_ANALYSIS_SIDE) };
 
   return slices.map(function (slice) {
     const scaled = PM.scaleForMaxSide(slice.width, slice.height, PM_MAX_SIDE);
@@ -288,7 +292,7 @@ function pmEnsureAutoLayer(page) {
     parent.dataset.mlAutoPrevZ = parent.style.zIndex || '';
     parent.style.zIndex = '2147483645';
   }
-  syncSelectionLayerPosition(page.el, layer);              // content.js'ten
+  pmPositionLayer(page, layer);                            // resmin ICERIK dikdortgenine hizala
   page.layer = layer;
   return layer;
 }
@@ -328,7 +332,8 @@ function pmLayoutPage(page) {
   if (!page || !page.el || !page.el.isConnected) return;
   const layer = pmEnsureAutoLayer(page);
   if (!layer) return;
-  const rect = page.el.getBoundingClientRect();
+  const content = pmContentRectFor(page);
+  if (!content) return;
   const wanted = page.bubbles.length;
 
   while (layer.children.length > wanted) layer.removeChild(layer.lastElementChild);
@@ -347,19 +352,23 @@ function pmLayoutPage(page) {
       box.textContent = text;
     }
     if (box.title !== (b.text || '')) box.title = b.text || '';
+    if (box.dataset.snap !== (b.snap || 'model')) box.dataset.snap = b.snap || 'model';
 
-    let x = Math.round(b.xPct * rect.width);
-    let y = Math.round(b.yPct * rect.height);
-    let w = Math.max(24, Math.round(b.wPct * rect.width));
-    let h = Math.max(16, Math.round(b.hPct * rect.height));
-    if (w < 70 || h < 26) {                                // cok kucuk balon: hafif buyut
-      w = Math.min(Math.max(w, 70), Math.max(24, Math.round(rect.width - x)));
-      h = Math.min(Math.max(h, 26), Math.max(16, Math.round(rect.height - y)));
-    }
+    const x = Math.round(content.x + b.xPct * content.w);
+    const y = Math.round(content.y + b.yPct * content.h);
+    const w = Math.max(20, Math.round(b.wPct * content.w));
+    const h = Math.max(14, Math.round(b.hPct * content.h));
+
     box.style.setProperty('left', x + 'px', 'important');
     box.style.setProperty('top', y + 'px', 'important');
     box.style.setProperty('width', w + 'px', 'important');
     box.style.setProperty('height', h + 'px', 'important');
+
+    // object-fit: cover/none -> resmin bir kismi kirpilir; gorunmeyen kutuyu gizle
+    const v = content.visible;
+    const outside = v && (x + w <= v.x || x >= v.x + v.w || y + h <= v.y || y >= v.y + v.h);
+    if (outside) box.style.setProperty('display', 'none', 'important');
+    else box.style.removeProperty('display');
   }
   pmScheduleFit(layer);
 }
@@ -375,11 +384,48 @@ function pmScheduleFit(layer) {
   setTimeout(run, 300);
 }
 
+// Katmani resmin ICERIK dikdortgenine hizala (eleman kutusu degil)
+function pmPositionLayer(page, layer) {
+  const parent = layer.parentElement;
+  if (!parent) return;
+  const content = pmContentRectFor(page);
+  if (!content) return;
+  const imgRect = page.el.getBoundingClientRect();
+  const parentRect = parent.getBoundingClientRect();
+  layer.style.left = (imgRect.left - parentRect.left + parent.scrollLeft + content.x) + 'px';
+  layer.style.top = (imgRect.top - parentRect.top + parent.scrollTop + content.y) + 'px';
+  layer.style.width = content.w + 'px';
+  layer.style.height = content.h + 'px';
+}
+
+// Sayfanin resim icerik dikdortgeni (object-fit farkindalikli)
+function pmContentRectFor(page) {
+  const el = page && page.el;
+  if (!el || !el.getBoundingClientRect) return null;
+  const r = el.getBoundingClientRect();
+  const isImg = el.tagName === 'IMG';
+  let cs = null;
+  try { cs = window.getComputedStyle(el); } catch (e) { cs = null; }
+  const num = function (v) { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
+  return PM.contentRectOf({
+    boxW: r.width,
+    boxH: r.height,
+    naturalW: isImg ? (el.naturalWidth || page.imageWidth || 0) : (el.width || 0),
+    naturalH: isImg ? (el.naturalHeight || page.imageHeight || 0) : (el.height || 0),
+    objectFit: isImg && cs ? cs.objectFit : 'fill',
+    objectPosition: isImg && cs ? cs.objectPosition : '50% 50%',
+    borderTop: cs ? num(cs.borderTopWidth) : 0,
+    borderLeft: cs ? num(cs.borderLeftWidth) : 0,
+    borderRight: cs ? num(cs.borderRightWidth) : 0,
+    borderBottom: cs ? num(cs.borderBottomWidth) : 0,
+  });
+}
+
 function pmSyncAutoLayers() {
   pageMode.pages.forEach(function (page) {
     if (!page.el || !page.el.isConnected) { pmClearPageOverlay(page); return; }
     if (page.layer && page.bubbles.length) pmLayoutPage(page);
-    else if (page.layer) syncSelectionLayerPosition(page.el, page.layer);
+    else if (page.layer) pmPositionLayer(page, page.layer);
   });
 }
 
@@ -509,9 +555,48 @@ function pmDropJob(key, reason) {
   pmPump();
 }
 
+// Yuzdedeki kutulari gercek balon bolgesine oturt (analiz gorseli uzerinde piksel analizi)
+function pmSnapPageBubbles(page, bubbles) {
+  const analysis = page && page.analysis;
+  if (!analysis || !analysis.canvas || !bubbles.length) return bubbles;
+  try {
+    const cw = analysis.canvas.width;
+    const ch = analysis.canvas.height;
+    const img = analysis.canvas.getContext('2d').getImageData(0, 0, cw, ch);
+    const pixelSpace = bubbles.map(function (b) {
+      return {
+        text: b.text, translation: b.translation,
+        x: b.xPct * cw, y: b.yPct * ch,
+        width: Math.max(1, b.wPct * cw), height: Math.max(1, b.hPct * ch),
+      };
+    });
+    const snapped = PM.snapBubbles({
+      data: img.data, width: cw, height: ch, bubbles: pixelSpace,
+      opts: { margin: Math.max(2, Math.round(cw / 400)) },
+    });
+    const resolved = PM.resolveOverlaps(snapped.bubbles, { maxRatio: 0.25, minWidth: 24, minHeight: 14 });
+    page.snapStats = snapped.stats;
+    console.log('[MangaLens-pm] snap:', JSON.stringify(snapped.stats));
+    return resolved.map(function (b) {
+      return {
+        text: b.text, translation: b.translation,
+        xPct: b.x / cw, yPct: b.y / ch,
+        wPct: b.width / cw, hPct: b.height / ch,
+        snap: b.snap || 'model',
+      };
+    });
+  } catch (e) {
+    console.warn('[MangaLens-pm] snap atlandi:', e.message);
+    return bubbles;
+  } finally {
+    page.analysis = null;                 // bellegi serbest birak
+  }
+}
+
 function pmFinalizePage(page) {
   if (!page || page.state === 'done' || page.state === 'empty') return;
   page.bubbles = pmDedupeGlobal(page.bubbles);
+  page.bubbles = pmSnapPageBubbles(page, page.bubbles);
   page.state = page.bubbles.length ? 'done' : 'empty';
   pageMode.stats.done++;
   pageMode.stats.bubbles += page.bubbles.length;
