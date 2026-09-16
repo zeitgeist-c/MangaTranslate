@@ -16,10 +16,7 @@ const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 const REQUEST_TIMEOUT = 45000;
 
-// v3.2: sayfa modu sabitleri
-const PAGE_MAX_SIDE = 1600;              // AI'a gonderilen en uzun kenar
-const PAGE_BAND_MAX_HEIGHT = 1800;       // uzun seritte bant yuksekligi (content ile ayni deger)
-const PAGE_BAND_OVERLAP = 200;           // bantlar arasi ortusme
+// v3.2: sayfa modu sabitleri (bantlama/sayfa bolme content tarafinda yapilir)
 const PAGE_MAX_TEXT = 600;               // sayfa modunda metin kesme siniri (200 degil)
 const PAGE_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 
