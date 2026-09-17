@@ -7,10 +7,12 @@
 const GEMINI_MODELS = Object.freeze({
   DEFAULT: 'gemini-3.5-flash-lite',
   FALLBACK: 'gemini-3.1-flash-lite',
+  GEMMA: 'gemma-4-31b-it',
 });
 const GEMINI_MODEL_LABELS = Object.freeze({
   [GEMINI_MODELS.DEFAULT]: 'Gemini 3.5 Flash Lite',
   [GEMINI_MODELS.FALLBACK]: 'Gemini 3.1 Flash Lite',
+  [GEMINI_MODELS.GEMMA]: 'Gemma 4 31B',
 });
 
 const DEFAULTS = {

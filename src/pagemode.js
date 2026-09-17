@@ -201,8 +201,25 @@ async function pmAcquireImage(page) {
   // Yedek: gorunur alan kirpmasi (yalnizca ekranda olan sayfalar)
   if (!pmIsVisibleRatio(el, 0.05)) throw new Error('sayfa ekranda degil');
   const rect = el.getBoundingClientRect();
-  const canvas = await captureVisibleRect({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
-  return { canvas: canvas, width: canvas.width, height: canvas.height, source: 'viewport-crop', src: 'crop' };
+  const content = pmContentRectFor(page);
+  if (!content || !content.w || !content.h) throw new Error('resim alani bulunamadi');
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const left = Math.max(0, rect.left + content.visible.x);
+  const top = Math.max(0, rect.top + content.visible.y);
+  const right = Math.min(vw, rect.left + content.visible.x + content.visible.w);
+  const bottom = Math.min(vh, rect.top + content.visible.y + content.visible.h);
+  const canvas = await captureVisibleRect({ left: left, top: top, right: right, bottom: bottom });
+  // Do not associate a screenshot taken while scrolling with stale coordinates.
+  const after = el.getBoundingClientRect();
+  if (Math.abs(after.left - rect.left) > 1 || Math.abs(after.top - rect.top) > 1 ||
+      Math.abs(after.width - rect.width) > 1 || Math.abs(after.height - rect.height) > 1 ||
+      vw !== window.innerWidth || vh !== window.innerHeight) {
+    throw new Error('Yakalama sirasinda sayfa hareket etti; durduktan sonra Yeniden ile deneyin');
+  }
+  return { canvas: canvas, width: canvas.width, height: canvas.height, source: 'viewport-crop', src: 'crop',
+    region: { x: (left - rect.left - content.x) / content.w,
+      y: (top - rect.top - content.y) / content.h,
+      w: (right - left) / content.w, h: (bottom - top) / content.h } };
 }
 
 // ── Is planlama: bantlar (natural cozunurlukte kes, sonra gerekirse olcekle) ──
@@ -223,6 +240,11 @@ function pmBuildJobs(page, img) {
   const isImg = page.el.tagName === 'IMG';
   const src = isImg ? (page.el.currentSrc || page.el.src || '') : 'canvas:' + page.pageId;
   page.cacheKey = PM.pageCacheKey({ src: src, w: img.width, h: img.height });
+  page.captureRegion = img.region || null;
+  if (page.captureRegion) {
+    // Different visible portions (and old incorrect entries) must never share results.
+    page.cacheKey += '|crop2:' + JSON.stringify(page.captureRegion);
+  }
   page.imageWidth = img.width;
   page.imageHeight = img.height;
   page.image = img;                       // oturtma icin kaynak tuval (tam cozunurluk, kopya yok)
@@ -306,7 +328,9 @@ function pmClearPageOverlay(page) {
 }
 
 function pmFitBubbleText(box) {
-  const text = box.textContent || '';
+  const label = box.querySelector('.ml-auto-text');
+  if (!label) return;
+  const text = label.textContent || '';
   if (!text) return;
   const w = box.clientWidth;
   const h = box.clientHeight;
@@ -319,14 +343,22 @@ function pmFitBubbleText(box) {
     return;
   }
   box.dataset.mlFitTries = '0';
-  let size = PM.estimateFontSize(w, h, text.length, { min: 9, max: 18 });
-  box.style.setProperty('font-size', size + 'px', 'important');
-  for (let i = 0; i < 10; i++) {
-    if (box.scrollHeight <= box.clientHeight + 1 && box.scrollWidth <= box.clientWidth + 1) break;
-    size -= 1;
-    if (size < 9) break;
-    box.style.setProperty('font-size', size + 'px', 'important');
+  // Measure an unconstrained text span, not a centered flex box (which can hide overflow).
+  const area = box._mlTextRect || { x: 0, y: 0, w: 1, h: 1 };
+  const availableW = Math.max(1, w * area.w - 4);
+  const availableH = Math.max(1, h * area.h - 4);
+  label.style.setProperty('width', availableW + 'px', 'important');
+  label.style.setProperty('left', ((area.x + area.w / 2) * w) + 'px', 'important');
+  label.style.setProperty('top', ((area.y + area.h / 2) * h) + 'px', 'important');
+  let low = 1, high = 32, best = 1;
+  for (let i = 0; i < 9; i++) {
+    const size = (low + high) / 2;
+    label.style.setProperty('font-size', size + 'px', 'important');
+    if (label.scrollHeight <= availableH && label.scrollWidth <= availableW + 0.5) {
+      best = size; low = size;
+    } else high = size;
   }
+  label.style.setProperty('font-size', best + 'px', 'important');
 }
 
 function pmLayoutPage(page) {
@@ -345,23 +377,33 @@ function pmLayoutPage(page) {
     if (!box) {
       box = document.createElement('div');
       box.className = 'ml-auto-bubble';
+      const label = document.createElement('span');
+      label.className = 'ml-auto-text';
+      box.appendChild(label);
       layer.appendChild(box);
     }
     const text = b.translation || b.text || '';
     if (box.dataset.mlText !== text) {
       box.dataset.mlText = text;
-      box.textContent = text;
+      box.querySelector('.ml-auto-text').textContent = text;
     }
     if (box.title !== (b.text || '')) box.title = b.text || '';
     if (box.dataset.snap !== (b.snap || 'model')) box.dataset.snap = b.snap || 'model';
+    box._mlTextRect = b.interior ? b.interior.textRect : null;
+    if (b.interior) {
+      box.style.setProperty('clip-path', 'polygon(' + b.interior.polygon.map(function (p) {
+        return (p[0] * 100) + '% ' + (p[1] * 100) + '%';
+      }).join(',') + ')', 'important');
+    } else box.style.removeProperty('clip-path');
+    box.style.setProperty('background', b.background || '#fff', 'important');
 
     // Katman zaten resmin ICERIK dikdortgeninde konumlu; kutular katmana GORE yuzde ile yerlestirilir
     const kk = pmLayerScale(layer);
-    const cw = content.w / kk, ch = content.h / kk;
-    const x = Math.round(b.xPct * cw);
-    const y = Math.round(b.yPct * ch);
-    const w = Math.max(20, Math.round(b.wPct * cw));
-    const h = Math.max(14, Math.round(b.hPct * ch));
+    const cw = content.w / kk.x, ch = content.h / kk.y;
+    const x = b.xPct * cw;
+    const y = b.yPct * ch;
+    const w = Math.max(1, b.wPct * cw);
+    const h = Math.max(1, b.hPct * ch);
 
     box.style.setProperty('left', x + 'px', 'important');
     box.style.setProperty('top', y + 'px', 'important');
@@ -370,8 +412,8 @@ function pmLayoutPage(page) {
 
     // object-fit: cover/none -> resmin bir kismi kirpilir; gorunmeyen kutuyu gizle
     const v = content.visible;
-    const vx = (v.x - content.x) / kk, vy = (v.y - content.y) / kk;
-    const vw = v.w / kk, vh = v.h / kk;
+    const vx = (v.x - content.x) / kk.x, vy = (v.y - content.y) / kk.y;
+    const vw = v.w / kk.x, vh = v.h / kk.y;
     const outside = v && (x + w <= vx || x >= vx + vw || y + h <= vy || y >= vy + vh);
     if (outside) box.style.setProperty('display', 'none', 'important');
     else box.style.removeProperty('display');
@@ -393,12 +435,12 @@ function pmScheduleFit(layer) {
 // Katman px'leri ebeveynin YEREL uzayindadir; ebeveyn transform/zoom'lu ise gorsel px'i bole
 function pmLayerScale(layer) {
   const parent = layer && layer.parentElement;
-  if (!parent) return 1;
+  if (!parent) return { x: 1, y: 1 };
   const r = parent.getBoundingClientRect();
-  const w = parent.offsetWidth || 0;
-  if (!w || !r.width) return 1;
-  const k = r.width / w;
-  return (isFinite(k) && k > 0.01) ? k : 1;
+  return {
+    x: parent.offsetWidth && r.width ? r.width / parent.offsetWidth : 1,
+    y: parent.offsetHeight && r.height ? r.height / parent.offsetHeight : 1,
+  };
 }
 
 // Katmani resmin ICERIK dikdortgenine hizala (eleman kutusu degil)
@@ -416,10 +458,10 @@ function pmPositionLayer(page, layer) {
     borderLeft = parseFloat(cs.borderLeftWidth) || 0;
     borderTop = parseFloat(cs.borderTopWidth) || 0;
   } catch (e) { borderLeft = 0; borderTop = 0; }
-  layer.style.left = ((imgRect.left - parentRect.left - borderLeft) / k + content.x / k) + 'px';
-  layer.style.top = ((imgRect.top - parentRect.top - borderTop) / k + content.y / k) + 'px';
-  layer.style.width = (content.w / k) + 'px';
-  layer.style.height = (content.h / k) + 'px';
+  layer.style.left = ((imgRect.left - parentRect.left + content.x) / k.x - borderLeft + parent.scrollLeft) + 'px';
+  layer.style.top = ((imgRect.top - parentRect.top + content.y) / k.y - borderTop + parent.scrollTop) + 'px';
+  layer.style.width = (content.w / k.x) + 'px';
+  layer.style.height = (content.h / k.y) + 'px';
 }
 
 // Sayfanin resim icerik dikdortgeni (object-fit farkindalikli)
@@ -431,13 +473,17 @@ function pmContentRectFor(page) {
   let cs = null;
   try { cs = window.getComputedStyle(el); } catch (e) { cs = null; }
   const num = function (v) { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
-  return PM.contentRectOf({
-    boxW: r.width,
-    boxH: r.height,
+  // object-fit, borders, padding and pixel object-position use local CSS pixels.
+  // Convert to screen coordinates only after all local geometry is resolved.
+  const localW = el.offsetWidth || r.width, localH = el.offsetHeight || r.height;
+  const sx = localW ? r.width / localW : 1, sy = localH ? r.height / localH : 1;
+  const rect = PM.contentRectOf({
+    boxW: localW,
+    boxH: localH,
     naturalW: isImg ? (el.naturalWidth || page.imageWidth || 0) : (el.width || 0),
     naturalH: isImg ? (el.naturalHeight || page.imageHeight || 0) : (el.height || 0),
-    objectFit: isImg && cs ? cs.objectFit : 'fill',
-    objectPosition: isImg && cs ? cs.objectPosition : '50% 50%',
+    objectFit: cs ? cs.objectFit : 'fill',
+    objectPosition: cs ? cs.objectPosition : '50% 50%',
     borderTop: cs ? num(cs.borderTopWidth) : 0,
     borderLeft: cs ? num(cs.borderLeftWidth) : 0,
     borderRight: cs ? num(cs.borderRightWidth) : 0,
@@ -447,6 +493,9 @@ function pmContentRectFor(page) {
     paddingRight: cs ? num(cs.paddingRight) : 0,
     paddingBottom: cs ? num(cs.paddingBottom) : 0,
   });
+  if (!rect) return null;
+  const scaleRect = function (v) { return { x: v.x * sx, y: v.y * sy, w: v.w * sx, h: v.h * sy }; };
+  return Object.assign(scaleRect(rect), { visible: scaleRect(rect.visible), clipped: rect.clipped });
 }
 
 function pmSyncAutoLayers() {
@@ -732,11 +781,15 @@ function pmSnapPageBubbles(page, bubbles) {
     stats.merged += snapped.stats.merged || 0;
     stats.pixels += snapped.stats.pixels || 0;
     stats.fills += snapped.stats.fills || 0;
+    // Remove consumed entries; carry the merged text into the one surviving overlay.
+    g.items.forEach(function (it) { out[it.idx] = null; });
     const resolved = PM.resolveOverlaps(snapped.bubbles, { maxRatio: 0.25, minWidth: 24, minHeight: 14 });
     resolved.forEach(function (rb) {
       const idx = (typeof rb.id === 'number') ? rb.id : -1;
       if (idx < 0 || idx >= out.length) return;
-      out[idx] = Object.assign({}, out[idx], {
+      out[idx] = Object.assign({}, bubbles[idx], {
+        text: rb.text, translation: rb.translation,
+        interior: rb.interior || null, background: rb.background || null,
         xPct: (gx0 + rb.x / scale) / W,
         yPct: (gy0 + rb.y / scale) / H,
         wPct: (rb.width / scale) / W,
@@ -748,13 +801,20 @@ function pmSnapPageBubbles(page, bubbles) {
   page.snapStats = stats;
   console.log('[MangaLens-pm] snap:', JSON.stringify(stats));
   page.image = null;                      // kaynak tuvali birak
-  return out;
+  return out.filter(Boolean);
 }
 
 function pmFinalizePage(page) {
   if (!page || page.state === 'done' || page.state === 'empty') return;
   page.bubbles = pmDedupeGlobal(page.bubbles);
   page.bubbles = pmSnapPageBubbles(page, page.bubbles);
+  if (page.captureRegion) {
+    const r = page.captureRegion;
+    page.bubbles = page.bubbles.map(function (b) {
+      return Object.assign({}, b, { xPct: r.x + b.xPct * r.w, yPct: r.y + b.yPct * r.h,
+        wPct: b.wPct * r.w, hPct: b.hPct * r.h });
+    });
+  }
   page.state = page.bubbles.length ? 'done' : 'empty';
   pageMode.stats.done++;
   pageMode.stats.bubbles += page.bubbles.length;

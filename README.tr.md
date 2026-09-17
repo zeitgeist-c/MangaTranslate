@@ -10,7 +10,7 @@ Chrome Manifest V3 uzantısı. Manga/manhwa/manhua sitelerindeki İngilizce konu
 
 ## Kurulum
 
-1. `MangaLensTR-3.2.2.zip` klasöre çıkarılır.
+1. `MangaLensTR-3.3.0.zip` klasöre çıkarılır.
 2. `chrome://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle (`manifest.json` içeren klasör).
 3. Popup → API sekmesi → en az 1 Gemini anahtarı ekle/test et/aktif yap.
 4. Sayfada: Sayfayı Çevir / Alan Seç / Oto Çevir.
@@ -18,6 +18,9 @@ Chrome Manifest V3 uzantısı. Manga/manhwa/manhua sitelerindeki İngilizce konu
 Paketleme: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\package.ps1` (sürümü manifest'ten okur, MV3 + JS doğrular, 12 dosyayı zipler).
 
 ## Özellikler
+
+- **3.3.0 yerleşim düzeltmeleri** — algılanan açık renkli balonun şekline uyan kaplama, gövde içinde otomatik yazı boyutu, ölçek/kaydırma ve görünür alan kırpma koordinatları düzeltildi.
+- **Gemma 4 31B** — görsel destekli üçüncü model seçeneği; varsayılan Gemini 3.5 Flash Lite. Sayfa önbelleği modele göre ayrılır. Gerçek Gemma API kalitesi henüz karşılaştırılmadı.
 
 - **Sayfa modu (tek tuş)** — önce görünen sayfayı çevirir, kaydırdıkça devam eder (ya da tüm bölümü); her balonun üstüne yazısı otomatik sığan Türkçe kutu koyar, üzerine gelince İngilizce orijinal görünür, sonuçlar sayfa bazında önbelleğe alınır.
 - **Balona oturtma (ek istek yok)** — her kutu, resmin gerçek içerik alanı hesaplanarak (object-fit, kenarlık, dolgu; transform/zoom'lu kaplar dahil) yerel piksel analiziyle **balon çerçevesine** oturtulur; panel ve sayfa zemini balon sanılmaz, kayma ve üst üste binme giderilir, gemini kotası değişmez.

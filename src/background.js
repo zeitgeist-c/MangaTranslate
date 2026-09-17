@@ -10,6 +10,7 @@ const MLCore = self.MLPagemodeCore;
 const GEMINI_MODELS = Object.freeze({
   DEFAULT: 'gemini-3.5-flash-lite',
   FALLBACK: 'gemini-3.1-flash-lite',
+  GEMMA: 'gemma-4-31b-it',
 });
 const GEMINI_MODEL_VALUES = Object.freeze(Object.values(GEMINI_MODELS));
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -338,7 +339,10 @@ async function callGemini({ apiKey, model, prompt, imageBase64, responseMimeType
     generationConfig: {
       maxOutputTokens: 8192,
       ...(normalizedModel === GEMINI_MODELS.FALLBACK && typeof temperature === 'number' ? { temperature } : {}),
-      ...(responseMimeType ? { responseMimeType } : {}),
+      // Gemma uses the JSON instructions in the prompt, without forcing a
+      // structured-output capability that is not documented for this endpoint.
+      ...(responseMimeType && normalizedModel !== GEMINI_MODELS.GEMMA ? { responseMimeType } : {}),
+      ...(normalizedModel === GEMINI_MODELS.GEMMA ? { thinkingConfig: { thinkingLevel: 'minimal' } } : {}),
     },
   };
 
@@ -388,7 +392,7 @@ async function callGemini({ apiKey, model, prompt, imageBase64, responseMimeType
   const partsArr = candidates[0]?.content?.parts || [];
   let text = '';
   for (const part of partsArr) {
-    if (typeof part.text === 'string') text += part.text + '\n';
+    if (!part.thought && typeof part.text === 'string') text += part.text + '\n';
   }
   text = text.trim();
 
@@ -733,14 +737,16 @@ function findQueuedDuplicate(cacheKey) {
  * v3.2: Bir bant istegi. Cache HIT ise hemen cevap doner (istek yok);
  * degilse kuyruga girer, sonuc PAGE_RESULT / PAGE_JOB_FAILED ile sayfaya itilir.
  */
-function handleTranslatePage(message, sender) {
+async function handleTranslatePage(message, sender) {
   const tabId = sender && sender.tab ? sender.tab.id : null;
-  const cacheKey = String(message.cacheKey || '');
+  const sourceCacheKey = String(message.cacheKey || '');
   const pageKey = String(message.pageKey || '');
   const bandIndex = Number(message.bandIndex || 0);
 
   if (!message.dataUrl) return Promise.resolve({ ok: false, error: 'dataUrl eksik' });
-  if (!cacheKey) return Promise.resolve({ ok: false, error: 'cacheKey eksik' });
+  if (!sourceCacheKey) return Promise.resolve({ ok: false, error: 'cacheKey eksik' });
+  const selectedModel = await getSelectedGeminiModel();
+  const cacheKey = sourceCacheKey + '|model:' + selectedModel;
   if (findQueuedDuplicate(cacheKey)) return Promise.resolve({ ok: true, duplicate: true });
 
   return pageCacheGet(cacheKey).then(cached => {
@@ -765,19 +771,19 @@ function handleTranslatePage(message, sender) {
       },
     };
     pageJobs.set(jobId, { tabId, cacheKey, pageKey, bandIndex, state: 'running' });
-    enqueueWithRateLimit(() => runPageJob(message, cacheKey, bandIndex), meta).catch(() => {});
+    enqueueWithRateLimit(() => runPageJob(message, cacheKey, bandIndex, selectedModel), meta).catch(() => {});
     return { ok: true, jobId, position: requestQueue.length + 1, bandIndex };
   });
 }
 
-async function runPageJob(message, cacheKey, bandIndex) {
+async function runPageJob(message, cacheKey, bandIndex, requestedModel) {
   const apiKey = await getActiveApiKey();
   if (!apiKey) {
     const e = new Error('Lutfen once Google Gemini API anahtari ekleyin ve aktif yapin.');
     e.status = 'invalid';
     throw e;
   }
-  const selectedModel = await getSelectedGeminiModel();
+  const selectedModel = requestedModel ? normalizeGeminiModel(requestedModel) : await getSelectedGeminiModel();
   const bandNote = message.bandCount > 1 ? '\n[Slice ' + (bandIndex + 1) + '/' + message.bandCount + ']' : '';
 
   const result = await executeWithModelFallback(selectedModel, model =>

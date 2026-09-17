@@ -282,7 +282,7 @@
     seedsPerBubble: 8,    // balon basina en fazla tohum denemesi
     maxRegionInkRatio: 8, // bolge alani / icindeki yazi bbox alani: buyukse panel/zemin
     runawayRatio: 0.35,   // pencere alanina gore bunu asarsa "arka plan"
-    margin: 3,            // bulunan bolgeye eklenecek kenar payi (px)
+    margin: 3,            // balon cercevesini korumak icin iceri alinacak pay (px)
     minSide: 8,
     textPad: 0.35,        // yazi bbox'ina eklenecek oransal pay
     textPadRatio: 0.28,   // metin blogu bulundugunda eklenecek pay (blok yuksekligine oranla)
@@ -474,6 +474,45 @@
     return used ? total / used : 0;
   }
 
+  // Keep the detected interior rather than painting its rectangular bounding box.
+  // Row envelopes bridge letter holes; a small inset preserves the printed outline.
+  function bubbleInterior(rows, width, height, margin) {
+    const inset = Math.max(1, Math.round(margin || 1));
+    const safe = rows.map(function (row, y) {
+      let left = row[0], right = row[1];
+      for (let k = y - inset; k <= y + inset; k++) {
+        if (!rows[k]) return [width, -1];
+        left = Math.max(left, rows[k][0]);
+        right = Math.min(right, rows[k][1]);
+      }
+      return [left + inset, right - inset];
+    });
+    // Find the broad body, independently of the bbox center: tails must not pull
+    // the text down or sideways. Every row of the chosen rectangle stays inside.
+    let best = null;
+    for (let top = 0; top < height; top++) {
+      let left = 0, right = width - 1;
+      for (let bottom = top; bottom < height; bottom++) {
+        left = Math.max(left, safe[bottom][0]);
+        right = Math.min(right, safe[bottom][1]);
+        if (right < left) break;
+        const area = (right - left + 1) * (bottom - top + 1);
+        if (!best || area > best.area) {
+          best = { x: left / width, y: top / height,
+            w: (right - left + 1) / width, h: (bottom - top + 1) / height, area: area };
+        }
+      }
+    }
+    if (!best || best.w * width < 4 || best.h * height < 4) return null;
+    const l = [], r = [];
+    safe.forEach(function (row, y) {
+      if (row[1] < row[0]) return;
+      l.push([row[0] / width, y / height], [row[0] / width, (y + 1) / height]);
+      r.push([(row[1] + 1) / width, y / height], [(row[1] + 1) / width, (y + 1) / height]);
+    });
+    return { polygon: l.concat(r.reverse()), textRect: { x: best.x, y: best.y, w: best.w, h: best.h } };
+  }
+
   function snapBubbles(input) {
     const opts = Object.assign({}, SNAP_DEFAULTS, (input && input.opts) || {});
     const data = input && input.data;
@@ -574,8 +613,14 @@
           if (rowMax[k] < 0) continue;
           const yy = wy0 + k;
           total += 2;
-          if (rowMin[k] > 0 && isInk(wx0 + rowMin[k] - 1, yy)) dark++;
-          if (rowMax[k] < wW - 1 && isInk(wx0 + rowMax[k] + 1, yy)) dark++;
+          // Anti-aliased outlines have a gray transition pixel before dark ink.
+          let darkLeft = false, darkRight = false;
+          for (let step = 1; step <= 3; step++) {
+            if (rowMin[k] >= step && isInk(wx0 + rowMin[k] - step, yy)) darkLeft = true;
+            if (rowMax[k] + step < wW && isInk(wx0 + rowMax[k] + step, yy)) darkRight = true;
+          }
+          if (darkLeft) dark++;
+          if (darkRight) dark++;
         }
         const coverage = total ? dark / total : 0;
         if (coverage < opts.minOutline) continue;
@@ -585,7 +630,13 @@
         const dist = Math.sqrt(Math.pow(bot.x0 + rw / 2 - ccx, 2) + Math.pow(bot.y0 + rh / 2 - ccy, 2));
         if (dist > boxDiag * (opts.maxShiftRatio || 0.6)) continue;   // baska ogeye atlamayi engelle
         const cost = (dist / boxDiag) * 0.9 + areaPenalty + (1 - coverage) * 0.6;
-        cands.push({ x: bot.x0, y: bot.y0, width: rw, height: rh, area: filled.area, coverage: coverage, cost: cost });
+        const rows = [];
+        for (let y = bot.y0; y <= bot.y1; y++) {
+          rows.push([wx0 + rowMin[y - wy0] - bot.x0, wx0 + rowMax[y - wy0] - bot.x0]);
+        }
+        const pixel = (sy * W + sx) * 4;
+        cands.push({ x: bot.x0, y: bot.y0, width: rw, height: rh, area: filled.area, coverage: coverage, cost: cost,
+          rows: rows, background: 'rgb(' + data[pixel] + ',' + data[pixel + 1] + ',' + data[pixel + 2] + ')' });
         if (cost <= opts.goodCost) break;                // yeterince iyi aday: erken cik
       }
       cands.sort(function (a, b) { return a.cost - b.cost; });
@@ -601,11 +652,16 @@
         const ink = inkIn(c.x, c.y, c.x + c.width - 1, c.y + c.height - 1);
         if (ink.count) {
           const inkBoxArea = Math.max(1, (ink.bx1 - ink.bx0 + 1) * (ink.by1 - ink.by0 + 1));
-          if ((c.width * c.height) / inkBoxArea > opts.maxRegionInkRatio) continue;
+          // Sparse text is normal in rounded speech balloons. Apply the panel
+          // rejection only to nearly rectangular regions, not oval interiors.
+          const rectangular = c.area / (c.width * c.height) > 0.88;
+          if (rectangular && (c.width * c.height) / inkBoxArea > opts.maxRegionInkRatio) continue;
         }
+        const interior = bubbleInterior(c.rows, c.width, c.height, opts.margin);
+        if (!interior) continue;
         snapped = {
-          x: c.x - opts.margin, y: c.y - opts.margin,
-          width: c.width + 2 * opts.margin, height: c.height + 2 * opts.margin, snap: 'bubble',
+          x: c.x, y: c.y, width: c.width, height: c.height, snap: 'bubble',
+          interior: interior, background: c.background,
         };
         break;
       }
@@ -666,7 +722,8 @@
       const cy = Math.max(0, Math.min(H - 1, Math.round(snapped.y)));
       const cw = Math.max(4, Math.min(W - cx, Math.round(snapped.width)));
       const ch = Math.max(4, Math.min(H - cy, Math.round(snapped.height)));
-      return Object.assign({}, b, { x: cx, y: cy, width: cw, height: ch, snap: snapped.snap });
+      return Object.assign({}, b, { x: cx, y: cy, width: cw, height: ch, snap: snapped.snap,
+        interior: snapped.interior || null, background: snapped.background || null });
     });
 
     // 3) ayni bolgeye oturanlari birlestir (buyuk kutunun cevirisi korunur)
@@ -674,8 +731,8 @@
     out.slice().sort(function (a, b) { return (b.width * b.height) - (a.width * a.height); }).forEach(function (b) {
       const hit = merged.find(function (m) { return iou(m, b) >= opts.mergeIou; });
       if (hit) {
-        if (b.translation && hit.translation.indexOf(b.translation) === -1) hit.translation = (hit.translation + ' ' + b.translation).trim();
-        if (b.text && hit.text.indexOf(b.text) === -1) hit.text = (hit.text + ' ' + b.text).trim();
+        if (b.translation && String(hit.translation || '').indexOf(b.translation) === -1) hit.translation = ((hit.translation || '') + ' ' + b.translation).trim();
+        if (b.text && String(hit.text || '').indexOf(b.text) === -1) hit.text = ((hit.text || '') + ' ' + b.text).trim();
         stats.merged++;
       } else {
         merged.push(Object.assign({}, b));
@@ -694,6 +751,8 @@
     for (let i = 0; i < order.length; i++) {
       for (let j = i + 1; j < order.length; j++) {
         const big = order[i], small = order[j];
+        // A detected contour must not be stretched or moved to resolve bbox overlap.
+        if (small.interior) continue;
         const ox = Math.min(big.x + big.width, small.x + small.width) - Math.max(big.x, small.x);
         const oy = Math.min(big.y + big.height, small.y + small.height) - Math.max(big.y, small.y);
         if (ox <= 0 || oy <= 0) continue;
@@ -748,6 +807,7 @@
     estimateFontSize: estimateFontSize,
     contentRectOf: contentRectOf,
     snapBubbles: snapBubbles,
+    bubbleInterior: bubbleInterior,
     inkBlocksIn: inkBlocksIn,
     textScoreIn: textScoreIn,
     resolveOverlaps: resolveOverlaps,

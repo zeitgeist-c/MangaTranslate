@@ -50,7 +50,7 @@ $node = Get-Command 'node.exe' -ErrorAction SilentlyContinue
 if (-not $node) {
     throw 'JavaScript sözdizimi doğrulaması için Node.js bulunamadı.'
 }
-foreach ($relativePath in @('popup\popup.js', 'src\background.js', 'src\content.js')) {
+foreach ($relativePath in @('popup\popup.js', 'src\background.js', 'src\content.js', 'src\pagemode-core.js', 'src\pagemode.js')) {
     & $node.Source --check (Join-Path $projectRoot $relativePath)
     if ($LASTEXITCODE -ne 0) {
         throw "JavaScript sözdizimi doğrulaması başarısız: $relativePath"
@@ -60,8 +60,11 @@ foreach ($relativePath in @('popup\popup.js', 'src\background.js', 'src\content.
 $packageName = "MangaLensTR-$version.zip"
 $packagePath = Join-Path $projectRoot $packageName
 if (Test-Path -LiteralPath $packagePath) {
-    Remove-Item -LiteralPath $packagePath -Force
+    throw "Paket zaten mevcut; eski paket korunuyor: $packagePath"
 }
+
+& $node.Source --test (Join-Path $projectRoot 'tests\*.test.js')
+if ($LASTEXITCODE -ne 0) { throw 'Paketleme öncesi testler başarısız.' }
 
 $archiveInputs = @(
     (Join-Path $projectRoot 'manifest.json'),

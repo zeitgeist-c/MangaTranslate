@@ -93,6 +93,53 @@ test('contentRectOf: % ve px object-position', () => {
 // ── B) snapBubbles ─────────────────────────────────────────────────────────
 function baseOpts() { return { brightLuma: 205, brightSpread: 45, inkLuma: 120, margin: 3 }; }
 
+test('detected contour and text area stay inside an oval without covering its outline', () => {
+  const W = 300, H = 200;
+  const d = grayPage(W, H, 90);
+  ellipse(d, W, H, 120, 90, 60, 40, 250, 30);
+  inkText(d, W, 100, 85, 8);
+  const result = core.snapBubbles({ data: d, width: W, height: H,
+    bubbles: [{ x: 70, y: 55, width: 100, height: 70, translation: 'Merhaba' }], opts: baseOpts() });
+  const b = result.bubbles[0];
+  assert.equal(b.snap, 'bubble');
+  assert.ok(b.interior.polygon.length > 8);
+  for (const p of b.interior.polygon) {
+    const x = b.x + p[0] * b.width, y = b.y + p[1] * b.height;
+    assert.ok(((x - 120) ** 2 / 3600 + (y - 90) ** 2 / 1600) < 0.72, 'mask must preserve outline');
+  }
+  const r = b.interior.textRect;
+  for (const x of [r.x, r.x + r.w]) for (const y of [r.y, r.y + r.h]) {
+    assert.ok(((b.x + x * b.width - 120) ** 2 / 3600 + (b.y + y * b.height - 90) ** 2 / 1600) < 0.72);
+  }
+  assert.equal(b.background, 'rgb(250,250,250)');
+});
+
+test('overlap resolution preserves detected contour coordinates', () => {
+  const b = { x: 30, y: 20, width: 40, height: 40, interior: { polygon: [], textRect: {} } };
+  const result = core.resolveOverlaps([{ x: 0, y: 0, width: 80, height: 80 }, b]);
+  assert.deepEqual(result[1], b);
+});
+
+test('interior text rectangle fits every row of an irregular balloon', () => {
+  const rows = Array.from({ length: 90 }, (_, y) => {
+    const edge = Math.round(Math.abs(y - 45) / 3);
+    return [edge, 100 - edge - (y > 30 && y < 50 ? 15 : 0)];
+  });
+  const shape = core.bubbleInterior(rows, 101, 90, 2);
+  const r = shape.textRect;
+  for (let y = Math.round(r.y * 90); y < Math.round((r.y + r.h) * 90); y++) {
+    assert.ok(r.x * 101 >= rows[y][0] + 2 - 1e-8);
+    assert.ok((r.x + r.w) * 101 <= rows[y][1] - 1 + 1e-8);
+  }
+});
+
+test('speech tail does not pull text away from the balloon body', () => {
+  const rows = Array.from({ length: 120 }, (_, y) => y < 60 ? [0, 99] : [45, 54]);
+  const r = core.bubbleInterior(rows, 100, 120, 2).textRect;
+  assert.ok((r.y + r.h / 2) * 120 < 40, 'text center must remain in the broad upper body');
+  assert.ok(r.w * 100 > 80, 'tail must not constrain the text to a narrow strip');
+});
+
 test('snapBubbles: kaymis kutu beyaz balona oturur', () => {
   const W = 300, H = 200;
   const d = grayPage(W, H, 90);
