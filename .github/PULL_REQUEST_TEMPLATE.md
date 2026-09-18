@@ -1,6 +1,7 @@
 # What changed
 
 ## How it was tested
-- [ ] `.\check.ps1` passes
+- [ ] `node --test tests/*.test.js` passes
+- [ ] `package.ps1` builds the versioned ZIP
 
 ## Screenshots (if UI)
