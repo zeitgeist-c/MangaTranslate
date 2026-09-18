@@ -784,6 +784,7 @@
     if (w * h < 150 * 150) return false;
     const ratio = w / h;
     if (ratio < 0.02 || ratio > 8) return false;       // uzun serit (webtoon) de gecerli: 1:50'ye kadar
+    if (/(^|[\/_.-])covers?([\/_.-]|$)/i.test(String(i.src || ''))) return false;
     const sig = (String(i.src || '') + ' ' + String(i.cls || '') + ' ' + String(i.alt || '')).toLowerCase();
     const hasPositive = POSITIVE.some(function (k) { return sig.indexOf(k) !== -1; });
     const hasNegative = NEGATIVE.some(function (k) { return sig.indexOf(k) !== -1; });

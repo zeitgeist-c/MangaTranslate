@@ -124,6 +124,18 @@ const fs = require('node:fs');
     }
     assert.ok(crop.separateKeys, 'different visible parts must have separate cache keys');
     assert.ok(crop.rejectedMovement, 'moving screenshot must not be placed using old coordinates');
+    const errorDisplay = await page.evaluate(() => {
+      pmEnsureStyles = function () {};
+      pmReportError('API erişimi reddedildi. https://example.test?key=private-test-token');
+      pmUpdatePill(); // A progress update must not erase the actual cause.
+      const details = document.getElementById('ml-error-details');
+      return { open: details.open, hidden: details.hidden,
+        text: document.getElementById('ml-error-message').textContent };
+    });
+    assert.equal(errorDisplay.open, true);
+    assert.equal(errorDisplay.hidden, false);
+    assert.ok(errorDisplay.text.includes('API erişimi reddedildi'));
+    assert.ok(!errorDisplay.text.includes('private-test-token'));
     console.log(JSON.stringify({ full, half, merged: result }, null, 2));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

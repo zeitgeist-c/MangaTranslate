@@ -78,6 +78,28 @@ body.ml-auto-hidden .ml-auto-layer { display: none !important; }
 
 .ml-pill-text { color: #a7f3d0 !important; }
 
+.ml-error-details[hidden] { display: none !important; }
+.ml-error-details summary { color: #fca5a5 !important; cursor: pointer !important; }
+.ml-error-message {
+  position: absolute !important;
+  bottom: calc(100% + 8px) !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  width: min(520px, 85vw) !important;
+  max-height: 35vh !important;
+  overflow: auto !important;
+  padding: 12px !important;
+  box-sizing: border-box !important;
+  background: #111827 !important;
+  color: #fff !important;
+  border: 1px solid #ef4444 !important;
+  border-radius: 8px !important;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  user-select: text !important;
+  text-align: left !important;
+}
+
 .ml-pill-btn {
   height: 26px !important;
   padding: 0 9px !important;

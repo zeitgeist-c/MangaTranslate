@@ -89,7 +89,15 @@
               <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
               <option value="gemma-4-31b-it">Gemma 4 31B (Görsel destekli)</option>
             </select>
-            <small>3.5 başarısız olursa 3.1 otomatik olarak bir kez denenir.</small>
+            <small>Seçili model hata verir veya kotası dolarsa diğer iki model sırayla denenir.</small>
+          </div>
+          <div class="model-setting">
+            <label class="switch-row" for="local-placement-toggle">
+              <span><strong>Yerel balon yerleşimi (deneysel)</strong><small>Kurulu yardımcı, İngilizce yazıyı balonla eşleştirerek kaymayı azaltır.</small></span>
+              <input type="checkbox" id="local-placement-toggle">
+            </label>
+            <small id="local-helper-status">Yardımcı durumu denetleniyor…</small>
+            <small>Uzantı kimliği: <span id="local-extension-id"></span></small>
           </div>
           <button class="btn-primary btn-compact" id="btn-save" type="button">Kaydet</button>
         </div>

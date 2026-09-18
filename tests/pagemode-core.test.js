@@ -110,6 +110,7 @@ test('estimateFontSize: kutu buyudukce yazi buyur, min/max sinirinda kalir', () 
 
 test('isMangaCandidate: reklam/avatar elenir, sayfa gorseli gecer', () => {
   assert.equal(core.isMangaCandidate({ w: 1200, h: 1800, src: 'https://x/reader/page-01.jpg', cls: 'page-img' }), true);
+  assert.equal(core.isMangaCandidate({ w: 400, h: 567, src: 'https://cdn.asurascans.com/asura-images/covers/story.webp', cls: '' }), false);
   assert.equal(core.isMangaCandidate({ w: 1200, h: 1800, src: 'https://x/logo.png', cls: 'site-logo' }), false);
   assert.equal(core.isMangaCandidate({ w: 900, h: 60, src: 'https://x/banner.jpg', cls: 'banner' }), false);
   assert.equal(core.isMangaCandidate({ w: 90, h: 90, src: 'https://x/avatar.jpg', cls: '' }), false);

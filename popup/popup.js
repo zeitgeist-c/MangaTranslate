@@ -20,6 +20,7 @@ const DEFAULTS = {
   geminiModel:      GEMINI_MODELS.DEFAULT,
   translationFontSize: 16,
   pageModeScope:    'onScroll',
+  localPlacementEnabled: false,
 };
 
 const $ = id => document.getElementById(id);
@@ -59,6 +60,9 @@ const el = {
   // v3.2: sayfa modu
   btnTranslatePages: $('btn-translate-pages'),
   pageScopeSelect:   $('page-scope'),
+  localPlacementToggle: $('local-placement-toggle'),
+  localHelperStatus: $('local-helper-status'),
+  localExtensionId: $('local-extension-id'),
 };
 
 const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
@@ -100,6 +104,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindTabs();
   await syncTranslationModeState();
   updateStatus(settings);
+  if (el.localExtensionId) el.localExtensionId.textContent = chrome.runtime.id;
+  chrome.runtime.sendMessage({ type: 'PING_LOCAL_HELPER' }).then(result => {
+    if (el.localHelperStatus) el.localHelperStatus.textContent = result?.ok
+      ? ('Yardımcı bağlı · model ' + (result.model ? 'hazır' : 'eksik') + ' · OCR ' + (result.ocr ? 'hazır' : 'eksik'))
+      : ('Yardımcı bağlı değil: ' + (result?.error || 'bilinmeyen hata'));
+  }).catch(error => {
+    if (el.localHelperStatus) el.localHelperStatus.textContent = 'Yardımcı bağlı değil: ' + error.message;
+  });
   await migrateLegacyApiKey();   // v2.6: eski tekil alanlardan tasima
   await renderApiKeyList();
   await chooseInitialTab();
@@ -144,6 +156,7 @@ function saveSettings() {
     geminiModel:      normalizeGeminiModel(el.modelSelect?.value),
     translationFontSize: normalizeTranslationFontSize(selectedFontSize?.value),
     pageModeScope:    normalizePageScope(el.pageScopeSelect?.value),
+    localPlacementEnabled: !!el.localPlacementToggle?.checked,
   };
   return new Promise(resolve => chrome.storage.sync.set(s, () => resolve(s)));
 }
@@ -160,6 +173,7 @@ function applySettingsToUI(s) {
   });
 
   if (el.pageScopeSelect) el.pageScopeSelect.value = normalizePageScope(s.pageModeScope);
+  if (el.localPlacementToggle) el.localPlacementToggle.checked = s.localPlacementEnabled === true;
 }
 
 function normalizeTranslationFontSize(value) {
@@ -755,7 +769,7 @@ async function testApiKeyById(id) {
 
   // v2.6: Status'a ozel toast mesajlari
   if (result.status === 'success' && result.fallbackUsed) {
-    showToast('✓ API, Gemini 3.1 yedek modeli ile çalışıyor', 'success');
+    showToast('✓ API, ' + getGeminiModelLabel(result.model) + ' yedek modeli ile çalışıyor', 'success');
   }
   else if (result.status === 'success')        showToast('✓ API çalışıyor — ' + getGeminiModelLabel(result.model), 'success');
   else if (result.fallbackAttempted)           showToast('✗ ' + result.message, 'error');

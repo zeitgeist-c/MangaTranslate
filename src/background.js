@@ -5,7 +5,9 @@
 
 // v3.2: sayfa modu saf yardimcilari (bant/dedupe/dogrulama) — content ile ayni kaynak
 importScripts('/src/pagemode-core.js');
+importScripts('/src/local-match.js');
 const MLCore = self.MLPagemodeCore;
+const MLLocalMatch = self.MLLocalMatch;
 
 const GEMINI_MODELS = Object.freeze({
   DEFAULT: 'gemini-3.5-flash-lite',
@@ -55,13 +57,61 @@ chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create('keepalive', { periodInMinutes: 0.4 }).catch(() => {});
 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'keepalive') processRateLimitedQueue();
+  if (alarm.name === 'keepalive') {
+    processRateLimitedQueue();
+    notifyPageProgress();
+  }
 });
 
 // Sw basladiginda son lastFinishTime'i yukle
 loadRateState();
 
+const NATIVE_HOST_NAME = 'com.mangalens.tr';
+let nativePort = null;
+const nativePending = new Map();
+let nextNativeId = 1;
+
+function nativeRequest(payload, timeoutMs = 90000) {
+  return new Promise((resolve, reject) => {
+    try {
+      if (!nativePort) {
+        nativePort = chrome.runtime.connectNative(NATIVE_HOST_NAME);
+        nativePort.onMessage.addListener(message => {
+          const pending = nativePending.get(message && message.id);
+          if (!pending) return;
+          nativePending.delete(message.id);
+          clearTimeout(pending.timer);
+          if (!message.ok) pending.reject(new Error(message.error || 'Yerel yardımcı hatası'));
+          else pending.resolve(message);
+        });
+        nativePort.onDisconnect.addListener(() => {
+          const error = new Error((chrome.runtime.lastError && chrome.runtime.lastError.message) || 'Yerel yardımcı bağlantısı kesildi');
+          nativePort = null;
+          nativePending.forEach(pending => { clearTimeout(pending.timer); pending.reject(error); });
+          nativePending.clear();
+        });
+      }
+      const id = nextNativeId++;
+      const timer = setTimeout(() => {
+        nativePending.delete(id);
+        reject(new Error('Yerel yardımcı zaman aşımı'));
+      }, timeoutMs);
+      nativePending.set(id, { resolve, reject, timer });
+      nativePort.postMessage(Object.assign({}, payload, { id }));
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+
+  if (message.type === 'PING_LOCAL_HELPER') {
+    nativeRequest({ type: 'ping' }, 10000)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
 
   if (message.type === 'EXTRACT_BUBBLES') {
     handleExtract(message)
@@ -105,11 +155,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     let cancelled = 0;
     for (const item of requestQueue) {
       if (!item) continue;
-      const match = message.all || (item.meta && item.meta.pageKey === message.pageKey);
+      const match = item.meta && item.meta.tabId === sender?.tab?.id && (message.all || item.meta.pageKey === message.pageKey);
       if (match && item.meta) { item.cancelled = true; cancelled++; }
     }
     pageJobs.forEach(job => {
-      if (message.all || job.pageKey === message.pageKey) job.state = 'cancelled';
+      if (job.tabId === sender?.tab?.id && (message.all || job.pageKey === message.pageKey)) job.state = 'cancelled';
     });
     sendResponse({ ok: true, cancelled });
     return true;
@@ -178,6 +228,34 @@ const PAGE_PROMPT = 'You are analyzing ONE image: a page (or a slice of a longer
   'NEVER return markdown.';
 
 function buildPagePrompt() { return PAGE_PROMPT; }
+
+function buildLocalTextPrompt(items) {
+  return 'Translate the following OCR text from English comic speech balloons into concise, natural Turkish. ' +
+    'These lines are in page order; use neighboring lines only as context. Return ONLY JSON: ' +
+    '{"items":[{"id":0,"translation":"..."}]}. Include each id exactly once, preserve meaning, never invent missing text.\n' +
+    JSON.stringify(items.map((item, id) => ({ id, text: item.ocr })));
+}
+
+function parseLocalTranslations(raw, items) {
+  const source = String(raw || '').trim();
+  const start = source.indexOf('{'), end = source.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new Error('Yerel metin çevirisi JSON değil');
+  const parsed = JSON.parse(source.slice(start, end + 1));
+  if (!Array.isArray(parsed.items)) throw new Error('Yerel metin çevirisi listesi yok');
+  const byId = new Map();
+  for (const entry of parsed.items) {
+    const id = Number(entry && entry.id);
+    const translation = String((entry && entry.translation) || '').trim();
+    if (!Number.isInteger(id) || id < 0 || id >= items.length || !translation || byId.has(id)) continue;
+    byId.set(id, translation.slice(0, PAGE_MAX_TEXT));
+  }
+  if (byId.size !== items.length) throw new Error('Yerel çeviride balon eksik');
+  return items.map((item, id) => {
+    const box = item.bubble_box;
+    return { text: item.ocr, translation: byId.get(id), x: box[0], y: box[1],
+      width: box[2] - box[0], height: box[3] - box[1], localPlacement: true };
+  });
+}
 
 function buildTranslationPrompt(translationMode, alternativeAttempt) {
   if (translationMode !== 'alternative') return BASE_PROMPT;
@@ -415,9 +493,15 @@ async function callGemini({ apiKey, model, prompt, imageBase64, responseMimeType
  * status: 'invalid' | 'rate_limited' | 'error'
  */
 function normalizeGeminiError(status, body) {
-  if (status === 401 || status === 403) {
-    const e = new Error('API key gecersiz veya bu modele erisim yetkisi yok.');
+  const reasons = (body?.error?.details || []).map(d => d.reason || '').join(' ');
+  if (status === 401 || /API_KEY_INVALID|API_KEY_EXPIRED/i.test(reasons)) {
+    const e = new Error('API anahtarı geçersiz veya süresi dolmuş.');
     e.status = 'invalid';
+    return e;
+  }
+  if (status === 403) {
+    const e = new Error('Bu modele erişim reddedildi: ' + (body?.error?.message || 'yetki bulunamadı'));
+    e.status = 'forbidden';
     return e;
   }
   if (status === 429) {
@@ -472,32 +556,24 @@ async function getSelectedGeminiModel() {
 
 async function executeWithModelFallback(selectedModel, operation) {
   const primaryModel = normalizeGeminiModel(selectedModel);
-  try {
-    const value = await operation(primaryModel);
-    return { value, model: primaryModel, fallbackUsed: false };
-  } catch (primaryError) {
-    if (primaryModel !== GEMINI_MODELS.DEFAULT) throw primaryError;
-    // Gecersiz anahtar ayni kalir: yedek modeli bosuna deneme (kota israfi + yaniltici mesaj).
-    if (primaryError && primaryError.status === 'invalid') throw primaryError;
-
-    console.warn('[MangaLens-bg] Primary model failed, trying fallback:', primaryError.message);
+  const models = [primaryModel].concat(GEMINI_MODEL_VALUES.filter(model => model !== primaryModel));
+  const errors = [];
+  for (const model of models) {
     try {
-      const value = await operation(GEMINI_MODELS.FALLBACK);
-      return { value, model: GEMINI_MODELS.FALLBACK, fallbackUsed: true };
-    } catch (fallbackError) {
-      const error = new Error(
-        'Gemini 3.5 ve 3.1 istekleri basarisiz oldu. ' +
-        '3.5: ' + primaryError.message + ' | 3.1: ' + fallbackError.message
-      );
-      error.status = fallbackError.status || primaryError.status || 'error';
-      error.fallbackAttempted = true;
-      error.errors = {
-        primary: primaryError.message,
-        fallback: fallbackError.message,
-      };
-      throw error;
+      const value = await operation(model);
+      return { value, model, fallbackUsed: model !== primaryModel };
+    } catch (error) {
+      // A bad credential or disconnected network affects every model.
+      if (error.status === 'invalid' || error.status === 'network' || error.status === 'cancelled') throw error;
+      errors.push({ model, message: error.message, status: error.status || 'error' });
     }
   }
+  const error = new Error('Tüm modeller başarısız: ' + errors.map(e => e.model + ': ' + e.message).join(' | '));
+  error.status = errors.some(e => e.status === 'rate_limited') ? 'rate_limited'
+    : errors.some(e => e.status === 'timeout') ? 'timeout' : 'error';
+  error.fallbackAttempted = true;
+  error.errors = errors;
+  throw error;
 }
 
 /**
@@ -512,7 +588,7 @@ async function testApiKey(apiKey) {
     );
     return {
       status: 'success',
-      message: result.fallbackUsed ? 'API, Gemini 3.1 yedek modeli ile calisiyor.' : 'API calisiyor.',
+      message: result.fallbackUsed ? 'API, ' + result.model + ' yedek modeli ile çalışıyor.' : 'API calisiyor.',
       model: result.model,
       fallbackUsed: result.fallbackUsed,
     };
@@ -674,6 +750,7 @@ async function processRateLimitedQueue() {
     const elapsed = now - lastFinishTime;
     if (lastFinishTime > 0 && elapsed < MIN_INTERVAL_MS) {
       const wait = MIN_INTERVAL_MS - elapsed;
+      if (item.meta?.onProgress) item.meta.onProgress('waiting');
       await new Promise(r => setTimeout(r, wait));
     }
     if (item.cancelled) {
@@ -682,6 +759,7 @@ async function processRateLimitedQueue() {
     }
 
     try {
+      if (item.meta?.onProgress) item.meta.onProgress('working');
       const result = await item.fn();
       saveRateState(Date.now());
       item.resolve(result);
@@ -697,6 +775,7 @@ async function processRateLimitedQueue() {
         const backoff = Math.min(BACKOFF_INITIAL_MS * Math.pow(2, item.retries), BACKOFF_MAX_MS);
         console.warn('[MangaLens-bg] retryable hata:', e.message, '-> backoff:', backoff, 'ms');
         saveRateState(Date.now() + backoff);  // backoff kadar bekleme zorla
+        if (item.meta?.onProgress) item.meta.onProgress('retrying', e.message);
         requestQueue.unshift({ ...item, retries: item.retries + 1 });
       } else {
         saveRateState(Date.now());
@@ -719,16 +798,23 @@ async function processRateLimitedQueue() {
 
 const pageJobs = new Map();   // jobId -> { tabId, cacheKey, pageKey, bandIndex, state }
 
+function notifyPageProgress() {
+  pageJobs.forEach(job => {
+    if (job.state !== 'running') return;
+    notifyTab(job.tabId, { type: 'PAGE_PROGRESS', pageKey: job.pageKey,
+      bandIndex: job.bandIndex, status: job.progress || 'queued', error: job.error || '' });
+  });
+}
+
 function notifyTab(tabId, payload) {
   if (typeof tabId !== 'number') return;
   chrome.tabs.sendMessage(tabId, payload).catch(() => {});   // sayfa kapandi/degisti
 }
 
-function findQueuedDuplicate(cacheKey) {
-  const queued = requestQueue.some(i => i.meta && i.meta.cacheKey === cacheKey && !i.cancelled);
-  if (queued) return true;
+function findQueuedDuplicate(cacheKey, tabId, pageKey, bandIndex) {
   for (const job of pageJobs.values()) {
-    if (job.cacheKey === cacheKey && job.state === 'running') return true;
+    if (job.cacheKey === cacheKey && job.state === 'running' && job.tabId === tabId &&
+        job.pageKey === pageKey && job.bandIndex === bandIndex) return true;
   }
   return false;
 }
@@ -746,8 +832,10 @@ async function handleTranslatePage(message, sender) {
   if (!message.dataUrl) return Promise.resolve({ ok: false, error: 'dataUrl eksik' });
   if (!sourceCacheKey) return Promise.resolve({ ok: false, error: 'cacheKey eksik' });
   const selectedModel = await getSelectedGeminiModel();
-  const cacheKey = sourceCacheKey + '|model:' + selectedModel;
-  if (findQueuedDuplicate(cacheKey)) return Promise.resolve({ ok: true, duplicate: true });
+  const localSetting = await chrome.storage.sync.get({ localPlacementEnabled: false });
+  const localEnabled = localSetting.localPlacementEnabled === true;
+  const cacheKey = sourceCacheKey + '|model:' + selectedModel + (localEnabled ? '|local:v1' : '');
+  if (findQueuedDuplicate(cacheKey, tabId, pageKey, bandIndex)) return Promise.resolve({ ok: true, duplicate: true });
 
   return pageCacheGet(cacheKey).then(cached => {
     if (cached) return { ok: true, cached: true, bubbles: cached.bubbles, model: cached.model };
@@ -755,8 +843,18 @@ async function handleTranslatePage(message, sender) {
     const jobId = crypto.randomUUID();
     const meta = {
       cacheKey: cacheKey,
+      tabId, pageKey,
+      onProgress: (status, error) => {
+        const job = pageJobs.get(jobId);
+        if (!job || job.state !== 'running') return;
+        job.progress = status;
+        job.error = error || '';
+        notifyPageProgress();
+      },
       onSettled: (err, result) => {
+        const job = pageJobs.get(jobId);
         pageJobs.delete(jobId);
+        if (!job || job.state === 'cancelled') return;
         if (err) {
           notifyTab(tabId, {
             type: 'PAGE_JOB_FAILED', jobId, pageKey, bandIndex,
@@ -771,12 +869,12 @@ async function handleTranslatePage(message, sender) {
       },
     };
     pageJobs.set(jobId, { tabId, cacheKey, pageKey, bandIndex, state: 'running' });
-    enqueueWithRateLimit(() => runPageJob(message, cacheKey, bandIndex, selectedModel), meta).catch(() => {});
+    enqueueWithRateLimit(() => runPageJob(message, cacheKey, bandIndex, selectedModel, localEnabled), meta).catch(() => {});
     return { ok: true, jobId, position: requestQueue.length + 1, bandIndex };
   });
 }
 
-async function runPageJob(message, cacheKey, bandIndex, requestedModel) {
+async function runPageJob(message, cacheKey, bandIndex, requestedModel, localEnabled = false) {
   const apiKey = await getActiveApiKey();
   if (!apiKey) {
     const e = new Error('Lutfen once Google Gemini API anahtari ekleyin ve aktif yapin.');
@@ -786,20 +884,55 @@ async function runPageJob(message, cacheKey, bandIndex, requestedModel) {
   const selectedModel = requestedModel ? normalizeGeminiModel(requestedModel) : await getSelectedGeminiModel();
   const bandNote = message.bandCount > 1 ? '\n[Slice ' + (bandIndex + 1) + '/' + message.bandCount + ']' : '';
 
-  const result = await executeWithModelFallback(selectedModel, model =>
-    callGemini({
-      apiKey,
-      model,
+  let localMatches = null;
+  let unassignedOcr = 0;
+  let ocrCandidates = [];
+  if (localEnabled) {
+    try {
+      const response = await nativeRequest({ type: 'analyze', dataUrl: message.dataUrl });
+      if (response.size && response.size[0] === message.w && response.size[1] === message.h && Array.isArray(response.matches)) {
+        localMatches = response.matches;
+        unassignedOcr = Number(response.unassigned_ocr) || 0;
+        ocrCandidates = Array.isArray(response.ocr_candidates) ? response.ocr_candidates : [];
+      } else {
+        console.warn('[MangaLens] yerel yardımcının resim boyutu uyuşmadı');
+      }
+    } catch (error) {
+      console.warn('[MangaLens] yerel yerleşim kullanılamadı:', error.message);
+    }
+  }
+  const reliable = localMatches && localMatches.length > 0 && unassignedOcr === 0 && localMatches.every(match =>
+    match && !match.needs_review && Number(match.bubble_confidence) >= 0.7 &&
+    typeof match.ocr === 'string' && match.ocr.trim() &&
+    MLLocalMatch.validBox(match.bubble_box, message.w, message.h));
+  let result;
+  let localUsed = false;
+  if (reliable) {
+    result = await executeWithModelFallback(selectedModel, async model => {
+      const raw = await callGemini({ apiKey, model, prompt: buildLocalTextPrompt(localMatches),
+        responseMimeType: 'application/json' });
+      return parseLocalTranslations(raw, localMatches);
+    });
+    localUsed = true;
+  }
+  if (!result) result = await executeWithModelFallback(selectedModel, async model => {
+    const raw = await callGemini({
+      apiKey, model,
       prompt: buildPagePrompt() + '\n[Image: ' + message.w + 'x' + message.h + ']' + bandNote,
       imageBase64: { mime: 'image/jpeg', base64: String(message.dataUrl).split(',')[1] || '' },
       responseMimeType: 'application/json',
-    })
-  );
-
-  const bubbles = parseBubbleArray(result.value, message.w, message.h, { coordSpace: 'auto', maxLen: PAGE_MAX_TEXT });
+    });
+    return parseBubbleArray(raw, message.w, message.h, { coordSpace: 'auto', maxLen: PAGE_MAX_TEXT });
+  });
+  let bubbles = result.value;
+  if (!localUsed && localMatches && bubbles.length) {
+    const refined = MLLocalMatch.refine(bubbles, localMatches.concat(ocrCandidates), message.w, message.h);
+    bubbles = refined.bubbles;
+    localUsed = refined.placed > 0;
+  }
   if (bubbles.length > 0) {
     await incrementTranslationStats();
-    await pageCacheSet(cacheKey, bubbles, result.model);
+    if (!localEnabled || localUsed) await pageCacheSet(cacheKey, bubbles, result.model);
   }
   return { bubbles, model: result.model, fallbackUsed: result.fallbackUsed };
 }

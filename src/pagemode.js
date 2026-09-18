@@ -33,6 +33,7 @@ const pageMode = {
   stats: { total: 0, done: 0, bubbles: 0, errors: 0 },
   teardown: [],
   lastUrl: location.href,
+  lastError: '',
 };
 
 function pmJobKey(pageId, bandIndex) { return String(pageId) + '#' + Number(bandIndex || 0); }
@@ -292,7 +293,7 @@ async function pmEnqueuePage(page) {
     page.state = 'error';
     page.attempts++;
     pageMode.stats.errors++;
-    pmUpdatePill('sayfa alinamadi');
+    pmReportError('Sayfa alınamadı: ' + e.message);
     console.warn('[MangaLens-pm] hazirlik hatasi:', e.message);
   }
 }
@@ -328,6 +329,7 @@ function pmClearPageOverlay(page) {
 }
 
 function pmFitBubbleText(box) {
+  if (box.dataset.mlEditing === 'true') return;
   const label = box.querySelector('.ml-auto-text');
   if (!label) return;
   const text = label.textContent || '';
@@ -361,6 +363,111 @@ function pmFitBubbleText(box) {
   label.style.setProperty('font-size', best + 'px', 'important');
 }
 
+const PM_EDITS_KEY = 'ml_page_edits_v1';
+
+async function pmSavePageEdits(page) {
+  if (!page || !page.cacheKey) return;
+  if (!chrome.storage || !chrome.storage.local) return;
+  const edits = page.bubbles.map(function (b, index) {
+    return b._mlEdited ? { index: index, text: b.text, translation: b.translation,
+      xPct: b.xPct, yPct: b.yPct, wPct: b.wPct, hPct: b.hPct } : null;
+  }).filter(Boolean);
+  try {
+    const data = await chrome.storage.local.get([PM_EDITS_KEY]);
+    const map = data[PM_EDITS_KEY] || {};
+    if (edits.length) map[page.cacheKey] = { ts: Date.now(), edits: edits };
+    const keys = Object.keys(map).sort(function (a, b) { return (map[a].ts || 0) - (map[b].ts || 0); });
+    while (keys.length > 200) delete map[keys.shift()];
+    await chrome.storage.local.set({ [PM_EDITS_KEY]: map });
+  } catch (error) { console.warn('[MangaLens-pm] düzenleme kaydedilemedi:', error.message); }
+}
+
+async function pmApplyPageEdits(page) {
+  if (!page || !page.cacheKey) return;
+  if (!chrome.storage || !chrome.storage.local) return;
+  try {
+    const data = await chrome.storage.local.get([PM_EDITS_KEY]);
+    const record = (data[PM_EDITS_KEY] || {})[page.cacheKey];
+    if (!record || !Array.isArray(record.edits)) return;
+    record.edits.forEach(function (edit) {
+      let b = page.bubbles[edit.index];
+      if (!b || b.text !== edit.text) b = page.bubbles.find(function (item) { return item.text === edit.text; });
+      if (!b || ![edit.xPct, edit.yPct, edit.wPct, edit.hPct].every(Number.isFinite)) return;
+      b.translation = String(edit.translation || b.translation || '');
+      b.xPct = Math.max(0, Math.min(1, edit.xPct));
+      b.yPct = Math.max(0, Math.min(1, edit.yPct));
+      b.wPct = Math.max(0.001, Math.min(1 - b.xPct, edit.wPct));
+      b.hPct = Math.max(0.001, Math.min(1 - b.yPct, edit.hPct));
+      b._mlEdited = true;
+    });
+    if (page.layer) pmLayoutPage(page);
+  } catch (error) { console.warn('[MangaLens-pm] düzenleme okunamadı:', error.message); }
+}
+
+function pmBindBubbleEditor(page, box) {
+  box.addEventListener('dblclick', function (event) {
+    event.preventDefault(); event.stopPropagation();
+    const b = page.bubbles[Number(box.dataset.mlIndex)];
+    const label = box.querySelector('.ml-auto-text');
+    if (!b || !label) return;
+    const before = b.translation || b.text || '';
+    box.dataset.mlEditing = 'true';
+    label.contentEditable = 'true';
+    label.focus();
+    const selection = window.getSelection();
+    if (selection) { selection.selectAllChildren(label); selection.collapseToEnd(); }
+    const finish = function (save) {
+      if (box.dataset.mlEditing !== 'true') return;
+      const changed = save ? (label.textContent || '').trim() : '';
+      b.translation = changed || before;
+      b._mlEdited = true;
+      label.contentEditable = 'false';
+      box.dataset.mlEditing = 'false';
+      box.dataset.mlText = '';
+      pmLayoutPage(page);
+      pmSavePageEdits(page);
+    };
+    label.onkeydown = function (keyEvent) {
+      if (keyEvent.key === 'Enter' && !keyEvent.shiftKey) { keyEvent.preventDefault(); finish(true); }
+      if (keyEvent.key === 'Escape') { keyEvent.preventDefault(); finish(false); }
+      keyEvent.stopPropagation();
+    };
+    label.onblur = function () { finish(true); };
+  });
+  box.addEventListener('pointerdown', function (event) {
+    if (!event.altKey || box.dataset.mlEditing === 'true') return;
+    event.preventDefault(); event.stopPropagation();
+    const b = page.bubbles[Number(box.dataset.mlIndex)];
+    const content = pmContentRectFor(page);
+    if (!b || !content || !content.w || !content.h) return;
+    const start = { x: event.clientX, y: event.clientY, xPct: b.xPct, yPct: b.yPct,
+      wPct: b.wPct, hPct: b.hPct, resize: event.shiftKey };
+    box.setPointerCapture(event.pointerId);
+    const move = function (moving) {
+      const dx = (moving.clientX - start.x) / content.w;
+      const dy = (moving.clientY - start.y) / content.h;
+      if (start.resize) {
+        b.wPct = Math.max(0.015, Math.min(1 - b.xPct, start.wPct + dx));
+        b.hPct = Math.max(0.015, Math.min(1 - b.yPct, start.hPct + dy));
+      } else {
+        b.xPct = Math.max(0, Math.min(1 - b.wPct, start.xPct + dx));
+        b.yPct = Math.max(0, Math.min(1 - b.hPct, start.yPct + dy));
+      }
+      pmLayoutPage(page);
+    };
+    const end = function () {
+      box.removeEventListener('pointermove', move);
+      box.removeEventListener('pointerup', end);
+      box.removeEventListener('pointercancel', end);
+      b._mlEdited = true;
+      pmSavePageEdits(page);
+    };
+    box.addEventListener('pointermove', move);
+    box.addEventListener('pointerup', end);
+    box.addEventListener('pointercancel', end);
+  });
+}
+
 function pmLayoutPage(page) {
   if (!page || !page.el || !page.el.isConnected) return;
   const layer = pmEnsureAutoLayer(page);
@@ -381,13 +488,16 @@ function pmLayoutPage(page) {
       label.className = 'ml-auto-text';
       box.appendChild(label);
       layer.appendChild(box);
+      pmBindBubbleEditor(page, box);
     }
+    box.dataset.mlIndex = String(i);
     const text = b.translation || b.text || '';
     if (box.dataset.mlText !== text) {
       box.dataset.mlText = text;
       box.querySelector('.ml-auto-text').textContent = text;
     }
-    if (box.title !== (b.text || '')) box.title = b.text || '';
+    const boxHint = (b.text || '') + '\nÇift tık: metni düzelt · Alt+sürükle: taşı · Alt+Shift+sürükle: boyutlandır';
+    if (box.title !== boxHint) box.title = boxHint;
     if (box.dataset.snap !== (b.snap || 'model')) box.dataset.snap = b.snap || 'model';
     box._mlTextRect = b.interior ? b.interior.textRect : null;
     if (b.interior) {
@@ -599,6 +709,7 @@ function pmHandleResult(msg) {
     };
     const g = PM.bandToGlobal(natural, slice, imageW, imageH);
     const out = { text: g.text, translation: g.translation, xPct: g.xPct, yPct: g.yPct, wPct: g.wPct, hPct: g.hPct };
+    if (b.localPlacement) out.localPlacement = true;
     // Model 0-1000 (binde-birim) koordinat dondurmus olabilir: alternatif yorumu da sakla.
     // Karar, kutularin icindeki yazi miktarina bakilarak sayfa duzeyinde verilir.
     const vals = [Number(b.x), Number(b.y), Number(b.width), Number(b.height)];
@@ -643,8 +754,7 @@ function pmDropJob(key, reason) {
     }
   }
   const r = String(reason || '');
-  pmUpdatePill(r === 'zaman asimi' ? 'zaman asimi'
-    : (/kota|rate|429/i.test(r) ? 'kota/limit' : 'hata'));
+  pmReportError(r === 'zaman asimi' ? 'Yanıt gecikti; sunucudan sonuç gelirse gösterilecek.' : r);
   pmPump();
 }
 
@@ -652,6 +762,22 @@ function pmDropJob(key, reason) {
 // Dev sayfalarda (webtoon 900x16000 gibi) tek tuval belleği patlatıyordu; bu yuzden
 // balonlar konum komsuluguna gore KUMELENIR ve her kume icin kucuk bir tuval cizilir.
 function pmSnapPageBubbles(page, bubbles) {
+  const local = bubbles.filter(function (b) { return b.localPlacement; });
+  if (local.length) {
+    const remaining = bubbles.filter(function (b) { return !b.localPlacement; });
+    // Keep detector ownership of the box. Use the existing pixel contour only
+    // when it agrees closely; this avoids painting over artwork or the outline.
+    const shaped = local.map(function (b) {
+      if (!page.image) return b;
+      const candidate = pmSnapPageBubbles({ image: page.image }, [Object.assign({}, b, { localPlacement: false })])[0];
+      if (!candidate || !candidate.interior) return b;
+      const a = { x: b.xPct, y: b.yPct, width: b.wPct, height: b.hPct };
+      const c = { x: candidate.xPct, y: candidate.yPct, width: candidate.wPct, height: candidate.hPct };
+      return PM.iou(a, c) >= 0.72 ? Object.assign({}, candidate, { localPlacement: true }) : b;
+    });
+    if (!remaining.length) { page.image = null; return shaped; }
+    return shaped.concat(pmSnapPageBubbles(page, remaining));
+  }
   const src = page && page.image;
   const W = src && src.width, H = src && src.height;
   if (!src || !src.canvas || !W || !H || !bubbles.length) return bubbles;
@@ -805,7 +931,10 @@ function pmSnapPageBubbles(page, bubbles) {
 }
 
 function pmFinalizePage(page) {
-  if (!page || page.state === 'done' || page.state === 'empty') return;
+  if (!page || page.state === 'done' || (page.state === 'empty' && !page.bubbles.length)) return;
+  // The worker can still finish a queued/retried request after our watchdog.
+  // An empty timed-out page must be allowed to display that eventual result.
+  const wasCountedEmpty = page.state === 'empty';
   page.bubbles = pmDedupeGlobal(page.bubbles);
   page.bubbles = pmSnapPageBubbles(page, page.bubbles);
   if (page.captureRegion) {
@@ -816,23 +945,33 @@ function pmFinalizePage(page) {
     });
   }
   page.state = page.bubbles.length ? 'done' : 'empty';
-  pageMode.stats.done++;
+  if (!wasCountedEmpty) pageMode.stats.done++;
   pageMode.stats.bubbles += page.bubbles.length;
   if (page.bubbles.length) pmLayoutPage(page);
   else pmClearPageOverlay(page);          // bos sonuc: gereksiz katman birakma
+  if (page.bubbles.length) pmApplyPageEdits(page);
 }
 
 function pmDedupeGlobal(list) {
+  const local = list.filter(function (b) { return b.localPlacement; });
+  const uniqueLocal = [];
+  local.forEach(function (b) {
+    const rect = { x: b.xPct, y: b.yPct, width: b.wPct, height: b.hPct };
+    if (!uniqueLocal.some(function (old) {
+      return PM.iou(rect, { x: old.xPct, y: old.yPct, width: old.wPct, height: old.hPct }) >= 0.6;
+    })) uniqueLocal.push(b);
+  });
+  list = list.filter(function (b) { return !b.localPlacement; });
   const scaled = list.map(function (b) {
     const s = { text: b.text, translation: b.translation, x: b.xPct * 10000, y: b.yPct * 10000, width: b.wPct * 10000, height: b.hPct * 10000 };
     if (b.alt) s.alt = b.alt;                    // koordinat yorumu secimi icin tasinir
     return s;
   });
-  return PM.dedupeBubbles(scaled, { iouThreshold: 0.6 }).map(function (b) {
+  return uniqueLocal.concat(PM.dedupeBubbles(scaled, { iouThreshold: 0.6 }).map(function (b) {
     const out = { text: b.text, translation: b.translation, xPct: b.x / 10000, yPct: b.y / 10000, wPct: b.width / 10000, hPct: b.height / 10000 };
     if (b.alt) out.alt = b.alt;
     return out;
-  });
+  }));
 }
 
 // ── Tarama ve gozlemciler ──────────────────────────────────────────────────
@@ -931,7 +1070,9 @@ function pmEnsurePill() {
     '<span class="ml-pill-text" id="ml-pill-text">Hazirlaniyor...</span>' +
     '<button type="button" class="ml-pill-btn" id="ml-pill-toggle">Gizle</button>' +
     '<button type="button" class="ml-pill-btn" id="ml-pill-retry">Yeniden</button>' +
-    '<button type="button" class="ml-pill-btn" data-kind="danger" id="ml-pill-stop">Durdur</button>';
+    '<button type="button" class="ml-pill-btn" data-kind="danger" id="ml-pill-stop">Durdur</button>' +
+    '<details class="ml-error-details" id="ml-error-details" hidden>' +
+    '<summary>Hata ayrıntısı</summary><div class="ml-error-message" id="ml-error-message"></div></details>';
   document.body.appendChild(pill);
 
   document.getElementById('ml-pill-toggle').addEventListener('click', function () {
@@ -962,6 +1103,21 @@ function pmUpdatePill(note) {
   if (pageMode.stats.errors) parts.push(pageMode.stats.errors + ' hata');
   if (note && !(note === 'hata' && pageMode.stats.errors)) parts.push(note);
   text.textContent = 'MangaLens: ' + parts.join(' · ');
+  const details = pill.querySelector('#ml-error-details');
+  const errorText = pill.querySelector('#ml-error-message');
+  if (details && errorText) {
+    details.hidden = !pageMode.lastError;
+    if (errorText.textContent !== pageMode.lastError) errorText.textContent = pageMode.lastError;
+  }
+}
+
+function pmReportError(reason) {
+  pageMode.lastError = String(reason || 'Bilinmeyen hata')
+    .replace(/([?&]key=)[^&\s]+/gi, '$1[gizlendi]')
+    .replace(/AIza[\w-]+/g, '[anahtar gizlendi]');
+  pmUpdatePill();
+  const details = document.getElementById('ml-error-details');
+  if (details) details.open = true;
 }
 
 // ── Baslat / durdur ────────────────────────────────────────────────────────
@@ -973,6 +1129,7 @@ function pmStartPageMode(scope) {
 
   pmStopPageMode(false);
   pageMode.active = true;
+  pageMode.lastError = '';
   pageMode.scope = (scope === 'visible' || scope === 'chapter') ? scope : 'onScroll';
   pageMode.stats = { total: 0, done: 0, bubbles: 0, errors: 0 };
   pageMode.queue = [];
@@ -1016,7 +1173,7 @@ function pmHandleControlMessage(message, sendResponse) {
     return true;
   }
   if (message.type === 'GET_PAGE_MODE_STATUS') {
-    sendResponse({ ok: true, active: pageMode.active, scope: pageMode.scope, stats: pageMode.stats });
+    sendResponse({ ok: true, active: pageMode.active, scope: pageMode.scope, stats: pageMode.stats, error: pageMode.lastError });
     return true;
   }
   return false;
@@ -1026,13 +1183,26 @@ function pmHandleControlMessage(message, sendResponse) {
 
 chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
   if (!message || typeof message.type !== 'string') return false;
-  if (message.type !== 'PAGE_RESULT' && message.type !== 'PAGE_JOB_FAILED') return false;
+  if (message.type !== 'PAGE_RESULT' && message.type !== 'PAGE_JOB_FAILED' && message.type !== 'PAGE_PROGRESS') return false;
   if (!pageMode.active) return false;
+
+  if (message.type === 'PAGE_PROGRESS') {
+    const key = pmJobKey(message.pageKey, message.bandIndex);
+    const rec = pageMode.jobs.get(key);
+    if (rec) {
+      clearTimeout(rec.watchdogId);
+      rec.watchdogId = setTimeout(function () { pmDropJob(key, 'zaman asimi'); }, PM_JOB_WATCHDOG_MS);
+      if (message.error) pmReportError(message.error);
+      else pmUpdatePill(message.status === 'working' ? 'Çevriliyor…' : 'Sırada bekleniyor…');
+    }
+    sendResponse({ ok: true });
+    return true;
+  }
 
   if (message.type === 'PAGE_RESULT') {
     pmHandleResult(message);
   } else {
-    pmDropJob(pmJobKey(message.pageKey, message.bandIndex), message.status === 'rate_limited' ? 'kota/limit' : (message.error || 'hata'));
+    pmDropJob(pmJobKey(message.pageKey, message.bandIndex), message.error || message.status || 'hata');
   }
   sendResponse({ ok: true });
   return true;
