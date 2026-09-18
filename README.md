@@ -10,7 +10,7 @@ Chrome Manifest V3 extension. Translates English speech bubbles on manga/manhwa/
 
 ## Install
 
-1. Extract `MangaLensTR-3.1.2.zip`.
+1. Extract `MangaLensTR-3.1.3.zip`.
 2. `chrome://extensions` → Developer mode → Load unpacked (folder with `manifest.json`).
 3. Popup → API tab → add at least one Gemini key, test, activate.
 4. On a page: Select Area or Auto Translate.
@@ -25,9 +25,9 @@ Packaging: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\package.ps
 - **Result tools** — `Retry` + `×` on every result box.
 - **Font size** — 16px / 20px applied to all results (`chrome.storage.sync`).
 - **Multiple keys** — add/test/activate Gemini keys (`chrome.storage.local`).
-- **Model choice** — `gemini-3.5-flash-lite` default / `gemini-3.1-flash-lite`; one fallback retry on 3.5 failure.
-- **Resilient capture** — original img/canvas first, visible-tab crop on CORS blocks.
-- **Request queue** — min 6 s interval, 30→120 s backoff on 429/network errors, 45 s timeout, keepalive alarm.
+- **Model choice** — `gemini-3.5-flash-lite` default, plus `gemini-3.1-flash-lite` and **Gemma 4 31B**; if the selected model fails, the others are tried in sequence.
+- **Resilient capture** — the selected area is cropped from the captured visible tab (the area must be on screen).
+- **Request queue** — min 6 s interval; 30→120 s backoff on 429/quota and timeout (max 3 retries), 45 s timeout, keepalive alarm; network errors fail fast.
 - **Stats** — per-minute/day/total success counters, local only.
 
 ## Project structure

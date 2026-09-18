@@ -9,6 +9,6 @@
 ## Expected
 
 ## Environment
-- WordArc version:
+- MangaLens TR version (manifest):
+- Browser + version (Chrome / Brave / Edge):
 - Windows version:
-- Install type (exe / source):

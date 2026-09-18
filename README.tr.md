@@ -10,7 +10,7 @@ Chrome Manifest V3 uzantısı. Manga/manhwa/manhua sitelerindeki İngilizce konu
 
 ## Kurulum
 
-1. `MangaLensTR-3.1.2.zip` klasöre çıkarılır.
+1. `MangaLensTR-3.1.3.zip` klasöre çıkarılır.
 2. `chrome://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle (`manifest.json` içeren klasör).
 3. Popup → API sekmesi → en az 1 Gemini anahtarı ekle/test et/aktif yap.
 4. Sayfada: Alan Seç veya Oto Çevir.
@@ -25,9 +25,9 @@ Paketleme: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\package.ps
 - **Sonuç araçları** — her kutuda `Yeniden` + `×`.
 - **Yazı boyutu** — 16px / 20px, tüm sonuçlara (`chrome.storage.sync`).
 - **Çoklu anahtar** — Gemini anahtarı ekle/test/aktifleştir (`chrome.storage.local`).
-- **Model seçimi** — varsayılan `gemini-3.5-flash-lite` / `gemini-3.1-flash-lite`; 3.5 hata verirse 1 kez 3.1 denemesi.
-- **Dayanıklı yakalama** — önce orijinal img/canvas, CORS engelinde sekmekırpması.
-- **İstek kuyruğu** — min 6 sn aralık, 429/ağ hatasında 30→120 sn bekleme, 45 sn zaman aşımı.
+- **Model seçimi** — varsayılan `gemini-3.5-flash-lite`, yedek `gemini-3.1-flash-lite`, ek **Gemma 4 31B**; seçili model başarısız olursa modeller sırayla otomatik denenir.
+- **Dayanıklı yakalama** — seçilen alan, sekme görüntüsünden yüksek çözünürlükte kırpılır (bölge ekranda görünür olmalı).
+- **İstek kuyruğu** — min 6 sn aralık; 429/kota ve zaman aşımında 30→120 sn backoff (en fazla 3 tekrar), 45 sn zaman aşımı; ağ hatası hızlı başarısız olur.
 - **İstatistik** — dakika/gün/toplam sayaç, yalnız yerel.
 
 ## Proje yapısı
