@@ -7,10 +7,12 @@
 const GEMINI_MODELS = Object.freeze({
   DEFAULT: 'gemini-3.5-flash-lite',
   FALLBACK: 'gemini-3.1-flash-lite',
+  GEMMA: 'gemma-4-31b-it',
 });
 const GEMINI_MODEL_LABELS = Object.freeze({
   [GEMINI_MODELS.DEFAULT]: 'Gemini 3.5 Flash Lite',
   [GEMINI_MODELS.FALLBACK]: 'Gemini 3.1 Flash Lite',
+  [GEMINI_MODELS.GEMMA]: 'Gemma 4 31B',
 });
 
 const DEFAULTS = {
@@ -722,7 +724,7 @@ async function testApiKeyById(id) {
 
   // v2.6: Status'a ozel toast mesajlari
   if (result.status === 'success' && result.fallbackUsed) {
-    showToast('✓ API, Gemini 3.1 yedek modeli ile çalışıyor', 'success');
+    showToast('✓ API, ' + getGeminiModelLabel(result.model) + ' yedek modeli ile çalışıyor', 'success');
   }
   else if (result.status === 'success')        showToast('✓ API çalışıyor — ' + getGeminiModelLabel(result.model), 'success');
   else if (result.fallbackAttempted)           showToast('✗ ' + result.message, 'error');

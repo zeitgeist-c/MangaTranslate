@@ -6,8 +6,14 @@
 const GEMINI_MODELS = Object.freeze({
   DEFAULT: 'gemini-3.5-flash-lite',
   FALLBACK: 'gemini-3.1-flash-lite',
+  GEMMA: 'gemma-4-31b-it',
 });
 const GEMINI_MODEL_VALUES = Object.freeze(Object.values(GEMINI_MODELS));
+const GEMINI_MODEL_LABELS = Object.freeze({
+  [GEMINI_MODELS.DEFAULT]: 'Gemini 3.5 Flash Lite',
+  [GEMINI_MODELS.FALLBACK]: 'Gemini 3.1 Flash Lite',
+  [GEMINI_MODELS.GEMMA]: 'Gemma 4 31B',
+});
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 const REQUEST_TIMEOUT = 45000;
@@ -230,7 +236,8 @@ async function callGemini({ apiKey, model, prompt, imageBase64, responseMimeType
     generationConfig: {
       maxOutputTokens: 8192,
       ...(normalizedModel === GEMINI_MODELS.FALLBACK && typeof temperature === 'number' ? { temperature } : {}),
-      ...(responseMimeType ? { responseMimeType } : {}),
+      ...(normalizedModel === GEMINI_MODELS.GEMMA ? { thinkingConfig: { thinkingLevel: 'minimal' } } : {}),
+      ...(normalizedModel !== GEMINI_MODELS.GEMMA && responseMimeType ? { responseMimeType } : {}),
     },
   };
 
@@ -280,7 +287,7 @@ async function callGemini({ apiKey, model, prompt, imageBase64, responseMimeType
   const partsArr = candidates[0]?.content?.parts || [];
   let text = '';
   for (const part of partsArr) {
-    if (typeof part.text === 'string') text += part.text + '\n';
+    if (!part.thought && typeof part.text === 'string') text += part.text + '\n';
   }
   text = text.trim();
 
@@ -303,9 +310,14 @@ async function callGemini({ apiKey, model, prompt, imageBase64, responseMimeType
  * status: 'invalid' | 'rate_limited' | 'error'
  */
 function normalizeGeminiError(status, body) {
-  if (status === 401 || status === 403) {
+  if (status === 401) {
     const e = new Error('API key gecersiz veya bu modele erisim yetkisi yok.');
     e.status = 'invalid';
+    return e;
+  }
+  if (status === 403) {
+    const e = new Error('Bu modele erisim yetkisi yok veya API istegi engellendi.');
+    e.status = 'forbidden';
     return e;
   }
   if (status === 429) {
@@ -360,32 +372,25 @@ async function getSelectedGeminiModel() {
 
 async function executeWithModelFallback(selectedModel, operation) {
   const primaryModel = normalizeGeminiModel(selectedModel);
-  try {
-    const value = await operation(primaryModel);
-    return { value, model: primaryModel, fallbackUsed: false };
-  } catch (primaryError) {
-    if (primaryModel !== GEMINI_MODELS.DEFAULT) throw primaryError;
-    // Gecersiz anahtar ayni kalir: yedek modeli bosuna deneme (kota israfi + yaniltici mesaj).
-    if (primaryError && primaryError.status === 'invalid') throw primaryError;
-
-    console.warn('[MangaLens-bg] Primary model failed, trying fallback:', primaryError.message);
+  const start = GEMINI_MODEL_VALUES.indexOf(primaryModel);
+  const attempts = GEMINI_MODEL_VALUES.slice(start).concat(GEMINI_MODEL_VALUES.slice(0, start));
+  const errors = {};
+  for (const model of attempts) {
     try {
-      const value = await operation(GEMINI_MODELS.FALLBACK);
-      return { value, model: GEMINI_MODELS.FALLBACK, fallbackUsed: true };
-    } catch (fallbackError) {
-      const error = new Error(
-        'Gemini 3.5 ve 3.1 istekleri basarisiz oldu. ' +
-        '3.5: ' + primaryError.message + ' | 3.1: ' + fallbackError.message
-      );
-      error.status = fallbackError.status || primaryError.status || 'error';
-      error.fallbackAttempted = true;
-      error.errors = {
-        primary: primaryError.message,
-        fallback: fallbackError.message,
-      };
-      throw error;
+      const value = await operation(model);
+      return { value, model, fallbackUsed: model !== primaryModel };
+    } catch (attemptError) {
+      if (attemptError?.status === 'invalid') throw attemptError;
+      errors[model] = attemptError?.message || String(attemptError);
+      console.warn('[MangaLens-bg] Model failed:', model, errors[model]);
     }
   }
+  const error = new Error('Tüm modeller başarısız oldu. ' + attempts
+    .map(model => GEMINI_MODEL_LABELS[model] + ': ' + errors[model]).join(' | '));
+  error.status = 'error';
+  error.fallbackAttempted = true;
+  error.errors = errors;
+  throw error;
 }
 
 /**
@@ -400,7 +405,7 @@ async function testApiKey(apiKey) {
     );
     return {
       status: 'success',
-      message: result.fallbackUsed ? 'API, Gemini 3.1 yedek modeli ile calisiyor.' : 'API calisiyor.',
+      message: result.fallbackUsed ? 'API, ' + GEMINI_MODEL_LABELS[result.model] + ' yedek modeli ile calisiyor.' : 'API calisiyor.',
       model: result.model,
       fallbackUsed: result.fallbackUsed,
     };
