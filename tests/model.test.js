@@ -25,81 +25,54 @@ vm.runInContext(source, context);
 
 const models = vm.runInContext('GEMINI_MODELS', context);
 const values = vm.runInContext('GEMINI_MODEL_VALUES', context);
-const every = (fn, ms) => new Promise((resolve, reject) => {
-  const timer = setTimeout(() => reject(new Error(`zaman asimi: ${ms}ms icinde bitmedi`)), ms);
-  Promise.resolve(fn()).then(v => { clearTimeout(timer); resolve(v); }, e => { clearTimeout(timer); reject(e); });
-});
 
 (async () => {
   // ── Model listesi ve etiket butunlugu ──────────────────────────────────────
   assert.deepEqual([...values], [
-    'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemma-4-26b-a4b-it', 'gemma-4-31b-it',
-  ], 'model rotasyonu hizli -> yavas sirali olmali');
+    'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemma-4-26b-a4b-it',
+  ], 'model rotasyonu hizli -> yavas sirali olmali (gemma-4-31b-it listede yok)');
+  assert.ok(!values.includes('gemma-4-31b-it'), 'kaldirilan model zincire geri sizmamali');
   const labels = vm.runInContext('GEMINI_MODEL_LABELS', context);
   for (const model of values) assert.ok(labels[model], `etiket eksik: ${model}`);
   const popupSource = fs.readFileSync(path.join(root, 'popup/popup.js'), 'utf8');
+  const popupHtml = fs.readFileSync(path.join(root, 'popup/popup.html'), 'utf8');
   for (const model of values) {
     assert.ok(popupSource.includes(`'${model}'`), `popup model listesinde yok: ${model}`);
+    assert.ok(popupHtml.includes(`value="${model}"`), `popup select secenegi yok: ${model}`);
   }
+  assert.ok(!popupHtml.includes('gemma-4-31b-it'), 'kaldirilan model popup listesinde kalmamali');
 
-  // ── Yedek zincir: secili modelden baslar, 4 modeli de dolasir ───────────────
+  // ── Yedek zincir: secili modelden baslar, 3 modeli de dolasir ───────────────
   for (const selected of values) {
     const tried = [];
     const result = await context.executeWithModelFallback(selected, async model => {
       tried.push(model);
-      if (tried.length < 4) throw new Error('temporarily unavailable');
+      if (tried.length < 3) throw new Error('temporarily unavailable');
       return 'translated';
     });
     assert.equal(tried[0], selected, 'once secili model denenmeli');
-    assert.equal(new Set(tried).size, 4, 'zincir 4 modeli de kapsamali');
-    assert.equal(result.model, tried[3]);
+    assert.equal(new Set(tried).size, 3, 'zincir 3 modeli de kapsamali');
+    assert.equal(result.model, tried[2]);
     assert.equal(result.fallbackUsed, true);
   }
 
   await assert.rejects(
-    context.executeWithModelFallback('gemma-4-31b-it', async () => {
+    context.executeWithModelFallback(models.GEMMA_FAST, async () => {
       const error = new Error('invalid key'); error.status = 'invalid'; throw error;
     }),
     /invalid key/,
   );
 
   const answer = await context.callGemini({
-    apiKey: 'test', model: 'gemma-4-31b-it', prompt: 'Read image',
+    apiKey: 'test-key', model: models.GEMMA_FAST, prompt: 'Read image',
     imageBase64: { mime: 'image/png', base64: 'AA==' }, responseMimeType: 'application/json',
   });
   assert.equal(answer, 'OK');
-  assert.match(requests[0].url, /gemma-4-31b-it:generateContent/);
-  assert.equal(requests[0].body.generationConfig.responseMimeType, undefined);
-  assert.equal(requests[0].body.generationConfig.thinkingConfig.thinkingLevel, 'minimal');
   assert.equal(requests[0].body.contents[0].parts[1].inline_data.mime_type, 'image/png');
 
-  // ── Yavas model korumasi: yumusak tavan verilir, hizli modelde verilmez ────
-  const attemptTimeouts = [];
-  await context.executeWithModelFallback(models.GEMMA, async (model, options) => {
-    attemptTimeouts.push({ model, timeoutMs: options && options.timeoutMs, soft: options && options.soft });
-    if (attemptTimeouts.length < 2) { const e = new Error('slow'); e.status = 'timeout'; throw e; }
-    return 'translated';
-  });
-  assert.deepEqual(attemptTimeouts[0], { model: 'gemma-4-31b-it', timeoutMs: 12000, soft: true },
-    'yavas model ilk denemede 12sn yumusak tavan almali');
-  assert.equal(attemptTimeouts[1].model, 'gemini-3.5-flash-lite', 'yumusak tavandan sonra hizli yedek gelmeli');
-  assert.equal(attemptTimeouts[1].timeoutMs, undefined, 'hizli modelde yumusak tavan yok (sert tavan 45sn)');
-
-  // ── Yumusak zaman asimi modeli gecici olarak zincirin sonuna atar ──────────
-  assert.equal(vm.runInContext("isModelDemoted('gemma-4-31b-it')", context), true,
-    'ardisik yumusak zaman asimi modeli devre disi birakmali');
-  const afterDemote = [];
-  const fast = await context.executeWithModelFallback(models.GEMMA, async model => {
-    afterDemote.push(model);
-    return 'translated';
-  });
-  assert.equal(afterDemote[0], 'gemini-3.5-flash-lite', 'yavas model devre disiyken zincir hizli modelle baslamali');
-  assert.equal(fast.model, 'gemini-3.5-flash-lite');
-  assert.equal(fast.fallbackUsed, true);
-
-  // ── Basarili istek devre disi durumunu temizler ────────────────────────────
-  await context.executeWithModelFallback('gemini-3.1-flash-lite', async () => 'translated');
-  assert.equal(vm.runInContext("isModelDemoted('gemini-3.1-flash-lite')", context), false);
+  // ── Kaldirilan model: bilinmeyen ad varsayilana duser, zincire sizmaz ──────
+  assert.equal(context.normalizeGeminiModel('gemma-4-31b-it'), 'gemini-3.5-flash-lite',
+    'kaldirilan model adi varsayilan modele normalize edilmeli');
 
   // ── Adaptif aralik matematigi (olcum: 2.5sn taban, 429'da artar, temizde azalir) ──
   assert.equal(vm.runInContext('MIN_INTERVAL_MS', context), 2500, 'taban aralik 2.5sn olmali');
@@ -109,7 +82,7 @@ const every = (fn, ms) => new Promise((resolve, reject) => {
   assert.equal(context.nextIntervalAfterRateLimit(20000), 30000, 'ust sinir 30sn');
 
   // ── Gemma modelleri: responseMimeType yok, thinkingConfig minimal ──────────
-  for (const gemma of [models.GEMMA, models.GEMMA_FAST]) {
+  for (const gemma of [models.GEMMA_FAST]) {
     const gemmaAnswer = await context.callGemini({
       apiKey: 'test-key', model: gemma, prompt: 'Read image',
       imageBase64: { mime: 'image/png', base64: 'AA==' }, responseMimeType: 'application/json',
@@ -119,27 +92,11 @@ const every = (fn, ms) => new Promise((resolve, reject) => {
     assert.match(gemmaRequest.url, new RegExp(`${gemma}:generateContent`));
     assert.equal(gemmaRequest.body.generationConfig.responseMimeType, undefined);
     assert.equal(gemmaRequest.body.generationConfig.thinkingConfig.thinkingLevel, 'minimal');
+    assert.equal(gemmaRequest.body.contents[0].parts[1].inline_data.mime_type, 'image/png');
   }
 
-  // ── callGemini timeoutMs: yavas yanit yumusak tavanla kesilir ──────────────
-  // Gercek fetch gibi davran: abort sinyali gelince AbortError ile reddet
-  fetchImpl = (url, options) => new Promise((resolve, reject) => {
-    const signal = options && options.signal;
-    if (!signal) return;
-    if (signal.aborted) {
-      const aborted = new Error('The operation was aborted.'); aborted.name = 'AbortError'; reject(aborted); return;
-    }
-    signal.addEventListener('abort', () => {
-      const aborted = new Error('The operation was aborted.'); aborted.name = 'AbortError'; reject(aborted);
-    });
-  });
-  const softStart = Date.now();
-  await assert.rejects(
-    every(() => context.callGemini({ apiKey: 'test-key', model: models.GEMMA, prompt: 'slow', timeoutMs: 300 }), 5000),
-    /zaman asimina ugradi/,
-  );
-  const softElapsed = Date.now() - softStart;
-  assert.ok(softElapsed >= 250 && softElapsed < 3000, `yumusak tavan ~300ms'de kesmeliydi (olculen ${softElapsed}ms)`);
+  // ── Sert tavan tek sabit: yumusak tavan makinesi v3.1.5'te kaldirildi ──────
+  assert.equal(vm.runInContext('REQUEST_TIMEOUT', context), 45000, 'model basina tavan 45sn olmali');
 
   // ── content.js: bekleme suresi kuyruk derinligiyle buyur, tavani asmaz ─────
   const contentSource = fs.readFileSync(path.join(root, 'src/content.js'), 'utf8');
@@ -178,5 +135,5 @@ const every = (fn, ms) => new Promise((resolve, reject) => {
     'Gemini 3.5 Flash Lite · yedek model · 1.1 sn');
   assert.equal(metaContext.resultMetaText(null), '');
 
-  console.log('Model fallback, yavas model korumasi, adaptif kuyruk ve meta satiri testleri gecti.');
+  console.log('Model zinciri, adaptif kuyruk, dinamik bekleme ve meta satiri testleri gecti.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

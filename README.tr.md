@@ -10,7 +10,7 @@ Chrome Manifest V3 uzantısı. Manga/manhwa/manhua sitelerindeki İngilizce konu
 
 ## Kurulum
 
-1. `MangaLensTR-3.1.4.zip` klasöre çıkarılır.
+1. `MangaLensTR-3.1.5.zip` klasöre çıkarılır.
 2. `chrome://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle (`manifest.json` içeren klasör).
 3. Popup → API sekmesi → en az 1 Gemini anahtarı ekle/test et/aktif yap.
 4. Sayfada: Alan Seç veya Oto Çevir.
@@ -25,7 +25,7 @@ Paketleme: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\package.ps
 - **Sonuç araçları** — her kutuda `Yeniden` + `×`.
 - **Yazı boyutu** — 16px / 20px, tüm sonuçlara (`chrome.storage.sync`).
 - **Çoklu anahtar** — Gemini anahtarı ekle/test/aktifleştir (`chrome.storage.local`).
-- **Model seçimi** — varsayılan `gemini-3.5-flash-lite` (~1 sn/istek), ek `gemini-3.1-flash-lite` (~2 sn), **Gemma 4 26B A4B** (~4 sn) ve **Gemma 4 31B** (yavaş: 30-60 sn); seçili model başarısız olursa diğerleri sırayla, en hızlı önce denenir. Yavaş işaretli modelin ilk denemesi 12 sn'lik yumuşak tavanla kesilir; tavanı aşarsa model 10 dk boyunca zincirin sonuna alınır.
+- **Model seçimi** — varsayılan `gemini-3.5-flash-lite` (gerçek sayfada ~2-6 sn), ek `gemini-3.1-flash-lite` (~2-14 sn) ve **Gemma 4 26B A4B** (~11-24 sn); seçili model başarısız olursa diğerleri sırayla, en hızlı önce denenir. (Gemma 4 31B 3.1.5'te kaldırıldı: istek başı 30-90 sn + gerçek sayfalarda sık HTTP 500, üstelik daha fazla balon da bulmuyor.)
 - **Dayanıklı yakalama** — seçilen alan, sekme görüntüsünden yüksek çözünürlükte kırpılır (bölge ekranda görünür olmalı).
 - **İstek kuyruğu** — adaptif aralık (2.5 sn taban, 429'da 6→30 sn'ye çıkar, temiz geçişte azalır); 429/kota ve zaman aşımında 30→120 sn backoff (en fazla 3 tekrar), 45 sn sert zaman aşımı; ağ hatası hızlı başarısız olur. Kuyruk derinse içerik tarafı daha uzun bekler — sabit 75 sn yüzünden sonuç kaybı olmaz.
 - **İstatistik** — dakika/gün/toplam sayaç, yalnız yerel.
