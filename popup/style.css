@@ -528,6 +528,9 @@ button:disabled {
 .model-setting { padding: 11px 0; border-bottom: 1px solid var(--border); }
 .model-setting > label strong { display: block; margin-bottom: 7px; font-size: 13px; }
 .model-setting > small { display: block; margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.model-setting > small.model-speed:empty { display: none; }
+.model-setting > small.model-speed { color: var(--faint); font-weight: 600; }
+.model-setting > small.model-speed-warn { color: var(--warning); }
 
 .toast {
   position: fixed;

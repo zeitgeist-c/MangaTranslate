@@ -10,7 +10,7 @@ Chrome Manifest V3 extension. Translates English speech bubbles on manga/manhwa/
 
 ## Install
 
-1. Extract `MangaLensTR-3.1.3.zip`.
+1. Extract `MangaLensTR-3.1.4.zip`.
 2. `chrome://extensions` → Developer mode → Load unpacked (folder with `manifest.json`).
 3. Popup → API tab → add at least one Gemini key, test, activate.
 4. On a page: Select Area or Auto Translate.
@@ -25,9 +25,9 @@ Packaging: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\package.ps
 - **Result tools** — `Retry` + `×` on every result box.
 - **Font size** — 16px / 20px applied to all results (`chrome.storage.sync`).
 - **Multiple keys** — add/test/activate Gemini keys (`chrome.storage.local`).
-- **Model choice** — `gemini-3.5-flash-lite` default, plus `gemini-3.1-flash-lite` and **Gemma 4 31B**; if the selected model fails, the others are tried in sequence.
+- **Model choice** — `gemini-3.5-flash-lite` default (~1 s/request), plus `gemini-3.1-flash-lite` (~2 s), **Gemma 4 26B A4B** (~4 s) and **Gemma 4 31B** (slow: 30-60 s); if the selected model fails, the others are tried in sequence, fastest first. A slow-flagged model gets a 12 s soft cap on its first attempt and is pushed to the end of the chain for 10 minutes if it exceeds it.
 - **Resilient capture** — the selected area is cropped from the captured visible tab (the area must be on screen).
-- **Request queue** — min 6 s interval; 30→120 s backoff on 429/quota and timeout (max 3 retries), 45 s timeout, keepalive alarm; network errors fail fast.
+- **Request queue** — adaptive interval (2.5 s base, 6→30 s after a 429, decays back on clean runs); 30→120 s backoff on 429/quota and timeout (max 3 retries), 45 s hard timeout, keepalive alarm; network errors fail fast. The content side waits longer when the queue is deep, so results are no longer lost to a fixed 75 s wait.
 - **Stats** — per-minute/day/total success counters, local only.
 
 ## Project structure

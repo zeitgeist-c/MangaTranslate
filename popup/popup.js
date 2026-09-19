@@ -7,12 +7,21 @@
 const GEMINI_MODELS = Object.freeze({
   DEFAULT: 'gemini-3.5-flash-lite',
   FALLBACK: 'gemini-3.1-flash-lite',
+  GEMMA_FAST: 'gemma-4-26b-a4b-it',
   GEMMA: 'gemma-4-31b-it',
 });
 const GEMINI_MODEL_LABELS = Object.freeze({
   [GEMINI_MODELS.DEFAULT]: 'Gemini 3.5 Flash Lite',
   [GEMINI_MODELS.FALLBACK]: 'Gemini 3.1 Flash Lite',
+  [GEMINI_MODELS.GEMMA_FAST]: 'Gemma 4 26B A4B',
   [GEMINI_MODELS.GEMMA]: 'Gemma 4 31B',
+});
+// v3.1.4: 19 Eyl olcumleriyle hiz notlari (gorsel + ceviri istegi, 800x1200, 4 balon)
+const GEMINI_MODEL_SPEEDS = Object.freeze({
+  [GEMINI_MODELS.DEFAULT]: { text: 'en hızlı · istek başına ~1 sn', slow: false },
+  [GEMINI_MODELS.FALLBACK]: { text: 'hızlı · istek başına ~2 sn', slow: false },
+  [GEMINI_MODELS.GEMMA_FAST]: { text: 'orta · istek başına ~4 sn', slow: false },
+  [GEMINI_MODELS.GEMMA]: { text: 'yavaş · istek başına 30-60 sn; ilk deneme 12 sn\'de kesilip hızlı yedeğe geçilir', slow: true },
 });
 
 const DEFAULTS = {
@@ -35,6 +44,7 @@ const el = {
   resultLine:    $('result-line'),
   modelSelect:   $('gemini-model'),
   modelNote:     $('model-note'),
+  modelSpeed:    $('model-speed'),
 
   fontSizeOptions: Array.from(document.querySelectorAll('input[name="translation-font-size"]')),
 
@@ -169,8 +179,38 @@ function getGeminiModelLabel(model) {
   return GEMINI_MODEL_LABELS[normalizeGeminiModel(model)];
 }
 
+function getGeminiModelSpeed(model) {
+  return GEMINI_MODEL_SPEEDS[normalizeGeminiModel(model)] || { text: '', slow: false };
+}
+
 function updateModelNote(model) {
-  if (el.modelNote) el.modelNote.textContent = getGeminiModelLabel(model);
+  const normalized = normalizeGeminiModel(model);
+  if (el.modelNote) el.modelNote.textContent = getGeminiModelLabel(normalized);
+  if (el.modelSpeed) {
+    const speed = getGeminiModelSpeed(normalized);
+    el.modelSpeed.textContent = speed.text ? (speed.slow ? '⚠ ' : '') + speed.text : '';
+    el.modelSpeed.classList.toggle('model-speed-warn', speed.slow === true);
+  }
+  refreshModelHealthNote(normalized);
+}
+
+// v3.1.4: SW'nin oturum ici model sagligi — yavas kalan model gecici olarak zincirin sonuna alinir
+async function refreshModelHealthNote(model) {
+  if (!el.modelSpeed) return;
+  let health = null;
+  try {
+    const data = await chrome.storage.session.get(['ml_model_health']);
+    health = data && data.ml_model_health;
+  } catch (_) {
+    return;   // storage.session erisilemezse not sessiz kalir
+  }
+  const entry = health && health[model];
+  const demoted = !!(entry && Number(entry.demotedUntil) > Date.now());
+  const speed = getGeminiModelSpeed(model);
+  if (!demoted) return;
+  el.modelSpeed.textContent = (speed.slow ? '⚠ ' : '') + speed.text +
+    ' — bu model şu an yavaş bulundu, otomatik olarak hızlı yedek model kullanılıyor.';
+  el.modelSpeed.classList.add('model-speed-warn');
 }
 
 function bindTabs() {
@@ -264,6 +304,9 @@ function startStatsPolling() {
 // ── Event Handlers ────────────────────────────────────────────────────────────
 
 function bindEvents() {
+  // v3.1.4: model degisince hiz notu hemen guncellensin (kaydetmeden de gorunur)
+  el.modelSelect?.addEventListener('change', () => updateModelNote(el.modelSelect.value));
+
   // Alan Sec ve Cevir (v1 - manuel crop, fallback)
   el.btnTranslate.addEventListener('click', async () => {
     el.btnTranslate.disabled = true;
