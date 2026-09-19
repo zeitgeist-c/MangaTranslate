@@ -10,7 +10,7 @@ Chrome Manifest V3 uzantısı. Manga/manhwa/manhua sitelerindeki İngilizce konu
 
 ## Kurulum
 
-1. `MangaLensTR-3.1.5.zip` klasöre çıkarılır.
+1. `MangaLensTR-3.1.6.zip` klasöre çıkarılır.
 2. `chrome://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle (`manifest.json` içeren klasör).
 3. Popup → API sekmesi → en az 1 Gemini anahtarı ekle/test et/aktif yap.
 4. Sayfada: Alan Seç veya Oto Çevir.
