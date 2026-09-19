@@ -11,7 +11,11 @@ let sm_controls = null;
 const MAX_SELECTIONS = 12;
 const MIN_SELECTION_SIZE = 24;
 const QUICK_CAPTURE_TIMEOUT_MS = 12000;
-const QUICK_TRANSLATE_TIMEOUT_MS = 75000;
+// v3.1.4: ceviri beklemesi kuyruk derinligine gore buyur — sabit 75sn, kuyrukta bekleyen
+// son isteklerde erken dusup "Gemini zaman asimi" gosteriyordu (SW isi bitirse de sonuc kayboluyordu).
+const QUICK_TRANSLATE_TIMEOUT_MS = 75000;      // taban bekleme (kuyruk bos)
+const TRANSLATE_TIMEOUT_PER_JOB_MS = 16000;    // kuyrukta bekleyen her ek is icin pay
+const TRANSLATE_TIMEOUT_MAX_MS = 240000;
 let selectionMode = {
   active: false,
   selections: [],
@@ -468,6 +472,7 @@ function createSelectionBox(s, isDraft) {
     'border:none!important;border-radius:999px!important;background:#ef4444!important;color:white!important;' +
     'font-size:16px!important;line-height:20px!important;font-weight:800!important;cursor:pointer!important;padding:0!important;pointer-events:auto!important;">×</button>' +
     '<div class="ml-selection-result" style="display:none!important;"></div>' +
+    '<div class="ml-selection-meta" style="display:none!important;"></div>' +
     makeResizeHandle('tl') + makeResizeHandle('tr') + makeResizeHandle('bl') + makeResizeHandle('br');
   s.boxEl = box;
   renderSelectionBox(s);
@@ -927,7 +932,8 @@ function createQuickJobBox(job, text) {
     'position:absolute!important;right:3px!important;top:3px!important;width:22px!important;height:22px!important;z-index:4!important;' +
     'border:none!important;border-radius:999px!important;background:#ef4444!important;color:white!important;' +
     'font-size:16px!important;line-height:20px!important;font-weight:800!important;cursor:pointer!important;padding:0!important;pointer-events:auto!important;">×</button>' +
-    '<div class="ml-selection-result" style="display:none!important;"></div>';
+    '<div class="ml-selection-result" style="display:none!important;"></div>' +
+    '<div class="ml-selection-meta" style="display:none!important;"></div>';
   var closeBtn = box.querySelector('.ml-quick-close');
   var retryBtn = box.querySelector('.ml-quick-retry');
   var suppressToolEvent = function(e) {
@@ -1031,6 +1037,7 @@ async function translateQuickJobFromViewport(job, translationMode, alternativeAt
   var dataUrl = scaled.canvas.toDataURL('image/jpeg', 0.86);
   if (!dataUrl) throw new Error('Seçili alan kırpılamadı');
 
+  var waitMs = await getTranslationTimeoutMs();
   var aiResp = await sendRuntimeMessageWithTimeout(
     {
       type: 'EXTRACT_BUBBLES',
@@ -1040,7 +1047,7 @@ async function translateQuickJobFromViewport(job, translationMode, alternativeAt
       translationMode: translationMode || 'standard',
       alternativeAttempt: alternativeAttempt || 0,
     },
-    QUICK_TRANSLATE_TIMEOUT_MS,
+    waitMs,
     'Gemini zaman aşımı'
   );
 
@@ -1058,7 +1065,7 @@ async function translateQuickJobFromViewport(job, translationMode, alternativeAt
     .map(function(b) { return (b.translation || b.text || '').trim(); })
     .filter(Boolean)
     .join('\n');
-  updateQuickJobState(job, 'done', translatedText || 'Çeviri boş');
+  updateQuickJobState(job, 'done', translatedText || 'Çeviri boş', aiResp);
 }
 
 function hideQuickJobForCapture(job) {
@@ -1123,6 +1130,22 @@ function waitForNextPaint() {
   });
 }
 
+// v3.1.4: kuyruk derinligine gore ceviri bekleme suresi (SW'den sorulur)
+function translationTimeoutMsForQueueDepth(depth) {
+  var queued = Number(depth) > 0 ? Math.floor(Number(depth)) : 0;
+  return Math.min(TRANSLATE_TIMEOUT_MAX_MS, QUICK_TRANSLATE_TIMEOUT_MS + TRANSLATE_TIMEOUT_PER_JOB_MS * queued);
+}
+
+function getTranslationTimeoutMs() {
+  return chrome.runtime.sendMessage({ type: 'GET_QUEUE_STATE' })
+    .then(function(state) {
+      return translationTimeoutMsForQueueDepth(state && state.queueDepth);
+    })
+    .catch(function() {
+      return QUICK_TRANSLATE_TIMEOUT_MS;
+    });
+}
+
 function sendRuntimeMessageWithTimeout(message, timeoutMs, timeoutMessage) {
   return new Promise(function(resolve, reject) {
     var settled = false;
@@ -1148,12 +1171,38 @@ function sendRuntimeMessageWithTimeout(message, timeoutMs, timeoutMessage) {
   });
 }
 
-function updateQuickJobState(job, state, text) {
+// v3.1.4: sonuc kutusunda cevaplayan model + sure bilgisi (uyari: elapsedMs kuyruk beklemesini de icerir)
+function resultMetaText(info) {
+  if (!info || !info.modelLabel) return '';
+  var parts = [String(info.modelLabel)];
+  if (info.fallbackUsed) parts.push('yedek model');
+  var ms = Number(info.elapsedMs);
+  if (Number.isFinite(ms) && ms > 0) parts.push((ms / 1000).toFixed(1) + ' sn');
+  return parts.join(' · ');
+}
+
+function setResultMeta(boxEl, info) {
+  if (!boxEl) return;
+  var meta = boxEl.querySelector('.ml-selection-meta');
+  if (!meta) return;
+  var text = resultMetaText(info);
+  meta.textContent = text;
+  meta.title = text || '';
+  meta.style.cssText = text
+    ? 'display:block!important;position:absolute!important;left:4px!important;right:4px!important;bottom:2px!important;' +
+      'text-align:right!important;font-family:system-ui,sans-serif!important;font-size:10px!important;line-height:1.2!important;' +
+      'font-weight:700!important;color:#334155!important;pointer-events:none!important;z-index:3!important;' +
+      'overflow:hidden!important;white-space:nowrap!important;text-overflow:ellipsis!important;text-shadow:0 1px 2px rgba(255,255,255,0.85)!important;'
+    : 'display:none!important;';
+}
+
+function updateQuickJobState(job, state, text, info) {
   if (!job.boxEl) return;
   job.boxEl.dataset.state = state;
   var result = job.boxEl.querySelector('.ml-selection-result');
   var retryBtn = job.boxEl.querySelector('.ml-quick-retry');
   if (!result) return;
+  setResultMeta(job.boxEl, state === 'done' ? info : null);
   if (retryBtn) {
     retryBtn.disabled = state === 'processing' || state === 'queued' || state === 'drawing';
     retryBtn.style.setProperty('display', state === 'done' || state === 'error' || state === 'empty' ? 'block' : 'none', 'important');
@@ -1162,7 +1211,7 @@ function updateQuickJobState(job, state, text) {
   result.style.cssText =
     'display:' + (state === 'ready' ? 'none' : 'flex') + '!important;position:absolute!important;inset:0!important;' +
     'align-items:center!important;justify-content:center!important;text-align:center!important;' +
-    'white-space:pre-wrap!important;overflow:hidden!important;padding:30px 8px 8px 8px!important;' +
+    'white-space:pre-wrap!important;overflow:hidden!important;padding:30px 8px 18px 8px!important;' +
     'box-sizing:border-box!important;font-family:system-ui,sans-serif!important;' +
     'font-size:' + translationFontSize + 'px!important;line-height:1.25!important;font-weight:750!important;' +
     'color:#111827!important;background:' + (
@@ -1277,6 +1326,7 @@ async function translateOneSelection(selection, index, total, translationMode, a
       : 'Çeviriliyor ' + index + '/' + total + '...';
     setSelectionBoxState(selection, 'processing', statusText);
 
+    var waitMs = await getTranslationTimeoutMs();
     var aiResp = await sendRuntimeMessageWithTimeout(
       {
         type: 'EXTRACT_BUBBLES',
@@ -1286,7 +1336,7 @@ async function translateOneSelection(selection, index, total, translationMode, a
         translationMode: translationMode || 'standard',
         alternativeAttempt: alternativeAttempt || 0,
       },
-      QUICK_TRANSLATE_TIMEOUT_MS,
+      waitMs,
       'Gemini zaman aşımı (kuyruk yoğunsa tekrar deneyin)'
     );
 
@@ -1304,7 +1354,7 @@ async function translateOneSelection(selection, index, total, translationMode, a
       .map(function(b) { return (b.translation || b.text || '').trim(); })
       .filter(Boolean)
       .join('\n');
-    setSelectionBoxState(selection, 'done', translatedText || 'Çeviri boş');
+    setSelectionBoxState(selection, 'done', translatedText || 'Çeviri boş', aiResp);
   } catch (e) {
     console.warn('[MangaLens] selection translate failed:', e.message);
     setSelectionBoxState(selection, 'error', e.message || 'Çeviri hatası');
@@ -1312,11 +1362,12 @@ async function translateOneSelection(selection, index, total, translationMode, a
     selection.inFlight = false;
   }
 }
-function setSelectionBoxState(selection, state, text) {
+function setSelectionBoxState(selection, state, text, info) {
   if (!selection.boxEl) return;
   var result = selection.boxEl.querySelector('.ml-selection-result');
   var retryBtn = selection.boxEl.querySelector('.ml-selection-retry');
   if (!result) return;
+  setResultMeta(selection.boxEl, state === 'done' ? info : null);
   if (retryBtn) {
     retryBtn.disabled = state === 'processing' || state === 'preparing';
     retryBtn.style.setProperty('display', state === 'done' || state === 'error' || state === 'empty' ? 'block' : 'none', 'important');
@@ -1331,7 +1382,7 @@ function setSelectionBoxState(selection, state, text) {
   result.style.cssText =
     'display:' + (state === 'ready' ? 'none' : 'flex') + '!important;position:absolute!important;inset:0!important;' +
     'align-items:center!important;justify-content:center!important;text-align:center!important;' +
-    'white-space:pre-wrap!important;overflow:hidden!important;padding:30px 8px 8px 8px!important;' +
+    'white-space:pre-wrap!important;overflow:hidden!important;padding:30px 8px 18px 8px!important;' +
     'box-sizing:border-box!important;font-family:system-ui,sans-serif!important;' +
     'font-size:' + translationFontSize + 'px!important;line-height:1.25!important;font-weight:750!important;' +
     'color:#111827!important;background:' + (

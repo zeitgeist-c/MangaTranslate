@@ -6,42 +6,124 @@
 const GEMINI_MODELS = Object.freeze({
   DEFAULT: 'gemini-3.5-flash-lite',
   FALLBACK: 'gemini-3.1-flash-lite',
+  GEMMA_FAST: 'gemma-4-26b-a4b-it',
   GEMMA: 'gemma-4-31b-it',
 });
+// Sirasi = yedek model rotasyon sirasi (hizli -> yavas). Secili modelden baslanir.
 const GEMINI_MODEL_VALUES = Object.freeze(Object.values(GEMINI_MODELS));
 const GEMINI_MODEL_LABELS = Object.freeze({
   [GEMINI_MODELS.DEFAULT]: 'Gemini 3.5 Flash Lite',
   [GEMINI_MODELS.FALLBACK]: 'Gemini 3.1 Flash Lite',
+  [GEMINI_MODELS.GEMMA_FAST]: 'Gemma 4 26B A4B',
   [GEMINI_MODELS.GEMMA]: 'Gemma 4 31B',
 });
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
-const REQUEST_TIMEOUT = 45000;
+const REQUEST_TIMEOUT = 45000;        // model basina sert tavan
 
-// v2: Rate limit yonetimi (Gemini 10 RPM = ~6sn minimum aralik)
-const MIN_INTERVAL_MS = 6000;        // istekler arasi minimum bekleme
+// v3.1.4: yavas isaretli model icin ilk deneme tavani. Asilirsa yedek modele gecilir;
+// yedegi olmayan son adayda sert tavan (45sn) gecerli kalir. Test icin degistirilebilir.
+const MODEL_SOFT_TIMEOUTS = {
+  [GEMINI_MODELS.GEMMA]: 12000,   // olculdu: gemma-4-31b-it istek basi 29-60sn
+};
+const MODEL_DEMOTE_AFTER = 1;         // kac yumusak zaman asimi sonrasi zincirin sonuna alinir
+const MODEL_DEMOTE_MS = 10 * 60 * 1000;
+
+// v2: Rate limit yonetimi — v3.1.4 adaptif aralik
+// Olcum (19 Eyl): 2.5sn x 24 istek temiz (24 RPM), 2.0sn'de 9. istekte 429 -> anahtar siniri 30 RPM.
+const MIN_INTERVAL_MS = 2500;         // taban aralik (istekler arasi)
+const MAX_INTERVAL_MS = 30000;        // 429 sonrasi ulasilabilecek en yuksek aralik
+const INTERVAL_DECAY = 0.85;          // basarili istekte araligi yumusakca dusur
 const BACKOFF_INITIAL_MS = 30000;     // 429 alinca ilk bekleme
 const BACKOFF_MAX_MS = 120000;        // maksimum backoff
 const requestQueue = [];
 let lastFinishTime = 0;
+let intervalMs = MIN_INTERVAL_MS;
 let activeRequest = false;
 
 // v3: SW state persistence — lastFinishTime storage.session'da saklanir
 const RATE_STATE_KEY = 'ml_rate_state';
+const MODEL_HEALTH_KEY = 'ml_model_health';
 const TRANSLATION_STATS_KEY = 'translationStats';
+
+// v3.1.4: model hiz sagligi (oturum ici) — { [model]: { avgMs, softTimeouts, demotedUntil } }
+let modelHealth = {};
 
 async function loadRateState() {
   try {
     const data = await chrome.storage.session.get([RATE_STATE_KEY]);
     lastFinishTime = data[RATE_STATE_KEY]?.lastFinish || 0;
-  } catch(e) { lastFinishTime = 0; }
+    const saved = Number(data[RATE_STATE_KEY]?.intervalMs);
+    intervalMs = Number.isFinite(saved) && saved > 0
+      ? Math.min(MAX_INTERVAL_MS, Math.max(MIN_INTERVAL_MS, saved))
+      : MIN_INTERVAL_MS;
+  } catch(e) { lastFinishTime = 0; intervalMs = MIN_INTERVAL_MS; }
 }
 
-async function saveRateState(ts) {
+async function saveRateState(ts, nextInterval) {
   lastFinishTime = ts;
+  if (Number.isFinite(nextInterval) && nextInterval > 0) {
+    intervalMs = Math.min(MAX_INTERVAL_MS, Math.max(MIN_INTERVAL_MS, nextInterval));
+  }
   try {
-    await chrome.storage.session.set({ [RATE_STATE_KEY]: { lastFinish: ts } });
+    await chrome.storage.session.set({ [RATE_STATE_KEY]: { lastFinish: ts, intervalMs } });
   } catch(e) {}
+}
+
+async function loadModelHealth() {
+  try {
+    const data = await chrome.storage.session.get([MODEL_HEALTH_KEY]);
+    const saved = data[MODEL_HEALTH_KEY];
+    modelHealth = (saved && typeof saved === 'object') ? saved : {};
+  } catch(e) { modelHealth = {}; }
+}
+
+function persistModelHealth() {
+  try {
+    chrome.storage.session.set({ [MODEL_HEALTH_KEY]: modelHealth });
+  } catch(e) {}
+}
+
+function isModelDemoted(model, now = Date.now()) {
+  const entry = modelHealth[model];
+  return !!(entry && Number(entry.demotedUntil) > now);
+}
+
+function recordModelSuccess(model, elapsedMs) {
+  const entry = modelHealth[model] || {};
+  const previous = Number(entry.avgMs) > 0 ? entry.avgMs : elapsedMs;
+  entry.avgMs = Math.round(previous * 0.6 + elapsedMs * 0.4);
+  entry.softTimeouts = 0;
+  entry.demotedUntil = 0;
+  entry.updatedAt = Date.now();
+  modelHealth[model] = entry;
+  persistModelHealth();
+}
+
+function recordModelSlow(model, elapsedMs, capMs) {
+  const entry = modelHealth[model] || {};
+  entry.softTimeouts = (Number(entry.softTimeouts) || 0) + 1;
+  entry.lastSoftTimeoutMs = capMs;
+  if (!(Number(entry.avgMs) > 0)) entry.avgMs = Math.round(elapsedMs);
+  entry.updatedAt = Date.now();
+  if (entry.softTimeouts >= MODEL_DEMOTE_AFTER) {
+    entry.demotedUntil = Date.now() + MODEL_DEMOTE_MS;
+    console.warn('[MangaLens-bg] yavas model tespit edildi:', model,
+      '-> ' + Math.round(MODEL_DEMOTE_MS / 60000) + ' dk zincirin sonuna alindi');
+  }
+  modelHealth[model] = entry;
+  persistModelHealth();
+}
+
+// v3.1.4: adaptif aralik saf matematigi (test edilebilir)
+function nextIntervalAfterSuccess(current) {
+  const value = Number.isFinite(current) && current > 0 ? current : MIN_INTERVAL_MS;
+  return Math.max(MIN_INTERVAL_MS, Math.round(value * INTERVAL_DECAY));
+}
+
+function nextIntervalAfterRateLimit(current) {
+  const value = Number.isFinite(current) && current > 0 ? current : MIN_INTERVAL_MS;
+  return Math.min(MAX_INTERVAL_MS, Math.max(6000, Math.round(value * 2)));
 }
 
 // v3: Alarm — SW'i uyanik tut + queue isle
@@ -55,8 +137,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'keepalive') processRateLimitedQueue();
 });
 
-// Sw basladiginda son lastFinishTime'i yukle
+// Sw basladiginda son lastFinishTime'i ve model sagligini yukle
 loadRateState();
+loadModelHealth();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
@@ -65,6 +148,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then(result => sendResponse({ success: true, ...result }))
       .catch(err => sendResponse({ success: false, error: err.message, errors: err.errors }));
     return true;
+  }
+
+  // v3.1.4: content tarafindaki bekleme suresini kuyruk derinligine gore ayarlamak icin
+  if (message.type === 'GET_QUEUE_STATE') {
+    sendResponse({
+      queueDepth: requestQueue.length,
+      activeRequest,
+      intervalMs: Math.max(MIN_INTERVAL_MS, intervalMs),
+    });
+    return false;
   }
 
   if (message.type === 'CAPTURE_TAB') {
@@ -140,19 +233,26 @@ async function handleExtract({ dataUrl, w, h, translationMode, alternativeAttemp
   }
   const selectedModel = await getSelectedGeminiModel();
 
-  // v2: rate-limited queue uzerinden calistir
+  // v2: rate-limited queue uzerinden calistir (v3.1.4: deneme basi tavan bilgisi de gecilir)
+  const startedAt = Date.now();
   const result = await enqueueWithRateLimit(() =>
-    executeWithModelFallback(selectedModel, model =>
-      callMultimodal(apiKey, model, dataUrl, w, h, translationMode, alternativeAttempt)
+    executeWithModelFallback(selectedModel, (model, attemptOptions) =>
+      callMultimodal(apiKey, model, dataUrl, w, h, translationMode, alternativeAttempt, attemptOptions)
     )
   );
+  const elapsedMs = Date.now() - startedAt;
   const bubbles = result.value;
 
   if (bubbles && bubbles.length > 0) {
     await incrementTranslationStats();
-    return { bubbles, model: result.model, fallbackUsed: result.fallbackUsed };
   }
-  return { bubbles: [], model: result.model, fallbackUsed: result.fallbackUsed };
+  return {
+    bubbles: bubbles || [],
+    model: result.model,
+    modelLabel: GEMINI_MODEL_LABELS[result.model] || result.model,
+    fallbackUsed: result.fallbackUsed,
+    elapsedMs,
+  };
 }
 
 function getMinuteBucket(date = new Date()) {
@@ -200,7 +300,7 @@ async function incrementTranslationStats() {
   return stats;
 }
 
-async function callMultimodal(apiKey, model, dataUrl, w, h, translationMode, alternativeAttempt) {
+async function callMultimodal(apiKey, model, dataUrl, w, h, translationMode, alternativeAttempt, attemptOptions) {
   const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl);
   if (!m) throw new Error('Gecersiz dataUrl formati');
   const mime = m[1];
@@ -214,6 +314,7 @@ async function callMultimodal(apiKey, model, dataUrl, w, h, translationMode, alt
     imageBase64: { mime, base64 },
     responseMimeType: 'application/json',
     temperature: model === GEMINI_MODELS.FALLBACK ? (isAlternative ? 0.65 : 0.2) : undefined,
+    timeoutMs: attemptOptions && attemptOptions.timeoutMs,
   });
 
   return parseBubbleArray(text || '[]', w, h);
@@ -221,8 +322,9 @@ async function callMultimodal(apiKey, model, dataUrl, w, h, translationMode, alt
 /**
  * v2.7: Tek Gemini client helper.
  * Translation + test + response hardening (finishReason, candidates, empty).
+ * v3.1.4: timeoutMs ile deneme basi tavan (yavas model koruması) desteklenir.
  */
-async function callGemini({ apiKey, model, prompt, imageBase64, responseMimeType, temperature }) {
+async function callGemini({ apiKey, model, prompt, imageBase64, responseMimeType, temperature, timeoutMs }) {
   if (!apiKey) throw new Error('API key eksik');
   const normalizedModel = normalizeGeminiModel(model);
 
@@ -236,15 +338,18 @@ async function callGemini({ apiKey, model, prompt, imageBase64, responseMimeType
     generationConfig: {
       maxOutputTokens: 8192,
       ...(normalizedModel === GEMINI_MODELS.FALLBACK && typeof temperature === 'number' ? { temperature } : {}),
-      ...(normalizedModel === GEMINI_MODELS.GEMMA ? { thinkingConfig: { thinkingLevel: 'minimal' } } : {}),
-      ...(normalizedModel !== GEMINI_MODELS.GEMMA && responseMimeType ? { responseMimeType } : {}),
+      ...(normalizedModel === GEMINI_MODELS.GEMMA || normalizedModel === GEMINI_MODELS.GEMMA_FAST
+        ? { thinkingConfig: { thinkingLevel: 'minimal' } } : {}),
+      ...(normalizedModel !== GEMINI_MODELS.GEMMA && normalizedModel !== GEMINI_MODELS.GEMMA_FAST && responseMimeType
+        ? { responseMimeType } : {}),
     },
   };
 
   const url = GEMINI_BASE + '/' + normalizedModel + ':generateContent?key=' + apiKey;
 
+  const attemptTimeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : REQUEST_TIMEOUT;
   const ctrl = new AbortController();
-  const tid = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT);
+  const tid = setTimeout(() => ctrl.abort(), attemptTimeout);
 
   let res;
   try {
@@ -370,22 +475,40 @@ async function getSelectedGeminiModel() {
   return normalizeGeminiModel(data.geminiModel);
 }
 
+/**
+ * v3.1.4: Secili modelden baslar. Yavas isaretli model (MODEL_SOFT_TIMEOUTS) icin ilk deneme
+ * yumusak tavanla kesilir ve hemen yedek modele gecilir; ardisik yumusak zaman asimi modeli
+ * MODEL_DEMOTE_MS boyunca zincirin sonuna atar. Yedek yoksa sert tavan (REQUEST_TIMEOUT) gecerli.
+ */
 async function executeWithModelFallback(selectedModel, operation) {
   const primaryModel = normalizeGeminiModel(selectedModel);
   const start = GEMINI_MODEL_VALUES.indexOf(primaryModel);
-  const attempts = GEMINI_MODEL_VALUES.slice(start).concat(GEMINI_MODEL_VALUES.slice(0, start));
+  const fullChain = GEMINI_MODEL_VALUES.slice(start).concat(GEMINI_MODEL_VALUES.slice(0, start));
+  const now = Date.now();
+  const healthy = fullChain.filter(model => !isModelDemoted(model, now));
+  const chain = healthy.length > 0 ? healthy : fullChain;   // hepsi yavas isaretliyse tam zincir denenir
   const errors = {};
-  for (const model of attempts) {
+
+  for (let i = 0; i < chain.length; i++) {
+    const model = chain[i];
+    const hasNextModel = i + 1 < chain.length;
+    const softCap = hasNextModel ? (MODEL_SOFT_TIMEOUTS[model] || 0) : 0;
+    const attemptOptions = softCap > 0 ? { timeoutMs: softCap, soft: true } : {};
+    const attemptStartedAt = Date.now();
     try {
-      const value = await operation(model);
+      const value = await operation(model, attemptOptions);
+      recordModelSuccess(model, Date.now() - attemptStartedAt);
       return { value, model, fallbackUsed: model !== primaryModel };
     } catch (attemptError) {
       if (attemptError?.status === 'invalid') throw attemptError;
       errors[model] = attemptError?.message || String(attemptError);
+      if (attemptError?.status === 'timeout' && softCap > 0) {
+        recordModelSlow(model, Date.now() - attemptStartedAt, softCap);
+      }
       console.warn('[MangaLens-bg] Model failed:', model, errors[model]);
     }
   }
-  const error = new Error('Tüm modeller başarısız oldu. ' + attempts
+  const error = new Error('Tüm modeller başarısız oldu. ' + chain
     .map(model => GEMINI_MODEL_LABELS[model] + ': ' + errors[model]).join(' | '));
   error.status = 'error';
   error.fallbackAttempted = true;
@@ -542,32 +665,38 @@ async function processRateLimitedQueue() {
   activeRequest = true;
 
   try {
-    // onceki istek BITTIKTEN sonra MIN_INTERVAL_MS gecmis mi?
+    // onceki istek BITTIKTEN sonra gecerli aralik kadar gecmis mi? (v3.1.4: aralik adaptif)
     const now = Date.now();
     const elapsed = now - lastFinishTime;
-    if (lastFinishTime > 0 && elapsed < MIN_INTERVAL_MS) {
-      const wait = MIN_INTERVAL_MS - elapsed;
+    const spacing = Math.max(MIN_INTERVAL_MS, intervalMs);
+    if (lastFinishTime > 0 && elapsed < spacing) {
+      const wait = spacing - elapsed;
       await new Promise(r => setTimeout(r, wait));
     }
 
     try {
       const result = await item.fn();
-      saveRateState(Date.now());
+      saveRateState(Date.now(), nextIntervalAfterSuccess(intervalMs));
       item.resolve(result);
     } catch (e) {
       // 429 veya timeout → backoff ile retry
       // Retry edilebilir mi? status'e bak (mesaj dili degisebilir, regex tek basina yetmez).
       const errText = String((e && e.message) || '');
       const errStatus = e && e.status;
+      if (errStatus === 'rate_limited' || /429|rate[\s_-]?limit|kota/i.test(errText)) {
+        const raised = nextIntervalAfterRateLimit(intervalMs);
+        console.warn('[MangaLens-bg] rate limit -> aralik', intervalMs, '->', raised, 'ms');
+        intervalMs = raised;
+      }
       const isRetryable = errStatus === 'rate_limited' || errStatus === 'timeout' ||
         /429|timeout|rate[\s_-]?limit|kota|zaman as/i.test(errText);
       if (isRetryable && item.retries < 3) {
         const backoff = Math.min(BACKOFF_INITIAL_MS * Math.pow(2, item.retries), BACKOFF_MAX_MS);
         console.warn('[MangaLens-bg] retryable hata:', e.message, '-> backoff:', backoff, 'ms');
-        saveRateState(Date.now() + backoff);  // backoff kadar bekleme zorla
+        saveRateState(Date.now() + backoff, intervalMs);  // backoff kadar bekleme zorla
         requestQueue.unshift({ ...item, retries: item.retries + 1 });
       } else {
-        saveRateState(Date.now());
+        saveRateState(Date.now(), intervalMs);
         item.reject(e);
       }
     }
