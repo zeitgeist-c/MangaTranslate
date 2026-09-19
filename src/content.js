@@ -168,21 +168,25 @@ function exitSelectionMode(options) {
 function createSelectionControls() {
   sm_controls = document.createElement('div');
   sm_controls.id = 'ml-selection-controls';
+  // v3.1.6: width:max-content sart — left:50% + auto genislikte tarayici cubugu
+  // viewport'un yarisina sinirliyor, butonlar sikisip etiketler 2-4 satira kiriliyordu.
   sm_controls.style.cssText =
     'position:fixed!important;bottom:18px!important;left:50%!important;' +
     'transform:translateX(-50%)!important;' +
+    'width:max-content!important;max-width:calc(100vw - 16px)!important;box-sizing:border-box!important;' +
     'background:rgba(17,24,39,0.96)!important;color:#f9fafb!important;' +
     'border:1px solid rgba(255,255,255,0.16)!important;border-radius:8px!important;' +
-    'padding:10px!important;display:flex!important;align-items:center!important;' +
-    'gap:8px!important;z-index:2147483647!important;font-family:system-ui,sans-serif!important;' +
+    'padding:8px!important;display:flex!important;align-items:center!important;' +
+    'flex-wrap:wrap!important;justify-content:center!important;' +
+    'gap:6px!important;z-index:2147483647!important;font-family:system-ui,sans-serif!important;' +
     'box-shadow:0 14px 40px rgba(0,0,0,0.34)!important;';
   sm_controls.innerHTML =
-    '<span id="ml-selection-count" style="font-size:12px;font-weight:700;white-space:nowrap;">Secili: 0 / ' + MAX_SELECTIONS + '</span>' +
-    '<span id="ml-selection-msg" style="font-size:12px;color:#a7f3d0;min-width:88px;"></span>' +
-    '<button id="ml-undo" type="button" style="' + selectionControlButtonStyle(false) + '">Son Alani Geri Al</button>' +
-    '<button id="ml-clear" type="button" style="' + selectionControlButtonStyle(false) + '">Tumunu Temizle</button>' +
-    '<button id="ml-cancel" type="button" style="' + selectionControlButtonStyle(false) + '">Iptal Esc</button>' +
-    '<button id="ml-confirm" type="button" style="' + selectionControlButtonStyle(true) + '">Cevir Enter</button>';
+    '<span id="ml-selection-count" style="font-size:12px;font-weight:700;white-space:nowrap;flex:0 0 auto;line-height:1.2;">Seçili: 0/' + MAX_SELECTIONS + '</span>' +
+    '<span id="ml-selection-msg" style="font-size:12px;color:#a7f3d0;flex:1 1 auto;min-width:64px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2;"></span>' +
+    '<button id="ml-undo" type="button" style="' + selectionControlButtonStyle(false) + '">Geri Al</button>' +
+    '<button id="ml-clear" type="button" style="' + selectionControlButtonStyle(false) + '">Temizle</button>' +
+    '<button id="ml-cancel" type="button" style="' + selectionControlButtonStyle(false) + '">İptal (Esc)</button>' +
+    '<button id="ml-confirm" type="button" style="' + selectionControlButtonStyle(true) + '">Çevir (Enter)</button>';
   document.body.appendChild(sm_controls);
   document.getElementById('ml-undo').addEventListener('click', undoLastSelection);
   document.getElementById('ml-clear').addEventListener('click', clearSelections);
@@ -191,7 +195,12 @@ function createSelectionControls() {
 }
 
 function selectionControlButtonStyle(primary) {
-  return 'height:30px!important;padding:0 10px!important;border-radius:6px!important;' +
+  // v3.1.6: sabit satir yuksekligi + nowrap + inline-flex ile yazi kutusu butona tam oturur.
+  // Sayfa CSS'i line-height/padding buyutse bile metin tasmaz (kutular !important ile sabit).
+  return 'height:30px!important;min-height:30px!important;box-sizing:border-box!important;' +
+    'display:inline-flex!important;align-items:center!important;justify-content:center!important;' +
+    'white-space:nowrap!important;flex:0 0 auto!important;line-height:1!important;' +
+    'padding:0 10px!important;border-radius:6px!important;' +
     'border:1px solid ' + (primary ? '#2563eb' : 'rgba(255,255,255,0.18)') + '!important;' +
     'background:' + (primary ? '#2563eb' : 'rgba(255,255,255,0.08)') + '!important;' +
     'color:#fff!important;font-size:12px!important;font-weight:700!important;cursor:pointer!important;';
@@ -199,7 +208,7 @@ function selectionControlButtonStyle(primary) {
 
 function updateSelectionControls(message) {
   var count = document.getElementById('ml-selection-count');
-  if (count) count.textContent = 'Secili: ' + selectionMode.selections.length + ' / ' + MAX_SELECTIONS;
+  if (count) count.textContent = 'Seçili: ' + selectionMode.selections.length + '/' + MAX_SELECTIONS;
   if (message) setSelectionMessage(message);
 }
 
@@ -242,7 +251,7 @@ function onSmStart(e) {
   var local = clientToImageLocal(page.el, e.clientX, e.clientY);
   var layer = ensureSelectionLayer(page.el, page.pageId);
   if (!layer) {
-    updateSelectionControls('Gorsel hazir degil');
+    updateSelectionControls('Görsel hazır değil');
     return;
   }
   var draft = {
@@ -296,7 +305,7 @@ function onSmEnd(e) {
   selectionMode.drawing = null;
   if (s.width < MIN_SELECTION_SIZE || s.height < MIN_SELECTION_SIZE) {
     if (s.boxEl) s.boxEl.remove();
-    updateSelectionControls('Alan cok kucuk');
+    updateSelectionControls('Alan çok küçük');
     return;
   }
   s.boxEl.classList.remove('ml-selection-draft');
@@ -852,7 +861,7 @@ function onQuickStart(e) {
     hPct: 0,
     timeoutId: null,
   };
-  draft.boxEl = createQuickJobBox(draft, 'Seciliyor...');
+  draft.boxEl = createQuickJobBox(draft, 'Seçiliyor...');
   layer.appendChild(draft.boxEl);
   quickTranslateMode.drawing = draft;
   draft.timeoutId = setTimeout(function() {
