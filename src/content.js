@@ -1245,7 +1245,7 @@ function clampInt(v, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
-// v2.7: Orijinal img fetch (CORS izinli siteler icin)
+// v2.7: Kucuk hucreleri Gemini okunabilirligi icin buyut (orijinal cozunurluk yetersizse)
 function maybeUpscale(canvas, minSize) {
   if (!minSize) minSize = MIN_CELL_SIZE;
   var side = Math.min(canvas.width, canvas.height);
