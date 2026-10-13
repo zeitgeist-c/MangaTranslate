@@ -31,11 +31,14 @@ $requiredFiles = @(
     'assets\icon128.png',
     'popup\popup.html',
     'popup\popup.js',
+    'popup\ui.js',
+    'options\settings.html',
+    'options\settings.js',
+    'src\keys.js',
     'popup\style.css',
     'src\background.js',
     'src\content.js',
     'src\providers.js',
-    'popup\page-popup.js',
     'src\page-background.js',
     'src\page-content.js',
     'src\page\offscreen.html',
@@ -68,7 +71,7 @@ $node = Get-Command 'node.exe' -ErrorAction SilentlyContinue
 if (-not $node) {
     throw 'JavaScript sözdizimi doğrulaması için Node.js bulunamadı.'
 }
-foreach ($relativePath in @('popup\popup.js', 'popup\page-popup.js', 'src\background.js', 'src\content.js', 'src\providers.js', 'src\page-background.js', 'src\page-content.js', 'src\page\offscreen.mjs', 'src\page\layout.mjs')) {
+foreach ($relativePath in @('popup\popup.js', 'popup\ui.js', 'options\settings.js', 'src\keys.js', 'src\background.js', 'src\content.js', 'src\providers.js', 'src\page-background.js', 'src\page-content.js', 'src\page\offscreen.mjs', 'src\page\layout.mjs')) {
     & $node.Source --check (Join-Path $projectRoot $relativePath)
     if ($LASTEXITCODE -ne 0) {
         throw "JavaScript sözdizimi doğrulaması başarısız: $relativePath"
@@ -88,6 +91,7 @@ $archiveInputs = @(
     (Join-Path $projectRoot 'manifest.json'),
     (Join-Path $projectRoot 'assets'),
     (Join-Path $projectRoot 'popup'),
+    (Join-Path $projectRoot 'options'),
     (Join-Path $projectRoot 'src')
 )
 Compress-Archive -LiteralPath $archiveInputs -DestinationPath $packagePath -CompressionLevel Optimal

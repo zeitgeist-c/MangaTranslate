@@ -3,7 +3,7 @@
 
 'use strict';
 
-if (typeof importScripts === 'function') importScripts('providers.js', 'page-background.js');
+if (typeof importScripts === 'function') importScripts('providers.js', 'keys.js', 'page-background.js');
 
 const GEMINI_MODELS = Object.freeze({
   DEFAULT: 'gemini-3.5-flash-lite',
@@ -405,6 +405,7 @@ function normalizeFetchError(err) {
  * chrome.storage.sync olarak da dene (geriye uyumluluk).
  */
 async function getActiveApiKey() {
+  if (typeof MLKeys !== 'undefined') return MLKeys.active('gemini');
   const data = await new Promise(resolve => {
     chrome.storage.local.get(['googleApiKeys', 'activeGoogleApiKeyId'], d => resolve(d));
   });

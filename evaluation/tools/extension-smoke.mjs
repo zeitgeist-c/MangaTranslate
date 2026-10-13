@@ -27,6 +27,15 @@ try {
     ignoreDefaultArgs: ['--disable-extensions'], viewport: { width: 1280, height: 900 }
   });
   let worker = browser.serviceWorkers()[0] || await browser.waitForEvent('serviceworker', { timeout: 30000 });
+  // A reused unpacked profile can retain compiled importScripts from an older release.
+  if (!await worker.evaluate(() => typeof MLKeys !== 'undefined' && mlKey.toString().includes('MLKeys'))) {
+    const nextWorker = browser.waitForEvent('serviceworker', { timeout: 30000 });
+    const wake = await browser.newPage(), popupUrl = `chrome-extension://${new URL(worker.url()).host}/popup/popup.html`;
+    await worker.evaluate(() => setTimeout(() => chrome.runtime.reload(), 50));
+    await wake.waitForTimeout(300); await wake.goto(popupUrl);
+    worker = await nextWorker;
+    await wake.close();
+  }
   worker.on('console', message => { logs.push(message.text()); console.log('[worker] ' + message.text().slice(0, 250)); });
   const extensionId = new URL(worker.url()).host;
   await worker.evaluate(async () => {
@@ -77,9 +86,11 @@ try {
   const calls = await worker.evaluate(() => globalThis.__providerCalls);
   if (!process.env.ML_TEST_PROFILE) assert.ok(calls.length > 0, 'Must exercise synthetic provider adapter');
   const popup = await browser.newPage(); await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
-  await popup.waitForFunction(() => document.querySelector('#provider-openrouter').getAttribute('aria-pressed') === 'true');
-  assert.equal(await popup.locator('#router-api-key').inputValue(), '');
-  assert.equal(await popup.locator('#openrouter-model option').count(), 8);
+  try { await popup.waitForFunction(() => document.querySelector('#provider-openrouter').getAttribute('aria-pressed') === 'true'); }
+  catch (error) { console.log('[popup-diagnostic]', await popup.evaluate(() => ({ provider: document.querySelector('#provider-openrouter')?.outerHTML, notice: document.querySelector('#notice')?.textContent, summary: document.querySelector('#key-summary')?.textContent }))); throw error; }
+  assert.equal(await popup.locator('input[type=password]').count(), 0);
+  assert.equal(await popup.locator('#model option').count(), 8);
+  assert.match(await popup.locator('#key-summary').textContent(), /Kayıtlı/);
   const firstWallMs = performance.now() - start;
   const alignment = [];
   for (const width of process.env.FULL_CHAPTER === '1' ? [] : [1280, 700]) {

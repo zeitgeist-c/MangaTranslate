@@ -4,7 +4,7 @@
   globalThis.__mlPageController = true;
   let job, running = false, paused = false, epoch = 0, panel, statusNode, original = false, boxes = false;
   const layers = new Map();
-  let controller, resumePending, actionLink;
+  let controller, resumePending, actionLink, pauseButton, resumeButton, retryButton, counterNode, panelCollapsed = false;
   const pendingRequests = new Set();
   const request = (type, data = {}, signal = controller?.signal) => new Promise((resolve, reject) => {
     const requestId = crypto.randomUUID();
@@ -36,32 +36,49 @@
       else finish(null, response.value);
     }, error => finish(error));
   });
-  const status = text => { ensurePanel(); statusNode.textContent = text; actionLink.hidden = true; };
+  function controls() {
+    if (!pauseButton) return;
+    const blocked = !!job?.blocked, finished = job?.state === 'finished' && !running;
+    statusNode.hidden = panelCollapsed && !blocked;
+    pauseButton.hidden = !running || paused || blocked || finished;
+    resumeButton.hidden = running && !paused && !blocked || finished;
+    retryButton.hidden = !blocked && !(job?.pages || []).some(p => p.state === 'error');
+    const phase = job?.state === 'paused' ? 'Duraklatıldı' : blocked ? 'İşlem gerekli' : finished ? 'Bitti' :
+      ({ detecting: 'Tespit', translating: 'Çeviri', rendering: 'Yerleşim' })[(job?.pages || []).find(p => ['detecting', 'translating', 'rendering'].includes(p.state))?.state] || 'Çalışıyor';
+    counterNode.textContent = job ? `${phase} · ${job.pages.filter(p => ['done', 'review', 'error'].includes(p.state)).length}/${job.pages.length}` : 'Hazırlanıyor';
+  }
+  const status = text => { ensurePanel(); statusNode.textContent = text; actionLink.hidden = true; controls(); };
   const blockedStatus = error => {
     status('Tarama durduruldu; kalan görseller işlenmedi.\n' + error.message);
     actionLink.hidden = error.actionUrl !== 'https://openrouter.ai/settings/preferences';
   };
   function ensurePanel() {
     if (panel?.isConnected) return;
+    panelCollapsed = false;
     panel = document.createElement('div'); panel.dataset.mangalensUi = 'page';
-    panel.style.cssText = 'position:fixed!important;left:12px!important;top:12px!important;z-index:2147483646!important;max-width:420px!important';
+    panel.style.cssText = 'position:fixed!important;left:12px!important;top:12px!important;z-index:2147483646!important;width:340px!important;max-width:calc(100vw - 24px)!important';
     const shadow = panel.attachShadow({ mode: 'closed' }), style = document.createElement('style');
-    style.textContent = ':host{all:initial}section{font:13px Arial;color:#eee;background:#171c27;border:1px solid #6875a9;border-radius:10px;padding:12px;box-shadow:0 4px 20px #0008}button{font:12px Arial;margin:3px;padding:6px;color:white;background:#303e69;border:1px solid #7688b5;border-radius:5px;cursor:pointer}p{max-height:110px;overflow:auto;white-space:pre-wrap;margin:8px 0}';
-    const section = document.createElement('section'), title = document.createElement('strong'); title.textContent = 'MangaLens · Tam bölüm';
+    style.textContent = ':host{all:initial}[hidden]{display:none!important}section{font:13px/1.5 system-ui,Arial;color:#eef2fa;background:#191d26;border:1px solid #38455e;border-radius:12px;padding:12px;box-shadow:0 6px 24px #0007}header{display:flex;align-items:center;gap:8px}header strong{font-size:13px;flex:1}header span{color:#9ba8be;font-size:11px}button{font:12px system-ui,Arial;margin:3px;padding:7px 10px;color:#eef2fa;background:#222836;border:1px solid #3c4b65;border-radius:8px;cursor:pointer}button:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid #6b9cff;outline-offset:2px}button:hover{background:#304366}p{max-height:120px;overflow:auto;overflow-wrap:anywhere;white-space:pre-wrap;margin:10px 0;color:#c4cfe1}details{border-top:1px solid #303849;margin-top:8px;padding-top:8px}summary{cursor:pointer;color:#9fb9e4}';
+    const section = document.createElement('section'), title = document.createElement('strong'); title.textContent = 'MangaLens';
+    const header = document.createElement('header'), fold = document.createElement('button'); fold.textContent = '−'; fold.setAttribute('aria-label', 'Paneli katla'); fold.setAttribute('aria-expanded', 'true');
+    counterNode = document.createElement('span'); counterNode.textContent = 'Hazırlanıyor'; header.append(title, counterNode, fold);
     statusNode = document.createElement('p'); statusNode.setAttribute('role', 'status');
-    section.append(title, statusNode);
+    section.append(header, statusNode);
     actionLink = document.createElement('a'); actionLink.textContent = 'OpenRouter ayarlarını aç';
     actionLink.href = 'https://openrouter.ai/settings/preferences'; actionLink.target = '_blank'; actionLink.rel = 'noopener noreferrer';
     actionLink.style.cssText = 'color:#b7ccff;margin:8px 0'; actionLink.hidden = true; section.append(actionLink);
-    const button = (text, action) => { const b = document.createElement('button'); b.textContent = text; b.onclick = () => Promise.resolve().then(action).catch(e => status(e.message)); section.append(b); };
-    button('Duraklat', pause); button('Devam et', () => start({ resume: true })); button('Hatalıları yeniden dene', () => start({ resume: true, retry: true }));
-    button('Orijinal / çeviri', () => { original = !original; synchronize(); });
-    button('Kutuları göster / gizle', () => { boxes = !boxes; synchronize(); });
+    const body = document.createElement('div'); section.append(body);
+    const button = (text, action, parent = body) => { const b = document.createElement('button'); b.textContent = text; b.onclick = () => Promise.resolve().then(action).catch(e => status(e.message)); parent.append(b); return b; };
+    pauseButton = button('Duraklat', pause); resumeButton = button('Devam et', () => start({ resume: true })); retryButton = button('Hatalıları yeniden dene', () => start({ resume: true, retry: true }));
+    const tools = document.createElement('details'), summary = document.createElement('summary'); summary.textContent = 'Görünüm ve kontrol araçları'; tools.append(summary); body.append(tools);
+    fold.onclick = () => { body.hidden = !body.hidden; panelCollapsed = body.hidden; controls(); fold.textContent = body.hidden ? '+' : '−'; fold.setAttribute('aria-expanded', String(!body.hidden)); fold.setAttribute('aria-label', body.hidden ? 'Paneli genişlet' : 'Paneli katla'); };
+    button('Orijinal / çeviri', () => { original = !original; synchronize(); }, tools);
+    button('Kutuları göster / gizle', () => { boxes = !boxes; synchronize(); }, tools);
     button('Kontrol listesi', () => { status((job?.pages || []).flatMap((p, index) => [
       p.error ? `Görsel ${index + 1}: ${p.error}` : '',
       ...(p.issues || []).map(issue => `Görsel ${index + 1} · y=${Math.round(issue.textBox[1])}: ${issue.reason}${issue.translatedText ? '\n' + issue.translatedText : ''}`)
-    ]).filter(Boolean).join('\n') || 'Kontrol gerektiren alan yok.'); });
-    button('Kapat', () => { pause(); panel.remove(); for (const entry of layers.values()) entry.root.remove(); layers.clear(); });
+    ]).filter(Boolean).join('\n') || 'Kontrol gerektiren alan yok.'); }, tools);
+    button('Kapat', () => { pause(); panel.remove(); for (const entry of layers.values()) entry.root.remove(); layers.clear(); }, tools);
     shadow.append(style, section); document.documentElement.append(panel);
   }
   async function save(signal = controller?.signal) { if (job) { job.updatedAt = Date.now(); await request('ML_JOB_SAVE', { job: structuredClone(job) }, signal); } }
@@ -235,6 +252,7 @@
       if (error.name !== 'AbortError' && token === epoch) status(error.message);
     } finally {
       running = false;
+      controls();
       const next = resumePending; resumePending = null;
       if (next) start(next);
     }

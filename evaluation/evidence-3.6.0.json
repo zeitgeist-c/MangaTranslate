@@ -1,0 +1,64 @@
+{
+  "version": "3.6.0",
+  "date": "2026-10-13",
+  "automatedChecks": 54,
+  "realProviderCalls": 0,
+  "ui": {
+    "version": "3.6.0",
+    "migration": true,
+    "multiKeyBothProviders": true,
+    "concurrentTabs": true,
+    "noSecretInDOM": true,
+    "metadataChecks": 2,
+    "responsiveWidths": [
+      1000,
+      500,
+      360
+    ],
+    "enlargedText": true,
+    "failedSaveRestoresSelection": true,
+    "dirtyPreferencesPreserved": true,
+    "lastKeyDisablesTranslation": true,
+    "settingsTabReused": true,
+    "workerRestart": true,
+    "keyboardAdd": true,
+    "popupTranslationActions": true,
+    "contributorConsent": true,
+    "modelCatalog": true,
+    "realProviderCalls": 0,
+    "browser": "155.0.8059.40"
+  },
+  "panel": {
+    "foldDoesNotPause": true,
+    "displayToolsWork": true,
+    "closePauses": true,
+    "ageRefusalStopsQueue": true
+  },
+  "extension": {
+    "version": "3.6.0",
+    "pages": [
+      {
+        "state": "review",
+        "regions": 19,
+        "translated": 7,
+        "issues": 12
+      }
+    ],
+    "alignment": [
+      {
+        "width": 1280,
+        "delta": 0
+      },
+      {
+        "width": 700,
+        "delta": 0
+      }
+    ],
+    "turkishGlyphRender": true,
+    "overflowRejected": true,
+    "resumeProviderCalls": 0,
+    "serviceWorkerRestartProviderCalls": 0,
+    "errors": []
+  },
+  "humanQualityAccepted": false
+}

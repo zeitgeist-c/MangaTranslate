@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MangaLens TR",
-  "version": "3.5.2",
+  "version": "3.6.0",
   "description": "Manga, manhwa ve manhua sitelerindeki İngilizce konuşma balonlarını yapay zeka ile Türkçe'ye çevirir.",
   "icons": {
     "16": "assets/icon16.png",
@@ -20,6 +20,7 @@
   "background": {
     "service_worker": "src/background.js"
   },
+  "options_ui": { "page": "options/settings.html", "open_in_tab": true },
   "content_scripts": [
     {
       "matches": [
@@ -59,5 +60,5 @@
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
   "minimum_chrome_version": "116",
-  "version_name": "3.5.2 - Tam bölüm önizleme"
+  "version_name": "3.6.0 - Yeni arayüz ve ortak API yönetimi"
 }
