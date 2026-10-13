@@ -45,5 +45,6 @@ Gerçek yapılan kontroller checkpoint kayıtlarında ayrıca belirtilir.
 
 3.1.7 ilk geri dönüş noktası ve önceki sürüm paketleri korunur. Mağaza adımları
 `store/PUBLISH.md`, açıklama `store/LISTING-TR.md`, gizlilik taslağı `store/PRIVACY-TR.md`.
-Dağıtım **Unlisted**; herkese açık HTTPS gizlilik adresi ve mağaza görselleri
-tamamlanmadan incelemeye hazır sayılmaz. Henüz mağazaya gönderilmiş değildir.
+Dağıtım **Unlisted**; mağaza görselleri `store/assets/` içinde hazırdır.
+Herkese açık HTTPS gizlilik adresi tamamlanmadan incelemeye hazır sayılmaz.
+Henüz mağazaya gönderilmiş değildir.

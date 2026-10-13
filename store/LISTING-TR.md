@@ -24,7 +24,7 @@ Seçilen görsel kırpmaları, çeviri bağlamı ve yönergeler seçtiğiniz sa�
 ## Yayın öncesi eksikler
 
 - Herkese açık HTTPS gizlilik politikası adresi henüz sağlanmadı. Unlisted dağıtımda da gereklidir.
-- Gerçek uzantı arayüzünü gösteren, telif açısından kullanılabilir en az bir 1280×800 ekran görüntüsü hazırlanmalı.
-- 128×128 ikon: mevcut `assets/icon128.png`. Küçük tanıtım görseli: 440×280.
+- Gerçek uzantı ayarlar arayüzünün iki adet 1280×800 ekran görüntüsü `store/assets/` içinde hazır; yalnız temsili anahtar kullanıldı.
+- 128×128 ikon ve 440×280 küçük tanıtım görseli `store/assets/` içinde hazır.
 - Mağaza hesabındaki izin/dağıtım alanları ve test yönergeleri doldurulmalı.
 - Metinler taslaktır; yükleme veya incelemeye gönderim yapılmış değildir.
