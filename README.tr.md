@@ -1,52 +1,42 @@
-# MangaTranslate (MangaLens TR) — İngilizce-Türkçe manga balon çevirisi
+# MangaLens TR 3.5.0 — tam bölüm önizleme
 
-> English: [README.md](./README.md)
+[English](README.md)
 
-Chrome Manifest V3 uzantısı. Manga/manhwa/manhua sitelerindeki İngilizce konuşma balonlarını Gemini API ile Türkçe'ye çevirir — alan seçimi, oto çeviri, alternatif varyantlar, hız sınırlı kuyruk.
+Brave/Chromium Manifest V3 uzantısı. İngilizce manga/manhwa/manhua yazılarını Gemini veya OpenRouter üzerinden Türkçeye çevirir. Alan Seç ve Oto Çevir korunur. Tam bölüm özelliği **önizlemedir**: bütün yazıların bulunması ve %98 kalite hedefi henüz insan etiketleriyle doğrulanmadı.
 
-![MangaTranslate ekran görüntüleri](./docs/screenshots/)
+## Kullanım
 
-> Ekran görüntüleri temiz kurulumdan ekleniyor (örnek veri yok). Yukarıdaki klasöre konacak.
+1. `MangaLensTR-3.5.0.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle.
+2. Popup'ta Gemini/OpenRouter seç; API alt sekmesinde ilgili anahtarı ekle. Google anahtarları korunur; OpenRouter ayrı saklanır.
+3. Modeli seç ve Kaydet. Manga çeviri tercihlerinden içerik türü, seri adı, yönerge ve sözlük ekleyebilirsin. Sözlük seri adına göre yerel saklanır.
+4. **Bölümün tamamını çevir** mevcut bölümün görsellerini sırayla işler; sonraki bölüme geçmez. Lazy-load taraması sınırlıdır ve kaydırma konumu geri getirilir.
+5. Sayfa paneli: Duraklat, Devam et, Hatalıları yeniden dene, Orijinal/çeviri, Kutular ve Kontrol listesi. Belirsiz alanlar/sığmayan metin otomatik kaplanmaz; Alan Seç ile düzeltilebilir.
 
-## Kurulum
+Yalnız seçili model kullanılır; başka modele sessiz geçiş olmaz. Hatalıları yeniden deneme yeni ücret oluşturabilir. Gönderilmiş bir isteğin cevabı kaybolursa otomatik tekrar yapılmaz. Tamamlanmış sonuçlar kaynak/model/profil/sözlük/bağlam cache'inden kullanılır. Başlamış iş ayarlarını sabitler; model değişimi yeni işleri etkiler.
 
-1. `MangaLensTR-3.1.7.zip` klasöre çıkarılır.
-2. `chrome://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle (`manifest.json` içeren klasör).
-3. Popup → API sekmesi → en az 1 Gemini anahtarı ekle/test et/aktif yap.
-4. Sayfada: Alan Seç veya Oto Çevir.
+## Modeller ve tespit
 
-Paketleme: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\package.ps1` (sürümü manifest'ten okur, MV3 + JS doğrular, 9 dosyayı zipler).
+Gemini: Gemini3.5 Flash Lite, Gemini3.1 Flash Lite, Gemma4 26B A4B.
 
-## Özellikler
+OpenRouter: Qwen3.7/3.8 Flash, Claude Haiku5.5, DeepSeekV4.1 Flash, Muse Spark1.3 ve Contributor, Gemini2.5/3.1 Flash Lite. Haiku4.5 yok. Contributor veri paylaşımı nedeniyle ayrı açık seçime bağlıdır. Hesap erişimi/fiyat/çeviri kalitesini kullanıcı deneyecek; canlı API testleri kullanıcı isteğiyle yapılmadı.
 
-- **Alan seçimi** — en fazla 12 alan (min 24px), Enter ile toplu çeviri.
-- **Oto çeviri** — çizilen her alan beklemeden çevrilir.
-- **Alternatif varyant** — `Yeniden` önceki sonucu göndermeden görseli yeniden okur; 3 strateji (günlük dil / ton-duygu-bağlam / kısa balon uyumu), yüksek yaratıcılık.
-- **Sonuç araçları** — her kutuda `Yeniden` + `×`.
-- **Yazı boyutu** — 16px / 20px, tüm sonuçlara (`chrome.storage.sync`).
-- **Çoklu anahtar** — Gemini anahtarı ekle/test/aktifleştir (`chrome.storage.local`).
-- **Model seçimi** — varsayılan `gemini-3.5-flash-lite` (gerçek sayfada ~2-6 sn), ek `gemini-3.1-flash-lite` (~2-14 sn) ve **Gemma 4 26B A4B** (~11-24 sn); seçili model başarısız olursa diğerleri sırayla, en hızlı önce denenir. (Gemma 4 31B 3.1.5'te kaldırıldı: istek başı 30-90 sn + gerçek sayfalarda sık HTTP 500, üstelik daha fazla balon da bulmuyor.)
-- **Dayanıklı yakalama** — seçilen alan, sekme görüntüsünden yüksek çözünürlükte kırpılır (bölge ekranda görünür olmalı).
-- **İstek kuyruğu** — adaptif aralık (2.5 sn taban, 429'da 6→30 sn'ye çıkar, temiz geçişte azalır); 429/kota ve zaman aşımında 30→120 sn backoff (en fazla 3 tekrar), 45 sn sert zaman aşımı; ağ hatası hızlı başarısız olur. Kuyruk derinse içerik tarafı daha uzun bekler — sabit 75 sn yüzünden sonuç kaybı olmaz.
-- **İstatistik** — dakika/gün/toplam sayaç, yalnız yerel.
+Yerel Standart tarama varsayılandır. Hızlı tarama daha küçük dedektörle deneysel seçenektir. Yerel modeller ücretli API kullanmaz. CPU/WASM çalışır; GPU adayları çıktı/uyumluluk kontrollerini geçmediği için etkin değildir.
 
-## Proje yapısı
+Çeviri modeli koordinat üretmez: yerel kaynak-piksel kutuları ve sabit bölge kimlikleri kullanılır. Model yalnız kimlikli kırpmayı okur/çevirir. Düz zemin ve güvenli şekil doğrulanınca yalnız eski harf pikselleri temizlenir. Dokulu zemin, döndürülmüş/eğik görsel, erişilemeyen kaynak ve dekoratif SFX ayrıca kontrol gerektirir. Japonca/dikey yazı doğrulanmadı.
 
-```text
-manifest.json        MV3 (<all_urls> + generativelanguage host)
-src/background.js    Gemini API, prompt stratejileri, kuyruk/hız sınırı, anahtarlar
-src/content.js       alan seçimi, oto çeviri, yakalama, sonuç kutuları
-popup/popup.html     Çeviri/API sekmeli arayüz
-popup/popup.js       mod/tercih/istatistik/anahtar yönetimi
-popup/style.css
-assets/              ikonlar 16/48/128
-package.ps1          paketleme betiği
+## Veri ve geri dönüş
+
+Anahtarlar extension local storage'da tutulur; sayfaya verilmez ve yalnız kendi sağlayıcısına gönderilir. Tercihler sync, seri sözlükleri/iş kayıtları local storage, tespit/çeviri cache'i IndexedDB'dedir. Kırpmalar çeviri başlatıldığında seçilen sağlayıcıya gönderilir. Telemetri yoktur. unlimitedStorage izni büyük cache'in kota nedeniyle kaybolmaması içindir.
+
+3.1.7 kaynak/Git ve şifreli Brave storage checkpoint'i korunur. [Geri dönüş](docs/GERI-DONUS-NOKTASI-2026-10-13.md) ve [uygulama/kabul takibi](docs/UYGULAMA-TAKIBI-2026-10-13.md). Gelecekte geri dönüşten önce yeni kaynak, local/sync verileri **ve IndexedDB** ayrı kurtarma yedeğine alınmalıdır.
+
+## Geliştirme ve paket
+
+```powershell
+node --test tests/*.test.js tests/*.test.mjs evaluation/tests/*.test.mjs
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\package.ps1
 ```
 
-## Katkı
+Paket betiği aynı sürüm ZIP'inin üzerine yazmaz. Yerel kaynak commit/tag ve paket ilişkisi ayrıca doğrulanır. [Laboratuvar](evaluation/README.md): dört seriden 101 yerel görsel, serileri ayrılmış 35 görsellik inceleme kuyruğu; model tahmini insan etiketi sayılmaz.
 
-Küçük PR, koda/örneğe API anahtarı konmaz. Bkz. [.github/PULL_REQUEST_TEMPLATE.md](./.github/PULL_REQUEST_TEMPLATE.md).
-
-## Lisans
-
-Bkz. [LICENSE](./LICENSE) (bekliyor — teyit edilecek).
+src/page yerel çıkarım/şekil/cache; src/page-background.js sağlayıcı ve kalıcı kayıt; src/page-content.js kuyruk/katman; src/providers.js model/profil/kimlik sözleşmesi. [Üçüncü taraf lisanslar](src/page/licenses/). Projenin genel lisansı henüz belirlenmedi.

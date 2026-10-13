@@ -1,5 +1,9 @@
 // MangaLens content script — Alan Seç, Oto Çevir ve sonuç araçları
 
+(() => {
+if (globalThis.__mlManualController) return;
+globalThis.__mlManualController = true;
+
 'use strict';
 
 
@@ -1401,4 +1405,6 @@ function setSelectionBoxState(selection, state, text, info) {
       'rgba(255,255,255,0.96)'
     ) + '!important;border-radius:2px!important;pointer-events:none!important;';
 }
+
+})();
 

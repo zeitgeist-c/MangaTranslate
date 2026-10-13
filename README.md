@@ -1,52 +1,22 @@
-# MangaTranslate (MangaLens TR) — English-to-Turkish manga bubble translation
+# MangaLens TR 3.5.0 — full-chapter preview
 
-> Türkçe için: [README.tr.md](./README.tr.md)
+[Türkçe kullanım kılavuzu](README.tr.md)
 
-Chrome Manifest V3 extension. Translates English speech bubbles on manga/manhwa/manhua sites into Turkish with the Gemini API — region select, auto-translate, retry variants, and a rate-limited queue.
+Manifest V3 extension for Brave/Chromium. Translates English manga, manhwa and manhua into Turkish through Gemini or OpenRouter. Manual selection and quick translation remain available.
 
-![MangaTranslate screenshots](./docs/screenshots/)
+Full-chapter processing is a **preview**: complete coverage and the planned 98% quality target have not passed human-reviewed acceptance. Uncertain regions, unsafe backgrounds and text overflow remain available for review.
 
-> Screenshots are being added from a clean install (no sample data). The folder above will hold them.
+Extract `MangaLensTR-3.5.0.zip`, load its folder through Developer mode in `brave://extensions`. For an existing unpacked installation, reload the extension and reader tab. Select a provider, add its separate key, choose a model and save. **Bölümün tamamını çevir** processes the current chapter sequentially; the page panel supports pause/resume, explicit retry, original toggle and review details.
 
-## Install
+Only the selected model is called. No silent model fallback or automatic retry of potentially billed requests. Completed results are cached by source, processing/profile version, model, glossary and context. Each job freezes its settings. Contributor models require explicit consent. Actual provider tests were declined by the owner; tests use synthetic translation replies.
 
-1. Extract `MangaLensTR-3.1.7.zip`.
-2. `chrome://extensions` → Developer mode → Load unpacked (folder with `manifest.json`).
-3. Popup → API tab → add at least one Gemini key, test, activate.
-4. On a page: Select Area or Auto Translate.
+Local models and ONNX JS/WASM are bundled. Translation models read identified crops and never generate placement coordinates. Flat interiors are checked before old ink pixels are erased; textured art is preserved. The small detector is an experimental option. Production detection uses WASM; GPU candidates failed compatibility/output checks.
 
-Packaging: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\package.ps1` (reads version from manifest, validates MV3 + JS, zips the 9 required files).
+Keys stay in extension local storage and go only to their provider. Preferences use sync, glossaries/jobs use local storage, detection/translation caches use IndexedDB. No telemetry was added. The unchanged 3.1.7 checkpoint is documented in [recovery instructions](docs/GERI-DONUS-NOKTASI-2026-10-13.md). Preserve current source, storage and IndexedDB before future rollback.
 
-## Features
-
-- **Region select** — draw up to 12 areas (min 24px), Enter translates in batch.
-- **Auto translate** — every drawn area translated without waiting.
-- **Retry variants** — `Retry` re-reads the image without sending the previous result; 3 strategies (casual tone / tone-emotion-context / short-bubble fit), high creativity.
-- **Result tools** — `Retry` + `×` on every result box.
-- **Font size** — 16px / 20px applied to all results (`chrome.storage.sync`).
-- **Multiple keys** — add/test/activate Gemini keys (`chrome.storage.local`).
-- **Model choice** — `gemini-3.5-flash-lite` default (~2-6 s per request on real pages), plus `gemini-3.1-flash-lite` (~2-14 s) and **Gemma 4 26B A4B** (~11-24 s); if the selected model fails, the others are tried in sequence, fastest first. (Gemma 4 31B was removed in 3.1.5: 30-90 s per request plus frequent HTTP 500 on real pages, with no better bubble detection.)
-- **Resilient capture** — the selected area is cropped from the captured visible tab (the area must be on screen).
-- **Request queue** — adaptive interval (2.5 s base, 6→30 s after a 429, decays back on clean runs); 30→120 s backoff on 429/quota and timeout (max 3 retries), 45 s hard timeout, keepalive alarm; network errors fail fast. The content side waits longer when the queue is deep, so results are no longer lost to a fixed 75 s wait.
-- **Stats** — per-minute/day/total success counters, local only.
-
-## Project structure
-
-```text
-manifest.json        MV3 (<all_urls> + generativelanguage host)
-src/background.js    Gemini API, prompt strategies, queue/rate-limit, keys
-src/content.js       area select, auto translate, capture, result boxes
-popup/popup.html     Translate/API tabbed UI
-popup/popup.js       mode/preference/stats/key management
-popup/style.css
-assets/              icons 16/48/128
-package.ps1          packaging script
+```powershell
+node --test tests/*.test.js tests/*.test.mjs evaluation/tests/*.test.mjs
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\package.ps1
 ```
 
-## Contributing
-
-Small PRs, no API keys in code or fixtures. See [.github/PULL_REQUEST_TEMPLATE.md](./.github/PULL_REQUEST_TEMPLATE.md).
-
-## License
-
-See [LICENSE](./LICENSE) (pending — to be confirmed).
+Existing same-version packages are never overwritten. See [implementation/acceptance tracking](docs/UYGULAMA-TAKIBI-2026-10-13.md), [evaluation lab](evaluation/README.md) and [third-party licenses](src/page/licenses/). The overall project license is not yet specified.

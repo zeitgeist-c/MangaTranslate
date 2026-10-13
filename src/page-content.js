@@ -1,0 +1,201 @@
+(() => {
+  'use strict';
+  if (globalThis.__mlPageController) return;
+  globalThis.__mlPageController = true;
+  let job, running = false, paused = false, epoch = 0, panel, statusNode, original = false, boxes = false;
+  const layers = new Map();
+  const request = async (type, data = {}) => {
+    const response = await chrome.runtime.sendMessage({ type, ...data });
+    if (!response?.ok) throw new Error(response?.error || 'Uzantı bağlantısı kesildi; devam düğmesiyle yeniden deneyin.');
+    return response.value;
+  };
+  const status = text => { ensurePanel(); statusNode.textContent = text; };
+  function ensurePanel() {
+    if (panel?.isConnected) return;
+    panel = document.createElement('div'); panel.dataset.mangalensUi = 'page';
+    panel.style.cssText = 'position:fixed!important;left:12px!important;top:12px!important;z-index:2147483646!important;max-width:420px!important';
+    const shadow = panel.attachShadow({ mode: 'closed' }), style = document.createElement('style');
+    style.textContent = ':host{all:initial}section{font:13px Arial;color:#eee;background:#171c27;border:1px solid #6875a9;border-radius:10px;padding:12px;box-shadow:0 4px 20px #0008}button{font:12px Arial;margin:3px;padding:6px;color:white;background:#303e69;border:1px solid #7688b5;border-radius:5px;cursor:pointer}p{max-height:110px;overflow:auto;white-space:pre-wrap;margin:8px 0}';
+    const section = document.createElement('section'), title = document.createElement('strong'); title.textContent = 'MangaLens · Tam bölüm';
+    statusNode = document.createElement('p'); statusNode.setAttribute('role', 'status');
+    section.append(title, statusNode);
+    const button = (text, action) => { const b = document.createElement('button'); b.textContent = text; b.onclick = () => Promise.resolve().then(action).catch(e => status(e.message)); section.append(b); };
+    button('Duraklat', pause); button('Devam et', () => start({ resume: true })); button('Hatalıları yeniden dene', () => start({ resume: true, retry: true }));
+    button('Orijinal / çeviri', () => { original = !original; synchronize(); });
+    button('Kutuları göster / gizle', () => { boxes = !boxes; synchronize(); });
+    button('Kontrol listesi', () => { status((job?.pages || []).flatMap((p, index) => [
+      p.error ? `Görsel ${index + 1}: ${p.error}` : '',
+      ...(p.issues || []).map(issue => `Görsel ${index + 1} · y=${Math.round(issue.textBox[1])}: ${issue.reason}${issue.translatedText ? '\n' + issue.translatedText : ''}`)
+    ]).filter(Boolean).join('\n') || 'Kontrol gerektiren alan yok.'); });
+    button('Kapat', () => { pause(); panel.remove(); for (const entry of layers.values()) entry.root.remove(); layers.clear(); });
+    shadow.append(style, section); document.documentElement.append(panel);
+  }
+  async function save() { if (job) { job.updatedAt = Date.now(); await request('ML_JOB_SAVE', { job }); } }
+  function pause() {
+    paused = true; epoch++; if (job) { job.state = 'paused'; save().catch(() => {}); }
+    status('Duraklatıldı. Devam eden adımın geç sonucu sayfaya uygulanmayacak; tamamlanan çeviri önbellekte korunur.');
+  }
+  const alive = token => { if (paused || token !== epoch) throw new DOMException('İş duraklatıldı', 'AbortError'); };
+  function candidates() {
+    return [...document.images].filter(img => !img.closest('[data-mangalens-ui]') && !img.dataset.mlPagePatch &&
+      (img.naturalWidth >= 400 || img.getBoundingClientRect().width >= 350) &&
+      (img.naturalHeight >= 300 || img.getBoundingClientRect().height >= 300));
+  }
+  async function discover(token) {
+    const initial = { x: scrollX, y: scrollY }; let lastHeight = 0, stable = 0;
+    try {
+      // Bounded lazy-load scan. Never navigate to another chapter or click site controls.
+      for (let step = 0; step < 120; step++) {
+        alive(token);
+        const height = document.documentElement.scrollHeight;
+        if (scrollY + innerHeight >= height - 4) { stable = height === lastHeight ? stable + 1 : 0; if (stable >= 3) break; }
+        lastHeight = height; window.scrollBy(0, Math.max(300, innerHeight * .8));
+        await new Promise(resolve => setTimeout(resolve, 160));
+      }
+      const images = candidates(), seen = new Set(), list = [];
+      for (const img of images) {
+        alive(token);
+        if (!img.complete) await Promise.race([img.decode().catch(() => {}), new Promise(resolve => setTimeout(resolve, 3000))]);
+        const source = img.currentSrc || img.src;
+        if (!/^https?:/.test(source) || seen.has(source)) continue;
+        seen.add(source); list.push({ source, state: 'queued' });
+      }
+      if (!list.length) throw new Error('İşlenebilir manga görseli bulunamadı. Görselleri yükleyip tekrar deneyin.');
+      return list;
+    } finally { window.scrollTo(initial.x, initial.y); }
+  }
+  function elementFor(source) { return [...document.images].find(img => (img.currentSrc || img.src) === source); }
+  function synchronize() {
+    for (const [source, entry] of layers) {
+      const warn = message => { entry.geometryError = message; if (entry.lastWarning !== message) { entry.lastWarning = message; status(message + ' Orijinal görsel korundu.'); } };
+      const img = elementFor(source);
+      if (!img?.isConnected) { entry.root.hidden = true; continue; }
+      const r = img.getBoundingClientRect(), css = getComputedStyle(img), matrix = css.transform;
+      // Rotation/skew/perspective needs a matrix-aware fixture; refuse guessed alignment.
+      const transform = matrix === 'none' ? null : new DOMMatrixReadOnly(matrix);
+      if (transform && (!transform.is2D || Math.abs(transform.b) > .0001 || Math.abs(transform.c) > .0001 || transform.a <= 0 || transform.d <= 0)) {
+        entry.root.hidden = true; warn('Bu görselde dönme/eğilme dönüşümü desteklenmiyor.'); continue;
+      }
+      if (img.naturalWidth !== entry.width || img.naturalHeight !== entry.height) { entry.root.hidden = true; warn('Görsel boyutu değişti; eski çeviri gizlendi.'); continue; }
+      const sx = r.width / (img.offsetWidth || r.width), sy = r.height / (img.offsetHeight || r.height);
+      const insetLeft = (parseFloat(css.borderLeftWidth) + parseFloat(css.paddingLeft)) * sx;
+      const insetTop = (parseFloat(css.borderTopWidth) + parseFloat(css.paddingTop)) * sy;
+      const cw = r.width - insetLeft - (parseFloat(css.borderRightWidth) + parseFloat(css.paddingRight)) * sx;
+      const ch = r.height - insetTop - (parseFloat(css.borderBottomWidth) + parseFloat(css.paddingBottom)) * sy;
+      let width = cw, height = ch;
+      if (css.objectFit === 'contain' || css.objectFit === 'cover' || css.objectFit === 'scale-down' || css.objectFit === 'none') {
+        let scale = css.objectFit === 'cover' ? Math.max(cw / entry.width, ch / entry.height) : Math.min(cw / entry.width, ch / entry.height);
+        if (css.objectFit === 'none') scale = 1;
+        if (css.objectFit === 'scale-down') scale = Math.min(1, scale);
+        width = entry.width * scale; height = entry.height * scale;
+      }
+      const positions = css.objectPosition.split(/\s+/);
+      const offset = (value, remaining) => value.endsWith('%') ? remaining * parseFloat(value) / 100 : value.endsWith('px') ? parseFloat(value) : null;
+      const px = offset(positions[0], cw - width), py = offset(positions[1] || '50%', ch - height);
+      if (px === null || py === null) { entry.root.hidden = true; warn('Görselin özel konumlandırması desteklenmiyor.'); continue; }
+      entry.geometryError = null;
+      entry.root.hidden = original;
+      entry.root.style.cssText = `position:absolute!important;pointer-events:none!important;z-index:2147483000!important;overflow:hidden!important;left:${r.left + scrollX + insetLeft}px!important;top:${r.top + scrollY + insetTop}px!important;width:${cw}px!important;height:${ch}px!important;`;
+      entry.inner.style.cssText = `position:absolute;left:${px}px;top:${py}px;width:${width}px;height:${height}px`;
+      for (const marker of entry.markers) marker.hidden = !boxes;
+    }
+  }
+  function draw(source, report, result) {
+    const previous = layers.get(source); previous?.root.remove();
+    const root = document.createElement('div'); root.dataset.mangalensUi = 'layer';
+    const shadow = root.attachShadow({ mode: 'closed' }), inner = document.createElement('div'); shadow.append(inner);
+    const position = (el, b) => { el.style.cssText = `position:absolute;left:${b[0] / report.width * 100}%;top:${b[1] / report.height * 100}%;width:${(b[2] - b[0]) / report.width * 100}%;height:${(b[3] - b[1]) / report.height * 100}%;box-sizing:border-box;`; };
+    for (const patch of result.patches) {
+      const image = document.createElement('img'); image.src = patch.dataUrl; image.alt = ''; image.dataset.mlPagePatch = '1'; position(image, patch.box); inner.append(image);
+    }
+    const markers = [];
+    for (const region of report.regions) {
+      const el = document.createElement('div'); position(el, region.textBox);
+      el.style.border = `1px solid ${result.issues.some(i => i.regionId === region.regionId) ? '#ff9b40' : '#57d998'}`;
+      inner.append(el); markers.push(el);
+    }
+    document.documentElement.append(root);
+    layers.set(source, { root, inner, markers, width: report.width, height: report.height }); synchronize();
+  }
+  async function processPage(item, token, retry) {
+    status(`${job.pages.indexOf(item) + 1}/${job.pages.length} · Yerel tespit hazırlanıyor…`);
+    item.state = 'detecting'; delete item.error; await save();
+    const pendingImage = elementFor(item.source);
+    if (pendingImage && !pendingImage.naturalWidth) {
+      const loading = pendingImage.getAttribute('loading'); pendingImage.loading = 'eager';
+      let timeout;
+      try { await Promise.race([pendingImage.decode(), new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('Sayfadaki görsel yüklenemedi.')), 15000); })]); }
+      finally { clearTimeout(timeout); if (loading === null) pendingImage.removeAttribute('loading'); else pendingImage.setAttribute('loading', loading); }
+      alive(token);
+    }
+    const report = await request('ML_PREPARE', { source: item.source, detector: job.config.localDetector }); alive(token);
+    const image = elementFor(item.source);
+    if (!image || image.naturalWidth !== report.width || image.naturalHeight !== report.height) throw new Error('Görsel kaynağı/boyutu değişti; sonuç uygulanmadı.');
+    item.imageId = report.imageId; item.regions = report.regions.length;
+    const translations = [], context = item.contextBefore || job.context || [];
+    item.contextBefore = context;
+    const eligible = report.regions.filter(r => r.crop && !r.needsReview && (r.bubbleId || r.kind === 'text_free'));
+    // Uncertain candidates stay visible for manual correction; never silently discarded.
+    for (let i = 0; i < eligible.length; i += 6) {
+      alive(token); item.state = 'translating'; await save();
+      status(`${job.pages.indexOf(item) + 1}/${job.pages.length} · ${job.config.provider}/${job.config.model} · yazı ${i + 1}–${Math.min(i + 6, eligible.length)}/${eligible.length}`);
+      const response = await request('ML_TRANSLATE', { config: job.config, imageId: report.imageId, regions: eligible.slice(i, i + 6), context, retry });
+      alive(token); translations.push(...response.regions);
+    }
+    item.state = 'rendering'; await save();
+    const result = await request('ML_RENDER', { source: item.source, report, translations, minFont: 12 }); alive(token);
+    if (!elementFor(item.source)) throw new Error('Kaynak görsel sayfadan kaldırıldı.');
+    draw(item.source, report, result);
+    if (layers.get(item.source)?.geometryError) throw new Error(layers.get(item.source).geometryError);
+    if (!report.regions.length) result.issues.push({ regionId: null, textBox: [0, 0, report.width, report.height], reason: 'no_text_detected', translatedText: '' });
+    item.state = result.issues.length ? 'review' : 'done'; item.issues = result.issues; item.translated = result.patches.length;
+    job.context = [...context, ...translations.filter(t => t.status === 'translated').map(t => ({ sourceText: t.sourceText, translatedText: t.translatedText }))].slice(-12);
+    await save();
+  }
+  async function start({ resume = false, retry = false } = {}) {
+    ensurePanel();
+    if (running) { status('Önceki adımın bitmesi bekleniyor; sonra Devam et düğmesini kullanabilirsiniz.'); return; }
+    running = true; paused = false; const token = ++epoch;
+    try {
+      const settings = await chrome.storage.sync.get({ enabled: true });
+      if (!settings.enabled) throw new Error('Uzantı kapalı.');
+      if (resume) job = job || await request('ML_JOB_GET');
+      if (resume && job) {
+        const current = await request('ML_CONFIG');
+        if (job.config.processingVersion !== current.processingVersion) throw new Error('İşleme sürümü değişti. Popup üzerinden yeni bölüm taraması başlatın; eski iş otomatik tekrar ücretlendirilmedi.');
+      }
+      if (!resume || !job) {
+        const config = await request('ML_CONFIG');
+        status('Bölüm görselleri yükleniyor; kaydırma konumun korunacak…');
+        const pages = await discover(token); alive(token);
+        job = { id: crypto.randomUUID(), url: location.href, config, pages, context: [], createdAt: Date.now(), state: 'running' };
+      }
+      job.state = 'running'; await save();
+      for (const item of job.pages) {
+        alive(token);
+        if (item.state === 'error' && !retry) continue;
+        // Redraw completed pages after reload from deterministic detection/translation caches.
+        try { await processPage(item, token, retry); }
+        catch (error) {
+          if (error.name === 'AbortError') throw error;
+          item.state = 'error'; item.error = error.message; await save();
+        }
+      }
+      alive(token); job.state = 'finished'; await save();
+      const done = job.pages.filter(p => p.state === 'done').length, review = job.pages.filter(p => p.state === 'review').length, errors = job.pages.filter(p => p.state === 'error').length;
+      status(`Tarama bitti: ${done} otomatik işlendi, ${review} kontrol gerekli, ${errors} hata.\n${job.config.provider} / ${job.config.model}\nBütün yazıların bulunduğu henüz doğrulanmadı. Turuncu alanlarda otomatik kaplama yapılmadı; Alan Seç ile düzeltebilirsiniz.${errors ? '\nİlk hata: ' + job.pages.find(p => p.error)?.error : ''}`);
+    } catch (error) {
+      if (error.name !== 'AbortError') status(error.message);
+    } finally { running = false; }
+  }
+  chrome.runtime.onMessage.addListener((message, sender, respond) => {
+    if (message.type === 'START_PAGE_TRANSLATION') { start(message); respond({ ok: true }); }
+    if (message.type === 'ML_PAGE_PROGRESS' && running && !paused) status(message.text);
+  });
+  let scheduled = false;
+  function schedule() { if (scheduled) return; scheduled = true; requestAnimationFrame(() => { scheduled = false; synchronize(); }); }
+  window.addEventListener('scroll', schedule, { passive: true }); window.addEventListener('resize', schedule);
+  new MutationObserver(records => { if (records.some(record => !record.target.closest?.('[data-mangalens-ui]'))) schedule(); })
+    .observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset', 'class', 'style'] });
+  new ResizeObserver(schedule).observe(document.documentElement);
+})();

@@ -23,6 +23,8 @@ const GEMINI_MODEL_SPEEDS = Object.freeze({
 });
 
 const DEFAULTS = {
+  translationProvider: 'gemini', openrouterModel: 'qwen/qwen3.8-flash', contributorConsent: false,
+  contentType: 'auto', localDetector: 'standard', seriesName: '', translationInstructions: '', translationGlossary: '',
   enabled:          true,
   geminiModel:      GEMINI_MODELS.DEFAULT,
   translationFontSize: 16,
@@ -134,23 +136,28 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
-function loadSettings() {
-  return new Promise(resolve => {
-    chrome.storage.sync.get(DEFAULTS, resolve);
-  });
+async function loadSettings() {
+  const [settings, local] = await Promise.all([chrome.storage.sync.get(DEFAULTS), chrome.storage.local.get('translationGlossary')]);
+  return { ...settings, translationGlossary: local.translationGlossary ?? settings.translationGlossary ?? '' };
 }
 
-function saveSettings() {
+async function saveSettings() {
   const selectedFontSize = el.fontSizeOptions.find(input => input.checked);
   const s = {
+    ...MLPopup.values(),
     enabled:          el.toggle.checked,
     geminiModel:      normalizeGeminiModel(el.modelSelect?.value),
     translationFontSize: normalizeTranslationFontSize(selectedFontSize?.value),
   };
-  return new Promise(resolve => chrome.storage.sync.set(s, () => resolve(s)));
+  await MLPopup.rememberGlossary(s);
+  await chrome.storage.local.set({ translationGlossary: s.translationGlossary });
+  const synced = { ...s }; delete synced.translationGlossary;
+  await chrome.storage.sync.set(synced);
+  return s;
 }
 
 function applySettingsToUI(s) {
+  MLPopup.apply(s);
   el.toggle.checked = s.enabled !== false;
   const model = normalizeGeminiModel(s.geminiModel);
   if (el.modelSelect) el.modelSelect.value = model;
@@ -182,12 +189,14 @@ function getGeminiModelSpeed(model) {
 }
 
 function updateModelNote(model) {
+  const routerLabel = typeof MLPopup !== 'undefined' && MLPopup.label({});
+  if (routerLabel) { if (el.modelNote) el.modelNote.textContent = routerLabel; if (el.modelSpeed) el.modelSpeed.textContent = ''; return; }
   const normalized = normalizeGeminiModel(model);
   if (el.modelNote) el.modelNote.textContent = getGeminiModelLabel(normalized);
   if (el.modelSpeed) {
     const speed = getGeminiModelSpeed(normalized);
-    el.modelSpeed.textContent = speed.text ? (speed.slow ? '⚠ ' : '') + speed.text : '';
-    el.modelSpeed.classList.toggle('model-speed-warn', speed.slow === true);
+    el.modelSpeed.textContent = 'Süre görsele, seçili modele ve kota durumuna bağlıdır.';
+    el.modelSpeed.classList.toggle('model-speed-warn', false);
   }
 }
 
@@ -208,7 +217,7 @@ function activateTab(tabName) {
 
 async function chooseInitialTab() {
   const { list, activeId } = await loadApiKeys();
-  const hasActiveKey = list.some(k => k.id === activeId);
+  const hasActiveKey = await MLPopup.hasSelectedKey();
   activateTab(hasActiveKey ? 'translate' : 'api');
 }
 
@@ -223,7 +232,7 @@ function updateStatus(s) {
     return;
   }
   const model = normalizeGeminiModel(s.geminiModel);
-  setStatus('active', 'Aktif — ' + getGeminiModelLabel(model));
+  setStatus('active', 'Aktif — ' + (MLPopup.label(s) || getGeminiModelLabel(model)));
   updateModelNote(model);
   el.btnTranslate.disabled = false;
 
@@ -334,10 +343,12 @@ function bindEvents() {
   el.btnSave.addEventListener('click', async () => {
     el.btnSave.disabled = true;
     el.btnSave.textContent = 'Kaydediliyor...';
+    try {
     const s = await saveSettings();
     updateStatus(s);
     await renderApiKeyList();
     showToast('✓ Ayarlar kaydedildi', 'success');
+    } catch (error) { showToast('Ayarlar kaydedilemedi: ' + error.message, 'error'); }
     el.btnSave.disabled = false;
     el.btnSave.innerHTML = 'Kaydet <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" stroke="currentColor" stroke-width="1.5"/><path d="M17 21v-8H7v8M7 3v5h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
   });
@@ -414,7 +425,7 @@ async function injectContentScript(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId: tabId },
-      files: ['src/content.js'],
+      files: ['src/content.js', 'src/page-content.js'],
     });
   } catch (e) {
     throw normalizeTabMessageError(e);
@@ -542,7 +553,9 @@ function statusLabel(s) {
 async function renderApiKeyList() {
   const { list, activeId } = await loadApiKeys();
   const settings = await loadSettings();
-  const hasActiveKey = list.some(k => k.id === activeId);
+  const hasActiveKey = await MLPopup.hasSelectedKey();
+  document.getElementById('btn-full-chapter').disabled = !hasActiveKey || !settings.enabled;
+  if (MLPopup.label(settings)) el.modelNote.textContent = MLPopup.label(settings);
 
   // Bos state uyarisi
   el.apiEmptyMsg.hidden = hasActiveKey;
@@ -757,8 +770,8 @@ async function testApiKeyById(id) {
 
 async function checkApiKeyBefore() {
   const { list, activeId } = await loadApiKeys();
-  if (!list.find(k => k.id === activeId)) {
-    showToast('⚠ Önce Google Gemini API anahtarı ekleyin ve aktif yapın.', 'error');
+  if (!await MLPopup.hasSelectedKey()) {
+    showToast('⚠ Seçili sağlayıcı için API anahtarı ekleyin.', 'error');
     activateTab('api');
     return false;
   }
