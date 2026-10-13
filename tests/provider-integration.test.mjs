@@ -54,3 +54,22 @@ test('strict translation jobs never automatically retry potentially billed failu
   assert.equal(attempts, 1);
   assert.equal(vm.runInContext('requestQueue.length', context), 0);
 });
+
+test('resuming while a provider reply is pending reuses the same operation and caches its result', async () => {
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  const cache = new Map(); let release, attempts = 0;
+  context.mlOffscreen = async (command, payload) => command === 'read' ? cache.get(payload.key) : cache.set(payload.key, payload.value);
+  context.enqueueWithRateLimit = async () => { attempts++; return new Promise(resolve => { release = resolve; }); };
+  context.incrementTranslationStats = async () => {};
+  const imageId = 'a'.repeat(64), regionId = `${imageId}:r1`;
+  const config = context.MLProviders.settings({ translationProvider: 'openrouter', openrouterModel: 'qwen/qwen3.8-flash' });
+  const message = { config, imageId, regions: [{ regionId, crop: 'data:image/png;base64,AAAA' }] };
+  const first = context.mlTranslate(message);
+  while (!release) await new Promise(resolve => setImmediate(resolve));
+  const resumed = context.mlTranslate(message);
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(attempts, 1);
+  release(JSON.stringify({ regions: [{ regionId, sourceText: 'Hello', translatedText: 'Merhaba', status: 'translated' }] }));
+  assert.equal((await first).regions[0].translatedText, 'Merhaba');
+  assert.equal((await resumed).regions[0].translatedText, 'Merhaba');
+  assert.equal((await context.mlTranslate(message)).cached, true); assert.equal(attempts, 1);
+});

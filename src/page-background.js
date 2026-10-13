@@ -1,16 +1,39 @@
 'use strict';
 let mlOffscreenCreating;
 const mlCalls = new Map();
+const mlLocalRequests = new Map();
 async function mlOffscreen(command, payload = {}) {
+  const { signal, ...data } = payload;
   const url = chrome.runtime.getURL('src/page/offscreen.html');
   const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'], documentUrls: [url] });
   if (!contexts.length) {
     if (!mlOffscreenCreating) mlOffscreenCreating = chrome.offscreen.createDocument({ url: 'src/page/offscreen.html', reasons: ['BLOBS'], justification: 'Yerel manga görsellerini okuyup dilimler halinde tespit etmek ve şekle uygun çeviri katmanı hazırlamak.' }).finally(() => { mlOffscreenCreating = null; });
     await mlOffscreenCreating;
   }
-  const response = await chrome.runtime.sendMessage({ target: 'ml-offscreen', command, requestId: crypto.randomUUID(), ...payload });
-  if (!response?.ok) throw new Error(response?.error || 'Yerel görüntü işleyici yanıt vermedi.');
-  return response.value;
+  signal?.throwIfAborted();
+  const requestId = crypto.randomUUID();
+  const cancel = () => chrome.runtime.sendMessage({ target: 'ml-offscreen', command: 'cancel', requestId }).catch(() => {});
+  signal?.addEventListener('abort', cancel, { once: true });
+  let timer;
+  try {
+    const response = await Promise.race([
+      chrome.runtime.sendMessage({ target: 'ml-offscreen', command, ...data, requestId }),
+      new Promise((_, reject) => { timer = setTimeout(() => { cancel(); reject(new Error('Yerel görüntü işleyici zamanında yanıt vermedi.')); }, command === 'prepare' ? 175000 : 55000); })
+    ]);
+    if (!response?.ok) throw new Error(response?.error || 'Yerel görüntü işleyici yanıt vermedi.');
+    return response.value;
+  } finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel); }
+}
+async function mlLocal(message, sender, command) {
+  if (typeof message.requestId !== 'string' || message.requestId.length > 80) throw new Error('Geçersiz işlem kimliği.');
+  const key = `${sender.tab.id}:${message.requestId}`, controller = new AbortController();
+  if (mlLocalRequests.has(key)) throw new Error('İşlem zaten çalışıyor.');
+  mlLocalRequests.set(key, controller);
+  try {
+    return await mlOffscreen(command, { source: message.source, detector: message.detector, report: message.report,
+      translations: message.translations, minFont: message.minFont, tabId: sender.tab.id,
+      clientRequestId: message.requestId, signal: controller.signal });
+  } finally { mlLocalRequests.delete(key); }
 }
 async function mlConfig() {
   const [settings, local] = await Promise.all([chrome.storage.sync.get(null), chrome.storage.local.get('translationGlossary')]);
@@ -83,14 +106,15 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message.type === 'ML_HEARTBEAT') { respond({ ok: true }); return; }
   if (message.type === 'ML_PROGRESS') {
     if (sender.url !== chrome.runtime.getURL('src/page/offscreen.html')) return;
-    if (Number.isInteger(message.tabId)) chrome.tabs.sendMessage(message.tabId, { type: 'ML_PAGE_PROGRESS', text: message.text }).catch(() => {});
+    if (Number.isInteger(message.tabId)) chrome.tabs.sendMessage(message.tabId, { type: 'ML_PAGE_PROGRESS', requestId: message.clientRequestId, text: message.text }).catch(() => {});
     respond({ ok: true }); return;
   }
   const action = async () => {
     if (message.type === 'ML_CONFIG') return mlConfig();
     if (!sender.tab?.id) throw new Error('Bu komut yalnız manga sayfasından çalıştırılabilir.');
-    if (message.type === 'ML_PREPARE') return mlOffscreen('prepare', { source: message.source, detector: message.detector, tabId: sender.tab.id });
-    if (message.type === 'ML_RENDER') return mlOffscreen('render', { source: message.source, report: message.report, translations: message.translations, minFont: message.minFont });
+    if (message.type === 'ML_CANCEL') { mlLocalRequests.get(`${sender.tab.id}:${message.requestId}`)?.abort(); return true; }
+    if (message.type === 'ML_PREPARE') return mlLocal(message, sender, 'prepare');
+    if (message.type === 'ML_RENDER') return mlLocal(message, sender, 'render');
     if (message.type === 'ML_TRANSLATE') return mlTranslate(message);
     if (message.type === 'ML_JOB_GET' || message.type === 'ML_JOB_SAVE') {
       const url = new URL(sender.tab.url); url.hash = '';

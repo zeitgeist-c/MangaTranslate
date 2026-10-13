@@ -20,12 +20,18 @@ async function modelSession(model) {
   }
   return sessions.get(model.id);
 }
-async function imageFromSource(source) {
+async function imageFromSource(source, signal) {
   const url = new URL(source);
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error('Desteklenmeyen görsel adresi.');
-  const response = await fetch(url.href, { credentials: 'omit', signal: AbortSignal.timeout(30000) });
-  if (!response.ok || !response.headers.get('content-type')?.startsWith('image/')) throw new Error(`Görsel yüklenemedi: HTTP ${response.status}`);
-  const blob = await response.blob();
+  const controller = new AbortController(), abort = () => controller.abort(), timer = setTimeout(abort, 30000);
+  let blob;
+  try {
+    signal?.throwIfAborted(); signal?.addEventListener('abort', abort, { once: true });
+    const response = await fetch(url.href, { credentials: 'omit', signal: controller.signal });
+    if (!response.ok || !response.headers.get('content-type')?.startsWith('image/')) throw new Error(`Görsel yüklenemedi: HTTP ${response.status}`);
+    blob = await response.blob();
+  } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
+  signal?.throwIfAborted();
   if (blob.size > 50_000_000) throw new Error('Görsel dosyası 50 MB sınırını aşıyor.');
   const imageId = await hash(await blob.arrayBuffer()), image = await createImageBitmap(blob);
   if (image.width * image.height > 100_000_000) { image.close(); throw new Error('Görsel 100 milyon piksel sınırını aşıyor.'); }
@@ -41,7 +47,7 @@ async function crop(image, box) {
   return canvas;
 }
 async function prepare(source, signal, progress, detector = 'standard') {
-  const { image, imageId } = await imageFromSource(source);
+  const { image, imageId } = await imageFromSource(source, signal);
   try {
     const model = detector === 'small' ? models[2] : models[0], version = detector === 'small' ? 'd4-small' : 'd4-standard';
     const key = `detection-v4:${model.sha256}:${imageId}`;
@@ -59,6 +65,7 @@ async function prepare(source, signal, progress, detector = 'standard') {
     signal.throwIfAborted();
     const regions = [];
     for (const region of report.regions) {
+      signal.throwIfAborted();
       const bounds = regionCrop(region, image.width, image.height);
       // A giant merged detection is flagged, never downscaled into unreadable text.
       if (bounds[2] - bounds[0] > 1200 || bounds[3] - bounds[1] > 1200) { regions.push({ ...region, needsReview: true, reason: 'oversized_region' }); continue; }
@@ -69,13 +76,14 @@ async function prepare(source, signal, progress, detector = 'standard') {
     return { ...report, regions };
   } finally { image.close(); }
 }
-async function render(source, report, translations, minFont) {
-  const { image, imageId } = await imageFromSource(source);
+async function render(source, report, translations, minFont, signal) {
+  const { image, imageId } = await imageFromSource(source, signal);
   try {
     if (imageId !== report.imageId || image.width !== report.width || image.height !== report.height) throw new Error('Kaynak görsel değişti; eski çeviri uygulanmadı.');
     const patches = [], issues = [];
     await document.fonts.ready;
     for (const region of report.regions) {
+      signal.throwIfAborted();
       const translation = translations.find(t => t.regionId === region.regionId);
       const fail = reason => issues.push({ regionId: region.regionId, textBox: region.textBox, reason, translatedText: translation?.translatedText || '' });
       if (!translation || translation.status !== 'translated') { fail('unreadable_or_pending'); continue; }
@@ -113,16 +121,19 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message.command === 'cancel') { active.get(message.requestId)?.abort(); respond({ ok: true }); return; }
   const controller = new AbortController(); active.set(message.requestId, controller);
   const heartbeat = setInterval(() => chrome.runtime.sendMessage({ type: 'ML_HEARTBEAT' }).catch(() => {}), 10000);
-  const progress = text => chrome.runtime.sendMessage({ type: 'ML_PROGRESS', tabId: message.tabId, requestId: message.requestId, text }).catch(() => {});
-  const task = serial.then(async () => {
+  const progress = text => chrome.runtime.sendMessage({ type: 'ML_PROGRESS', tabId: message.tabId, clientRequestId: message.clientRequestId, text }).catch(() => {});
+  const execute = async () => {
     controller.signal.throwIfAborted();
     if (message.command === 'prepare') return prepare(message.source, controller.signal, progress, message.detector);
-    if (message.command === 'render') return render(message.source, message.report, message.translations, message.minFont);
+    if (message.command === 'render') return render(message.source, message.report, message.translations, message.minFont, controller.signal);
     if (message.command === 'read') return read(message.key);
     if (message.command === 'write') return write(message.key, message.value);
     throw new Error('Bilinmeyen görüntü komutu');
-  });
-  serial = task.catch(() => {});
+  };
+  // Cache persistence must not wait behind a long inference or a cancelled kernel.
+  const lightweight = message.command === 'read' || message.command === 'write';
+  const task = lightweight ? execute() : serial.then(execute);
+  if (!lightweight) serial = task.catch(() => {});
   task.then(value => respond({ ok: true, value })).catch(error => respond({ ok: false, error: error.message })).finally(() => { active.delete(message.requestId); clearInterval(heartbeat); });
   return true;
 });

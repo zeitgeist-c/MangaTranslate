@@ -1,4 +1,4 @@
-# MangaLens TR 3.5.0 — tam bölüm önizleme
+# MangaLens TR 3.5.1 — tam bölüm önizleme
 
 [English](README.md)
 
@@ -6,13 +6,15 @@ Brave/Chromium Manifest V3 uzantısı. İngilizce manga/manhwa/manhua yazıları
 
 ## Kullanım
 
-1. `MangaLensTR-3.5.0.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle.
+1. `MangaLensTR-3.5.1.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle.
 2. Popup'ta Gemini/OpenRouter seç; API alt sekmesinde ilgili anahtarı ekle. Google anahtarları korunur; OpenRouter ayrı saklanır.
 3. Modeli seç ve Kaydet. Manga çeviri tercihlerinden içerik türü, seri adı, yönerge ve sözlük ekleyebilirsin. Sözlük seri adına göre yerel saklanır.
 4. **Bölümün tamamını çevir** mevcut bölümün görsellerini sırayla işler; sonraki bölüme geçmez. Lazy-load taraması sınırlıdır ve kaydırma konumu geri getirilir.
 5. Sayfa paneli: Duraklat, Devam et, Hatalıları yeniden dene, Orijinal/çeviri, Kutular ve Kontrol listesi. Belirsiz alanlar/sığmayan metin otomatik kaplanmaz; Alan Seç ile düzeltilebilir.
 
 Yalnız seçili model kullanılır; başka modele sessiz geçiş olmaz. Hatalıları yeniden deneme yeni ücret oluşturabilir. Gönderilmiş bir isteğin cevabı kaybolursa otomatik tekrar yapılmaz. Tamamlanmış sonuçlar kaynak/model/profil/sözlük/bağlam cache'inden kullanılır. Başlamış iş ayarlarını sabitler; model değişimi yeni işleri etkiler.
+
+3.5.1: Duraklat bekleyen yerel işlemi iptal eder; Devam et tek tıklamayla sürdürür. Yanıtsız adımlar süre sınırında hata olarak kaydedilir ve diğer görsellere geçilir. Gönderilmiş çeviri isteğinin geç cevabı önbelleğe alınabilir; devam ederken aynı çağrı paylaşılır. Sayfada zaten gösterilen tamamlanmış katmanlar yeniden işlenmez. Güncellemeden sonra uzantıyı ve manga sekmesini yeniden yükleyin.
 
 ## Modeller ve tespit
 
