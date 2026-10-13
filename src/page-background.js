@@ -1,0 +1,106 @@
+'use strict';
+let mlOffscreenCreating;
+const mlCalls = new Map();
+async function mlOffscreen(command, payload = {}) {
+  const url = chrome.runtime.getURL('src/page/offscreen.html');
+  const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'], documentUrls: [url] });
+  if (!contexts.length) {
+    if (!mlOffscreenCreating) mlOffscreenCreating = chrome.offscreen.createDocument({ url: 'src/page/offscreen.html', reasons: ['BLOBS'], justification: 'Yerel manga görsellerini okuyup dilimler halinde tespit etmek ve şekle uygun çeviri katmanı hazırlamak.' }).finally(() => { mlOffscreenCreating = null; });
+    await mlOffscreenCreating;
+  }
+  const response = await chrome.runtime.sendMessage({ target: 'ml-offscreen', command, requestId: crypto.randomUUID(), ...payload });
+  if (!response?.ok) throw new Error(response?.error || 'Yerel görüntü işleyici yanıt vermedi.');
+  return response.value;
+}
+async function mlConfig() {
+  const [settings, local] = await Promise.all([chrome.storage.sync.get(null), chrome.storage.local.get('translationGlossary')]);
+  return MLProviders.settings({ ...settings, translationGlossary: local.translationGlossary ?? settings.translationGlossary });
+}
+async function mlKey(provider) {
+  if (provider === 'gemini') return getActiveApiKey();
+  const stored = await chrome.storage.local.get(['openrouterApiKey']);
+  return stored.openrouterApiKey || '';
+}
+async function mlProviderCall(config, prompt, images, keyOverride) {
+  const key = keyOverride || await mlKey(config.provider);
+  if (!key) throw new Error(`${config.provider === 'gemini' ? 'Gemini' : 'OpenRouter'} API anahtarı eksik.`);
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 25000);
+  try {
+    const router = config.provider === 'openrouter';
+    const body = router ? MLProviders.routerBody(config.model, prompt, images) : {
+      contents: [{ role: 'user', parts: [{ text: prompt }, ...images.flatMap(image => {
+        const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(image.dataUrl);
+        if (!match) throw new Error('Geçersiz görsel kırpması');
+        return [{ text: `regionId=${image.regionId || 'manual'}` }, { inlineData: { mimeType: match[1], data: match[2] } }];
+      })] }], generationConfig: { maxOutputTokens: 8192, ...(!config.model.startsWith('gemma') ? { responseMimeType: 'application/json' } : {}) }
+    };
+    const endpoint = router ? 'https://openrouter.ai/api/v1/chat/completions' : `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.model)}:generateContent`;
+    const response = await fetch(endpoint, { method: 'POST', signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', ...(router ? { Authorization: `Bearer ${key}` } : { 'x-goog-api-key': key }) }, body: JSON.stringify(body) });
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(`${config.provider}/${config.model}: HTTP ${response.status} — ${String(data.error?.message || 'Sağlayıcı hatası').replaceAll(key, '[anahtar]').slice(0, 240)}`);
+    const text = router ? data.choices?.[0]?.message?.content : data.candidates?.[0]?.content?.parts?.filter(p => !p.thought).map(p => p.text || '').join('');
+    const finish = router ? data.choices?.[0]?.finish_reason : data.candidates?.[0]?.finishReason;
+    if (['length', 'MAX_TOKENS', 'SAFETY', 'content_filter'].includes(finish)) throw new Error(`Çeviri tamamlanmadı: ${finish}`);
+    if (typeof text !== 'string' || !text.trim()) throw new Error('Sağlayıcı boş yanıt verdi.');
+    return text;
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('Sağlayıcı 25 saniyede yanıt vermedi; ücretlendirme durumu belirsiz. Otomatik tekrar yapılmadı.');
+    throw error;
+  } finally { clearTimeout(timer); }
+}
+async function mlTranslate(message) {
+  const { config, regions, imageId, context = [] } = message;
+  const checked = MLProviders.settings({ translationProvider: config.provider, geminiModel: config.model, openrouterModel: config.model,
+    contributorConsent: config.model.endsWith('-contributor') ? (await chrome.storage.sync.get('contributorConsent')).contributorConsent : false,
+    contentType: config.contentType, localDetector: config.localDetector, seriesName: config.series, translationInstructions: config.instructions, translationGlossary: config.glossary });
+  if (!/^[a-f0-9]{64}$/.test(imageId) || !Array.isArray(regions) || !regions.length || regions.length > 6 ||
+      regions.some(r => !r.regionId?.startsWith(`${imageId}:`) || typeof r.crop !== 'string' || !/^data:image\/(png|jpeg|webp);base64,/.test(r.crop) || r.crop.length > 4_000_000)) throw new Error('Geçersiz bölge isteği');
+  const encoded = new TextEncoder().encode(JSON.stringify({ config: checked, imageId, regions: regions.map(r => r.regionId), context }));
+  const key = 'translation-v1:' + [...new Uint8Array(await crypto.subtle.digest('SHA-256', encoded))].map(v => v.toString(16).padStart(2, '0')).join('');
+  if (mlCalls.has(key)) return mlCalls.get(key);
+  const operation = (async () => {
+    const existing = await mlOffscreen('read', { key });
+    if (existing?.status === 'done') return { ...existing, cached: true };
+    if (existing && !message.retry) throw new Error('Önceki çağrı tamamlanamadı; tekrar ücret olasılığı nedeniyle durduruldu. “Hatalıları yeniden dene” ile açıkça tekrar deneyebilirsiniz.');
+    await mlOffscreen('write', { key, value: { status: 'pending', startedAt: Date.now(), config: checked } });
+    try {
+      const raw = await enqueueWithRateLimit(() => mlProviderCall(checked, MLProviders.prompt(checked, regions, context), regions.map(r => ({ regionId: r.regionId, dataUrl: r.crop }))), { retry: false });
+      const translated = MLProviders.parse(raw, regions.map(r => r.regionId));
+      const result = { status: 'done', config: checked, regions: translated, completedAt: Date.now() };
+      await mlOffscreen('write', { key, value: result }); await incrementTranslationStats();
+      return result;
+    } catch (error) {
+      await mlOffscreen('write', { key, value: { status: 'uncertain', error: error.message, config: checked, updatedAt: Date.now() } });
+      throw error;
+    }
+  })();
+  mlCalls.set(key, operation);
+  try { return await operation; } finally { mlCalls.delete(key); }
+}
+chrome.runtime.onMessage.addListener((message, sender, respond) => {
+  if (!message?.type?.startsWith('ML_') || sender.id !== chrome.runtime.id) return;
+  if (message.type === 'ML_HEARTBEAT') { respond({ ok: true }); return; }
+  if (message.type === 'ML_PROGRESS') {
+    if (sender.url !== chrome.runtime.getURL('src/page/offscreen.html')) return;
+    if (Number.isInteger(message.tabId)) chrome.tabs.sendMessage(message.tabId, { type: 'ML_PAGE_PROGRESS', text: message.text }).catch(() => {});
+    respond({ ok: true }); return;
+  }
+  const action = async () => {
+    if (message.type === 'ML_CONFIG') return mlConfig();
+    if (!sender.tab?.id) throw new Error('Bu komut yalnız manga sayfasından çalıştırılabilir.');
+    if (message.type === 'ML_PREPARE') return mlOffscreen('prepare', { source: message.source, detector: message.detector, tabId: sender.tab.id });
+    if (message.type === 'ML_RENDER') return mlOffscreen('render', { source: message.source, report: message.report, translations: message.translations, minFont: message.minFont });
+    if (message.type === 'ML_TRANSLATE') return mlTranslate(message);
+    if (message.type === 'ML_JOB_GET' || message.type === 'ML_JOB_SAVE') {
+      const url = new URL(sender.tab.url); url.hash = '';
+      const key = `ml-page-job:${sender.tab.id}:${url.href}`;
+      if (message.type === 'ML_JOB_GET') return (await chrome.storage.local.get(key))[key] || null;
+      if (!message.job || JSON.stringify(message.job).length > 2_000_000) throw new Error('İş kaydı çok büyük.');
+      await chrome.storage.local.set({ [key]: message.job }); return true;
+    }
+    throw new Error('Bilinmeyen sayfa komutu.');
+  };
+  action().then(value => respond({ ok: true, value })).catch(error => respond({ ok: false, error: error.message }));
+  return true;
+});

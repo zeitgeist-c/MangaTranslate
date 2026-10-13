@@ -33,7 +33,28 @@ $requiredFiles = @(
     'popup\popup.js',
     'popup\style.css',
     'src\background.js',
-    'src\content.js'
+    'src\content.js',
+    'src\providers.js',
+    'popup\page-popup.js',
+    'src\page-background.js',
+    'src\page-content.js',
+    'src\page\offscreen.html',
+    'src\page\offscreen.mjs',
+    'src\page\layout.mjs',
+    'src\page\store.mjs',
+    'src\page\lib\geometry.mjs',
+    'src\page\lib\rtdetr.mjs',
+    'src\page\lib\ppocr.mjs',
+    'src\page\models\detector_int8.onnx',
+    'src\page\models\ppocrv5_det.onnx',
+    'src\page\models\detector-v4-s_int8.onnx',
+    'src\page\vendor\ort.all.bundle.min.mjs',
+    'src\page\vendor\ort-wasm-simd-threaded.jsep.mjs',
+    'src\page\vendor\ort-wasm-simd-threaded.jsep.wasm',
+    'src\page\licenses\ONNXRuntime-MIT.txt',
+    'src\page\licenses\ONNXRuntime-ThirdPartyNotices.txt',
+    'src\page\licenses\PaddleOCR-Apache-2.0.txt',
+    'src\page\licenses\MODELS.md'
 )
 
 foreach ($relativePath in $requiredFiles) {
@@ -47,7 +68,7 @@ $node = Get-Command 'node.exe' -ErrorAction SilentlyContinue
 if (-not $node) {
     throw 'JavaScript sözdizimi doğrulaması için Node.js bulunamadı.'
 }
-foreach ($relativePath in @('popup\popup.js', 'src\background.js', 'src\content.js')) {
+foreach ($relativePath in @('popup\popup.js', 'popup\page-popup.js', 'src\background.js', 'src\content.js', 'src\providers.js', 'src\page-background.js', 'src\page-content.js', 'src\page\offscreen.mjs', 'src\page\layout.mjs')) {
     & $node.Source --check (Join-Path $projectRoot $relativePath)
     if ($LASTEXITCODE -ne 0) {
         throw "JavaScript sözdizimi doğrulaması başarısız: $relativePath"
@@ -57,8 +78,11 @@ foreach ($relativePath in @('popup\popup.js', 'src\background.js', 'src\content.
 $packageName = "MangaLensTR-$version.zip"
 $packagePath = Join-Path $projectRoot $packageName
 if (Test-Path -LiteralPath $packagePath) {
-    Remove-Item -LiteralPath $packagePath -Force
+    throw "Önceki paket korunuyor; aynı sürümün üzerine yazılmaz: $packagePath"
 }
+
+& $node.Source --test (Get-ChildItem -LiteralPath (Join-Path $projectRoot 'tests') -File | Where-Object { $_.Name -match '\.test\.(js|mjs)$' } | ForEach-Object FullName)
+if ($LASTEXITCODE -ne 0) { throw 'Sürüm testleri başarısız; paket oluşturulmadı.' }
 
 $archiveInputs = @(
     (Join-Path $projectRoot 'manifest.json'),
@@ -72,7 +96,8 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [System.IO.Compression.ZipFile]::OpenRead($packagePath)
 try {
     $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
-    foreach ($requiredEntry in @('manifest.json', 'assets/icon16.png', 'assets/icon48.png', 'assets/icon128.png', 'popup/popup.html', 'popup/popup.js', 'popup/style.css', 'src/background.js', 'src/content.js')) {
+    foreach ($requiredEntry in $requiredFiles) {
+        $requiredEntry = $requiredEntry.Replace('\', '/')
         if ($entries -notcontains $requiredEntry) {
             throw "ZIP içinde gerekli dosya bulunamadı: $requiredEntry"
         }

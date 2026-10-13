@@ -13,7 +13,7 @@
         <div class="brand-mark" aria-hidden="true">ML</div>
         <div class="brand-copy">
           <div class="brand-name">MangaLens TR</div>
-          <div class="brand-sub" id="brand-sub">Görsel çeviri v3.1.7</div>
+          <div class="brand-sub" id="brand-sub">Görsel çeviri v3.5.0</div>
         </div>
       </div>
 
@@ -23,6 +23,10 @@
       </div>
     </header>
 
+    <nav class="tabs" aria-label="Çeviri sağlayıcısı">
+      <button id="provider-gemini" type="button" class="btn-secondary">Gemini</button>
+      <button id="provider-openrouter" type="button" class="btn-secondary">OpenRouter</button>
+    </nav>
     <nav class="tabs" aria-label="Popup bölümleri">
       <button class="tab-btn active" type="button" data-tab="translate">Çeviri</button>
       <button class="tab-btn" type="button" data-tab="api">API</button>
@@ -34,7 +38,9 @@
           <div class="mode-head">
             <div class="panel-title">Çeviri araçları</div>
           </div>
+          <small>Tam bölüm önizleme: bütün yazıların bulunması henüz doğrulanmadı. Kontrol gereken alanlar ayrıca gösterilir.</small>
           <div class="action-grid mode-actions">
+            <button class="btn-primary mode-button" id="btn-full-chapter" type="button">Bölümün tamamını çevir</button>
             <button class="btn-secondary mode-button" id="btn-translate-page" type="button">
               <span class="btn-icon" aria-hidden="true">▣</span>
               Alan Seç
@@ -70,20 +76,40 @@
               <label><input type="radio" name="translation-font-size" value="20"><span>Büyük</span></label>
             </div>
           </div>
-          <div class="model-setting">
+          <div class="model-setting" id="gemini-model-panel">
             <label for="gemini-model"><strong>Çeviri modeli</strong></label>
             <select id="gemini-model" class="field-input">
-              <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite — en hızlı (Varsayılan)</option>
-              <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite — hızlı (değişken)</option>
-              <option value="gemma-4-26b-a4b-it">Gemma 4 26B A4B — yavaş (11-24 sn)</option>
+              <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite (Varsayılan)</option>
+              <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
+              <option value="gemma-4-26b-a4b-it">Gemma 4 26B A4B</option>
             </select>
             <small id="model-speed" class="model-speed"></small>
-            <small>Seçili model başarısız olursa diğer modeller sırayla otomatik denenir. Süreler 19 Eyl gerçek sayfa ölçümü.</small>
+            <small>Yalnız seçili model kullanılır. Hata olursa başka modele otomatik geçilmez.</small>
           </div>
+          <div class="model-setting" id="openrouter-model-panel" hidden>
+            <label for="openrouter-model"><strong>OpenRouter modeli</strong></label>
+            <select id="openrouter-model" class="field-input"></select>
+            <label><input id="contributor-consent" type="checkbox"> Contributor modelinde sağlayıcının veri paylaşımı koşullarını kabul ediyorum.</label>
+            <button id="refresh-models" type="button" class="btn-secondary">Model erişimini kontrol et</button>
+            <small id="model-availability"></small>
+          </div>
+          <details>
+            <summary>Manga çeviri tercihleri</summary>
+            <label for="local-detector">Yerel tarama</label>
+            <select id="local-detector" class="field-input"><option value="standard">Standart tarama</option><option value="small">Hızlı tarama (deneysel)</option></select>
+            <small>Hızlı yol daha küçük bir yerel dedektör kullanır; iki yöntemin bulduğu alanlar farklı olabilir.</small>
+            <label for="content-type">İçerik türü</label>
+            <select id="content-type" class="field-input"><option value="auto">Otomatik / bilinmiyor</option><option value="manga">Manga</option><option value="manhwa">Manhwa</option><option value="manhua">Manhua</option></select>
+            <label for="series-name">Seri adı (isteğe bağlı)</label><input id="series-name" class="field-input" maxlength="200">
+            <label for="translation-instructions">Çeviri tercihi (isteğe bağlı)</label><textarea id="translation-instructions" class="field-input" maxlength="1500"></textarea>
+            <label for="translation-glossary">Ad ve terim sözlüğü</label><textarea id="translation-glossary" class="field-input" maxlength="6000" placeholder="Kaynak terim = Türkçe karşılık"></textarea>
+          </details>
+          <small>Tam bölüm: yerel tespit → seçili modelle çeviri → güvenli yerleşim. Belirsiz alanlar kontrol için korunur. İş başladıktan sonra model değişimi yeni işleri etkiler.</small>
           <button class="btn-primary btn-compact" id="btn-save" type="button">Kaydet</button>
         </div>
       </section>
       <section class="tab-panel" data-tab-panel="api">
+        <div id="google-key-panel">
         <div class="section-head">
           <div>
             <div class="panel-title">Google API anahtarları</div>
@@ -108,6 +134,15 @@
           </button>
         </div>
 
+        </div>
+        <div id="router-key-panel" hidden>
+          <div class="panel-title">OpenRouter API anahtarı</div>
+          <p id="router-key-status">Anahtar yükleniyor…</p>
+          <input id="router-api-key" type="password" class="field-input" autocomplete="off" placeholder="Yeni OpenRouter anahtarı">
+          <button id="save-router-key" type="button" class="btn-primary">Anahtarı kaydet</button>
+          <button id="remove-router-key" type="button" class="btn-secondary">Anahtarı sil</button>
+          <small>Anahtar yalnız bu tarayıcıda saklanır ve yalnız OpenRouter'a gönderilir. Yeni anahtar kaydetmek mevcut Google anahtarlarını değiştirmez.</small>
+        </div>
         <div class="note-line">Seçili model: <code id="model-note">Gemini 3.5 Flash Lite</code></div>
       </section>
 
@@ -117,6 +152,8 @@
     <div class="toast" id="toast"></div>
   </div>
 
+  <script src="../src/providers.js"></script>
+  <script src="page-popup.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

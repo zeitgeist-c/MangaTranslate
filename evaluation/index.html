@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MangaLens TR — Tespit laboratuvarı</title><link rel="stylesheet" href="style.css"></head>
+<body><header><h1>MangaLens TR · Tespit laboratuvarı</h1><p>Çeviri ve API çağrısı yapmaz. Mor: model yazıları, mavi: model balonları. Yeşil/turkuaz: kontrol etiketleri.</p></header>
+<nav aria-label="Değerlendirme seçenekleri">
+<label>Görsel <select id="page"></select></label>
+<label>Dedektör <select id="model"></select></label>
+<label>Çalıştırma <select id="backend"><option value="wasm">WASM · CPU</option><option value="webgpu">WebGPU · GPU</option></select></label>
+<button id="run">Yazı ve balonları bul</button><button id="cancel" disabled>Durdur</button>
+<button id="batch">Bu bölümün tüm görsellerini tara</button>
+</nav>
+<p id="status" role="status">Yerel veri kümesi yükleniyor…</p>
+<details><summary>Kontrol etiketleri — model başarısını ölçmek için</summary>
+<p>Önce model çizgilerini gizleyip gerçek yazı gruplarını ve balonlarını çiz. Yazıyı doğru balona bağla. Eksik alan kalmadığını kontrol ettikten sonra doğrulama kutusunu işaretle. Model tahminleri doğru cevap sayılmaz.</p>
+<label><input id="showPredictions" type="checkbox" checked> Model çizgilerini göster</label>
+<label>Çizim <select id="labelMode"><option value="none">Kapalı</option><option value="text">Yazı grubu</option><option value="bubble">Balon</option></select></label>
+<label><input id="reviewed" type="checkbox"> Bu görselin kapsam içi tüm yazılarını ve eşleştirmelerini kontrol ettim</label>
+<button id="saveLabels">Etiketleri kaydet</button>
+<div id="labels"></div>
+</details>
+<main><div id="stage"><img id="image" alt="Değerlendirilen kaynak sayfa"><svg id="overlay" xmlns="http://www.w3.org/2000/svg" aria-label="Kaynak piksel koordinatlarında kutular"></svg></div></main>
+<script type="module" src="app.mjs"></script></body></html>

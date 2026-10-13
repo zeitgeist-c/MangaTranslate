@@ -3,6 +3,8 @@
 
 'use strict';
 
+if (typeof importScripts === 'function') importScripts('providers.js', 'page-background.js');
+
 const GEMINI_MODELS = Object.freeze({
   DEFAULT: 'gemini-3.5-flash-lite',
   FALLBACK: 'gemini-3.1-flash-lite',
@@ -165,6 +167,16 @@ function buildTranslationPrompt(translationMode, alternativeAttempt) {
 
 async function handleExtract({ dataUrl, w, h, translationMode, alternativeAttempt }) {
   if (!dataUrl) throw new Error('dataUrl eksik');
+
+  if (typeof MLProviders !== 'undefined') {
+    const config = await mlConfig(), started = Date.now();
+    const prompt = buildTranslationPrompt(translationMode, alternativeAttempt) + '\n' + MLProviders.style(config) +
+      '\nRead the complete selected crop. Image dimensions: ' + w + 'x' + h;
+    const raw = await enqueueWithRateLimit(() => mlProviderCall(config, prompt, [{ dataUrl }]), { retry: false });
+    const bubbles = parseBubbleArray(raw, w, h);
+    if (bubbles.length) await incrementTranslationStats();
+    return { bubbles, model: config.model, modelLabel: config.model, provider: config.provider, fallbackUsed: false, elapsedMs: Date.now() - started };
+  }
 
   // v2.5: aktif API key'i storage'dan al
   const apiKey = await getActiveApiKey();
@@ -443,6 +455,13 @@ async function executeWithModelFallback(selectedModel, operation) {
  * v2.5: API key test et. Kisa "Reply with OK only." promptu, JSON yok.
  */
 async function testApiKey(apiKey) {
+  if (typeof MLProviders !== 'undefined') {
+    const model = await getSelectedGeminiModel();
+    try {
+      await mlProviderCall({ provider: 'gemini', model }, 'Return JSON {"ok":true}.', [], apiKey);
+      return { status: 'success', model, fallbackUsed: false };
+    } catch (error) { return { status: 'error', model, fallbackUsed: false, message: error.message }; }
+  }
   if (!apiKey) throw new Error('API key bos');
   const selectedModel = await getSelectedGeminiModel();
   try {
@@ -574,9 +593,9 @@ function clampInt(v, min, max) {
 //  v2: Rate-Limited Sequential Queue
 // ══════════════════════════════════════════════════════════════════════════════
 
-function enqueueWithRateLimit(fn) {
+function enqueueWithRateLimit(fn, options = {}) {
   return new Promise((resolve, reject) => {
-    requestQueue.push({ fn, resolve, reject, retries: 0 });
+    requestQueue.push({ fn, resolve, reject, retries: 0, allowRetry: options.retry !== false });
     processRateLimitedQueue();
   });
 }
@@ -613,7 +632,7 @@ async function processRateLimitedQueue() {
       }
       const isRetryable = errStatus === 'rate_limited' || errStatus === 'timeout' ||
         /429|timeout|rate[\s_-]?limit|kota|zaman as/i.test(errText);
-      if (isRetryable && item.retries < 3) {
+      if (isRetryable && item.allowRetry !== false && item.retries < 3) {
         const backoff = Math.min(BACKOFF_INITIAL_MS * Math.pow(2, item.retries), BACKOFF_MAX_MS);
         console.warn('[MangaLens-bg] retryable hata:', e.message, '-> backoff:', backoff, 'ms');
         saveRateState(Date.now() + backoff, intervalMs);  // backoff kadar bekleme zorla

@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-13",
+  "version": "3.5.0",
+  "automatedChecksPassed": 36,
+  "liveProviderCalls": false,
+  "providerTestingDecision": "User will test models; no live calls",
+  "humanReviewedRegions": 0,
+  "detectionAcceptancePassed": false,
+  "dataFiles": 101,
+  "seriesGroups": 4,
+  "reviewQueue": 35,
+  "latestSmoke": {
+    "turkishGlyphRender": true,
+    "overflowRejected": true,
+    "restartCalls": 0,
+    "errors": [],
+    "alignment": [
+      {
+        "width": 1280,
+        "delta": 0
+      },
+      {
+        "width": 700,
+        "delta": 0
+      }
+    ],
+    "resumeCalls": 0,
+    "version": "3.5.0",
+    "pages": [
+      {
+        "state": "review",
+        "regions": 19,
+        "translated": 7,
+        "issues": 12
+      }
+    ]
+  },
+  "liveReader": {
+    "issues": 12,
+    "limitedToOneImage": true,
+    "otherImagesRemoved": true,
+    "alignment": [
+      {
+        "delta": 0,
+        "layerHidden": false,
+        "width": 1280
+      },
+      {
+        "delta": 0,
+        "layerHidden": false,
+        "width": 700
+      }
+    ],
+    "translated": 7
+  },
+  "earlierFullChapter": {
+    "wallMs": 679725.0351,
+    "processingVersion": "d3-small before seam/color refinement",
+    "reviewCandidates": 387.0,
+    "rendered": 45.0,
+    "pages": 18,
+    "fakeCalls": 21,
+    "providerReplies": "synthetic"
+  },
+  "peakMemoryMeasured": false,
+  "remainingGates": [
+    "200 human-reviewed regions and representativeness",
+    "98% detection targets and complete-page quality",
+    "Full live-reader lifecycle and device/peak-memory acceptance",
+    "Owner translation quality tests"
+  ]
+}
