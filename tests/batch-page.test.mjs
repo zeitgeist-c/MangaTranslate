@@ -51,11 +51,12 @@ test('cross-image batches associate reversed replies by identity and regrouped r
   const restarted=fixture(f.cache);await restarted.context.mlTranslate(restarted.message(rs));assert.equal(restarted.calls.length,0);
 });
 test('overlapping live batches reuse existing regions, including regrouping after a pause',async()=>{
-  const f=fixture();let release;const actual=f.context.mlProviderCall;
-  f.context.mlProviderCall=async(...args)=>{await new Promise(r=>release=r);return actual(...args);};
-  const first=f.context.mlTranslate(f.message([f.region(1)]));await flush();
+  const f=fixture();let release, signalFirst, signalSecond, started=0;const actual=f.context.mlProviderCall;
+  const firstStarted=new Promise(r=>signalFirst=r), secondStarted=new Promise(r=>signalSecond=r);
+  f.context.mlProviderCall=async(...args)=>{await new Promise(r=>{release=r; (++started===1 ? signalFirst : signalSecond)();});return actual(...args);};
+  const first=f.context.mlTranslate(f.message([f.region(1)]));await firstStarted;
   const second=f.context.mlTranslate(f.message([f.region(1),f.region(2)]));await flush();assert.equal(f.calls.length,0);
-  release();await first;await flush();release();await second;assert.equal(f.calls.length,2);assert.equal(f.calls[1].images.length,1);
+  release();await first;await secondStarted;release();await second;assert.equal(f.calls.length,2);assert.equal(f.calls[1].images.length,1);
 });
 test('worker restart never resends an uncertain region without an explicit retry',async()=>{
   const f=fixture();f.context.mlProviderCall=async()=>{throw Object.assign(new Error('timeout'),{stopJob:true,code:'PROVIDER_TIMEOUT'});};
