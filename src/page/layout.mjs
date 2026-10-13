@@ -3,29 +3,29 @@ import { area, intersection, clipBox } from './lib/geometry.mjs';
 // Fast path: group source-pixel text lines, without expensive balloon reconstruction.
 export function groupTextLines(report) {
   const unionBox = items => [Math.min(...items.map(r => r.box[0])), Math.min(...items.map(r => r.box[1])), Math.max(...items.map(r => r.box[2])), Math.max(...items.map(r => r.box[3]))];
-  const raw = report.regions.map(r => ({ box: r.textBox, score: r.score, clipped: r.reason === 'tile_boundary' }));
+  const raw = report.regions.map(r => ({ box: r.inkBox || r.textBox, cover: r.textBox, score: r.score, clipped: r.reason === 'tile_boundary' }));
   const pieces = raw.filter((r, i) => !raw.some((other, j) => j !== i && intersection(r.box, other.box) / area(r.box) > .9 &&
     (area(other.box) > area(r.box) * 1.05 || area(other.box) >= area(r.box) && j < i)));
   const join = (items, compatible) => {
     const parents = items.map((_, i) => i), find = i => parents[i] === i ? i : (parents[i] = find(parents[i]));
-    for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) if (compatible(items[i].box, items[j].box)) parents[find(j)] = find(i);
+    for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) if (compatible(items[i].box, items[j].box, items[i].cover, items[j].cover)) parents[find(j)] = find(i);
     const groups = new Map(); items.forEach((r, i) => { const key = find(i); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(r); });
-    return [...groups.values()].map(group => ({ box: unionBox(group), score: Math.min(...group.map(r => r.score)), clipped: group.some(r => r.clipped), lineCount: group.reduce((n, r) => n + (r.lineCount || 1), 0) }));
+    return [...groups.values()].map(group => ({ box: unionBox(group), cover: unionBox(group.map(r => ({box:r.cover || r.box}))), score: Math.min(...group.map(r => r.score)), clipped: group.some(r => r.clipped), lineCount: group.reduce((n, r) => n + (r.lineCount || 1), 0) }));
   };
-  const lines = join(pieces, (a, b) => {
+  const lines = join(pieces, (a, b, ac = a, bc = b) => {
     const ah = a[3] - a[1], bh = b[3] - b[1], overlap = Math.min(a[3], b[3]) - Math.max(a[1], b[1]);
     const gap = Math.max(a[0], b[0]) - Math.min(a[2], b[2]);
-    return overlap >= Math.min(ah, bh) * .55 && Math.abs((a[1] + a[3] - b[1] - b[3]) / 2) <= Math.max(ah, bh) * .4 && gap <= Math.max(ah, bh) * 1.5;
+    return overlap >= Math.min(ah, bh) * .55 && Math.abs((a[1] + a[3] - b[1] - b[3]) / 2) <= Math.max(ah, bh) * .4 && gap <= Math.max(Math.max(ah, bh) * 1.5, Math.min(ac[3]-ac[1],bc[3]-bc[1]) * .95);
   });
-  const groups = join(lines, (a, b) => {
+  const groups = join(lines, (a, b, ac = a, bc = b) => {
     const ah = a[3] - a[1], bh = b[3] - b[1], gap = Math.max(a[1], b[1]) - Math.min(a[3], b[3]);
     const overlap = Math.min(a[2], b[2]) - Math.max(a[0], b[0]);
-    return gap >= -Math.min(ah, bh) * .2 && gap <= Math.max(ah, bh) * 1.2 && Math.max(ah, bh) <= Math.min(ah, bh) * 1.8 &&
+    return gap >= -Math.min(ah, bh) * .2 && gap <= Math.max(Math.max(ah, bh) * 1.2, Math.min(ac[3]-ac[1],bc[3]-bc[1]) * .85) && Math.max(ah, bh) <= Math.min(ah, bh) * 1.8 &&
       overlap >= Math.min(a[2] - a[0], b[2] - b[0]) * .35;
   });
   return groups.sort((a, b) => a.box[1] - b.box[1] || a.box[0] - b.box[0]).map((r, i) => {
     const small = r.box[2] - r.box[0] < 24 || r.box[3] - r.box[1] < 12;
-    return { regionId: `${report.imageId}:fast-v5:r${i}`, textBox: r.box, score: r.score, kind: 'text_free', bubbleId: null, bubbleBox: null,
+    return { regionId: `${report.imageId}:fast-v6:r${i}`, textBox: r.cover || r.box, inkBox: r.box, score: r.score, kind: 'text_free', bubbleId: null, bubbleBox: null,
       needsReview: small || r.clipped, reason: small ? 'small_text_candidate' : r.clipped ? 'tile_boundary' : null, lineCount: r.lineCount };
   });
 }

@@ -4,16 +4,16 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import { webcrypto } from 'node:crypto';
 const source = await readFile(new URL('../src/page-content.js', import.meta.url), 'utf8');
-const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
-function fixture({ blocked = false } = {}) {
+const flush = async () => { for (let i = 0; i < 200; i++) await Promise.resolve(); };
+function fixture({ blocked = false, oldVersion } = {}) {
   const buttons = new Map(), messages = [], pending = [], timers = new Map(); let listener, status, timerId = 0;
   const node = tag => ({ dataset: {}, style: {}, isConnected: true, textContent: '',
     append(...children) { for (const child of children) { if (child.tag === 'button') buttons.set(child.textContent, child); if (child.tag === 'p') status = child; } },
     tag, setAttribute() {}, attachShadow() { return node('shadow'); }, remove() { this.isConnected = false; } });
-  const config = { processingVersion: 'page-v4', localDetector: 'standard', provider: 'openrouter', model: 'synthetic' };
-  let saved = { config, pages: [{ source: 'https://fixture/image.png', state: 'queued' }, ...(blocked ? [{ source: 'https://fixture/second.png', state: 'queued' }] : [])], context: [] };
+  const config = { processingVersion: 'page-v6', localDetector: 'fast', provider: 'openrouter', model: 'synthetic', batching: { maxRegions: 1 } };
+  let saved = { config: oldVersion ? {...config,processingVersion:oldVersion} : config, pages: [{ source: 'https://fixture/image.png', state: 'queued' }, ...(blocked ? [{ source: 'https://fixture/second.png', state: 'queued' }] : [])], context: [] };
   const image = { currentSrc: 'https://fixture/image.png', naturalWidth: 900, naturalHeight: 1000, isConnected: true };
-  const context = vm.createContext({ AbortController, DOMException, structuredClone, crypto: webcrypto, URL, console, performance,
+  const context = vm.createContext({ AbortController, DOMException, structuredClone, crypto: webcrypto, URL, console, performance, TextEncoder,
     setTimeout(fn, ms) { timers.set(++timerId, { fn, ms }); return timerId; }, clearTimeout(id) { timers.delete(id); },
     document: { createElement: node, images: [image], documentElement: node('html') },
     window: { addEventListener() {} }, MutationObserver: class { observe() {} }, ResizeObserver: class { observe() {} },
@@ -23,6 +23,7 @@ function fixture({ blocked = false } = {}) {
         if (message.type === 'ML_CONFIG') return Promise.resolve({ ok: true, value: config });
         if (message.type === 'ML_JOB_GET') return Promise.resolve({ ok: true, value: saved });
         if (message.type === 'ML_JOB_SAVE') { saved = structuredClone(message.job); return Promise.resolve({ ok: true }); }
+        if (message.type === 'ML_JOB_CONTROL') return Promise.resolve({ok:true});
         if (message.type === 'ML_CANCEL') return Promise.resolve({ ok: true });
         if (message.type === 'ML_PREPARE') return new Promise(resolve => pending.push({ message, resolve }));
         if (message.type === 'ML_TRANSLATE') return Promise.resolve({ ok: false, error: 'OpenRouter hesabında 18+ yaş onayı gerekiyor.', code: 'AGE_CONFIRMATION_REQUIRED', stopJob: true, actionUrl: 'https://openrouter.ai/settings/preferences' });
@@ -73,4 +74,7 @@ test('stale progress cannot overwrite the paused or resumed operation', async ()
   f.progress({ requestId: oldId, text: 'STALE' }); assert.equal(f.text, resumed);
   f.progress({ requestId: f.pending[1].message.requestId, text: 'CURRENT' }); assert.equal(f.text, 'CURRENT');
   await f.click('Duraklat');
+});
+test('3.7 jobs require a new scan without deleting results or submitting a provider call',async()=>{
+  const f=fixture({oldVersion:'page-v5'});await f.start();assert.match(f.text,/İşleme sürümü değişti/);assert.equal(f.pending.length,0);assert.equal(f.saved.config.processingVersion,'page-v5');assert.equal(f.messages.filter(m=>m.type==='ML_TRANSLATE').length,0);
 });

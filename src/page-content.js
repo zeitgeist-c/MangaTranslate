@@ -6,6 +6,7 @@
   const layers = new Map();
   let controller, resumePending, actionLink, pauseButton, resumeButton, retryButton, counterNode, panelCollapsed = false;
   const pendingRequests = new Set();
+  let saveChain = Promise.resolve(), segmentClock = 0;
   const request = (type, data = {}, signal = controller?.signal) => new Promise((resolve, reject) => {
     const requestId = crypto.randomUUID();
     const cancelLocal = () => {
@@ -18,7 +19,7 @@
       if (error) reject(error); else resolve(value);
     };
     const abort = () => { cancelLocal(); finish(new DOMException('İş duraklatıldı', 'AbortError')); };
-    const limit = type === 'ML_PREPARE' ? 180000 : type === 'ML_TRANSLATE' ? 120000 : type === 'ML_RENDER' ? 60000 : 15000;
+    const limit = type === 'ML_PREPARE' ? 180000 : type === 'ML_TRANSLATE' ? 300000 : type === 'ML_RENDER' ? 60000 : 15000;
     const timer = setTimeout(() => {
       cancelLocal(); finish(new Error(type === 'ML_TRANSLATE'
         ? 'Çeviri yanıtı zamanında gelmedi. Otomatik ücretli tekrar yapılmadı; geç yanıt önbellekte korunabilir.'
@@ -32,7 +33,7 @@
     }).then(response => {
       if (settled) return;
       if (!response?.ok) finish(Object.assign(new Error(response?.error || 'Uzantı bağlantısı kesildi; devam düğmesiyle yeniden deneyin.'),
-        { code: response?.code, stopJob: response?.stopJob === true, actionUrl: response?.actionUrl }));
+        { code: response?.code, stopJob: response?.stopJob === true, actionUrl: response?.actionUrl, timing: response?.timing, notSent: response?.notSent }));
       else finish(null, response.value);
     }, error => finish(error));
   });
@@ -76,16 +77,27 @@
     button('Orijinal / çeviri', () => { original = !original; synchronize(); }, tools);
     button('Kutuları göster / gizle', () => { boxes = !boxes; synchronize(); }, tools);
     button('Kontrol listesi', () => { status((job?.pages || []).flatMap((p, index) => [
-      p.timing ? `Görsel ${index + 1} süre: tarama ${((p.timing.totalMs || 0) / 1000).toFixed(2)} sn · çeviri ${((p.timing.translationMs || 0) / 1000).toFixed(2)} sn · kart ${((p.timing.renderMs || 0) / 1000).toFixed(2)} sn` : '',
+      p.timing ? `Görsel ${index + 1} süre: tarama ${((p.timing.totalMs || 0) / 1000).toFixed(2)} sn · kart ${((p.timing.renderMs || 0) / 1000).toFixed(2)} sn (çeviri süreleri Tanılama özeti içinde grup bazında)` : '',
       p.error ? `Görsel ${index + 1}: ${p.error}` : '',
       ...(p.issues || []).map(issue => `Görsel ${index + 1} · y=${Math.round(issue.textBox[1])}: ${issue.reason}${issue.translatedText ? '\n' + issue.translatedText : ''}`)
     ]).filter(Boolean).join('\n') || 'Kontrol gerektiren alan yok.'); }, tools);
+    button('Tanılama özeti', async () => {
+      const groups = job?.metrics?.groups || [], summary = {
+        model: job?.config?.model, provider: job?.config?.provider, elapsedMs: (job?.elapsedMs || 0) + (segmentClock ? performance.now() - segmentClock : 0),
+        images: job?.pages?.length || 0, cards: job?.pages?.reduce((n,p)=>n+(p.translated||0),0) || 0,
+        groups: groups.map(g=>({groupId:g.groupId,regions:g.regions || g.regionCount,queueMs:g.queueMs,providerMs:g.providerMs,wallMs:g.wallMs,concurrency:g.concurrency,cached:g.cached,failed:g.failed,code:g.code}))
+      };
+      const text = JSON.stringify(summary, null, 2); status(text);
+      try { await navigator.clipboard.writeText(text); } catch { /* Summary remains selectable in the panel. */ }
+    }, tools);
     button('Kapat', () => { pause(); panel.remove(); for (const entry of layers.values()) entry.root.remove(); layers.clear(); }, tools);
     shadow.append(style, section); document.documentElement.append(panel);
   }
-  async function save(signal = controller?.signal) { if (job) { job.updatedAt = Date.now(); await request('ML_JOB_SAVE', { job: structuredClone(job) }, signal); } }
+  async function save(signal = controller?.signal) { if (job) { job.updatedAt = Date.now(); const snapshot = structuredClone(job); snapshot.pages?.forEach(p => { delete p.translations; }); const task = saveChain.catch(() => {}).then(() => request('ML_JOB_SAVE', { job: snapshot }, signal)); saveChain = task; await task; } }
   function pause() {
+    if (job && segmentClock) { job.elapsedMs = (job.elapsedMs || 0) + performance.now() - segmentClock; segmentClock = 0; }
     paused = true; epoch++; resumePending = null; controller?.abort();
+    if (job?.id) chrome.runtime.sendMessage({ type: 'ML_JOB_CONTROL', jobId: job.id, paused: true }).catch(() => {});
     if (job) { job.state = 'paused'; save(null).catch(() => {}); }
     status('Duraklatıldı. Devam eden adımın geç sonucu sayfaya uygulanmayacak; tamamlanan çeviri önbellekte korunur.');
   }
@@ -173,44 +185,105 @@
     document.documentElement.append(root);
     layers.set(source, { root, inner, markers, width: report.width, height: report.height }); synchronize();
   }
-  async function processPage(item, token, retry) {
-    const pageStarted = performance.now(); let translationMs = 0;
-    status(`${job.pages.indexOf(item) + 1}/${job.pages.length} · Yerel tespit hazırlanıyor…`);
-    item.state = 'detecting'; delete item.error; delete item.errorCode; await save(); alive(token);
-    const pendingImage = elementFor(item.source);
-    if (pendingImage && !pendingImage.naturalWidth) {
-      const loading = pendingImage.getAttribute('loading'); pendingImage.loading = 'eager';
-      let timeout;
-      try { await Promise.race([pendingImage.decode(), new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('Sayfadaki görsel yüklenemedi.')), 15000); })]); }
-      finally { clearTimeout(timeout); if (loading === null) pendingImage.removeAttribute('loading'); else pendingImage.setAttribute('loading', loading); }
-      alive(token);
+  async function processChapter(token, retry) {
+    const reports = new Map(), pending = new Set(), rendering = new Map(), seenRegions = new Set();
+    const caps = job.config.batching || { maxRegions: job.config.provider === 'openrouter' ? 12 : 6 };
+    let buffer = [], bytes = 65536, stopError, detecting;
+    job.metrics ||= { groups: [] };
+    const renderItem = item => {
+      const work = (rendering.get(item) || Promise.resolve()).catch(() => {}).then(async () => {
+        alive(token); const report = reports.get(item); if (!report) return;
+        const translations = item.translations || [];
+        const result = await request('ML_RENDER', { source: item.source, report, translations, minFont: 12, style: 'card' }); alive(token);
+        if (!elementFor(item.source)) throw new Error('Kaynak görsel sayfadan kaldırıldı.');
+        draw(item.source, report, result);
+        if (layers.get(item.source)?.geometryError) throw new Error(layers.get(item.source).geometryError);
+        if (!report.regions.length) result.issues.push({ regionId: null, textBox: [0, 0, report.width, report.height], reason: 'no_text_detected' });
+        item.translated = result.patches.length; item.issues = result.issues;
+        item.timing.renderMs = (item.timing.renderMs || 0) + (result.timing?.renderMs || 0);
+        const eligible = report.regions.filter(r => r.crop && !r.needsReview);
+        if (!item.error) item.state = eligible.every(r => translations.some(t => t.regionId === r.regionId)) ? (result.issues.length ? 'review' : 'done') : 'translating';
+        await save();
+      }); rendering.set(item, work); return work;
+    };
+    const dispatch = async () => {
+      if (!buffer.length || stopError) return;
+      while (pending.size >= 8) { await Promise.race(pending); alive(token); if (stopError) return; }
+      const group = buffer; buffer = []; bytes = 65536;
+      const imageIds = new Set(group.map(r => r.imageId));
+      const affectedItems = () => job.pages.filter(p => imageIds.has(p.imageId) && reports.has(p));
+      const started = performance.now();
+      const operation = (async () => {
+        try {
+          const result = await request('ML_TRANSLATE', { jobId: job.id, config: job.config, regions: group, context: job.fixedContext || [], retry }); alive(token);
+          job.metrics.groups.push({ groupId: result.groupId, ...result.timing, wallMs: performance.now() - started, cached: !!result.cached });
+          for (const item of affectedItems()) {
+            const fresh = result.regions.filter(r => group.some(g => g.regionId === r.regionId && g.imageId === item.imageId));
+            const byId = new Map((item.translations || []).map(r => [r.regionId, r])); fresh.forEach(r => byId.set(r.regionId, r)); item.translations = [...byId.values()];
+            await renderItem(item); alive(token);
+          }
+        } catch (error) {
+          if (error.name === 'AbortError') return;
+          alive(token);
+          job.metrics.groups.push({ ...error.timing, failed: true, code: error.code, wallMs: performance.now() - started, regionCount: group.length });
+          for (const item of affectedItems()) { item.state = 'error'; item.error = error.message; item.errorCode = error.code; }
+          if (error.stopJob) {
+            if (!stopError || stopError.code === 'DISPATCH_STOPPED' && error.code !== 'DISPATCH_STOPPED') { stopError = error; job.blocked = { error: error.message, code: error.code, actionUrl: error.actionUrl }; }
+            detecting?.abort();
+          }
+          await save();
+        }
+      })();
+      pending.add(operation); operation.finally(() => pending.delete(operation)).catch(() => {});
+    };
+    for (const item of job.pages) {
+      alive(token); if (stopError) break;
+      if (item.state === 'error' && !retry) continue;
+      delete item.error; delete item.errorCode; item.state = 'detecting'; await save(); alive(token);
+      if (stopError) { item.state = 'queued'; break; }
+      status(`Yerel tarama ${job.pages.indexOf(item) + 1}/${job.pages.length} · ${pending.size} grup bekleniyor · ${job.pages.reduce((n,p) => n + (p.translated || 0),0)} kart`);
+      try {
+        const img = elementFor(item.source);
+        if (img && !img.naturalWidth) {
+          let timer; const loading = img.getAttribute('loading'); img.loading = 'eager';
+          try { await Promise.race([img.decode(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Sayfadaki görsel yüklenemedi.')), 15000); })]); }
+          finally { clearTimeout(timer); if (loading === null) img.removeAttribute('loading'); else img.setAttribute('loading', loading); }
+        }
+        detecting = new AbortController(); const abortDetection = () => detecting?.abort();
+        controller.signal.addEventListener('abort', abortDetection, { once: true });
+        let report;
+        try { report = await request('ML_PREPARE', { source: item.source, detector: job.config.localDetector }, detecting.signal); }
+        finally { controller.signal.removeEventListener('abort', abortDetection); detecting = null; }
+        alive(token);
+        const image = elementFor(item.source);
+        if (!image || image.naturalWidth !== report.width || image.naturalHeight !== report.height) throw new Error('Görsel kaynağı/boyutu değişti; sonuç uygulanmadı.');
+        reports.set(item, report); item.imageId = report.imageId; item.regions = report.regions.length;
+        item.timing = { ...report.timing, renderMs: 0 }; item.backend = report.backend;
+        const sibling = job.pages.find(p => p !== item && p.imageId === report.imageId && p.translations?.length);
+        item.translations ||= sibling ? [...sibling.translations] : [];
+        const eligible = report.regions.filter(r => r.crop && !r.needsReview && (r.bubbleId || r.kind === 'text_free'));
+        item.state = 'translating';
+        if (!eligible.length || eligible.every(r => item.translations.some(t => t.regionId === r.regionId))) await renderItem(item);
+        for (const region of eligible) {
+          alive(token); if (stopError) break;
+          if (seenRegions.has(region.regionId)) continue; seenRegions.add(region.regionId);
+          const value = { ...region, imageId: report.imageId }, size = new TextEncoder().encode(JSON.stringify(value)).length + 1024;
+          if (size + 65536 > 8 * 1024 * 1024) throw new Error('Tek kırpma gönderim boyutu sınırını aşıyor.');
+          if (buffer.length && (buffer.length >= caps.maxRegions || bytes + size > 8 * 1024 * 1024)) await dispatch();
+          if (stopError) break; buffer.push(value); bytes += size;
+          if (buffer.length >= caps.maxRegions) await dispatch();
+        }
+      } catch (error) {
+        if (error.name === 'AbortError' && stopError) { item.state = 'queued'; break; }
+        if (error.name === 'AbortError') throw error;
+        item.state = 'error'; item.error = error.message; await save();
+      }
     }
-    const report = await request('ML_PREPARE', { source: item.source, detector: job.config.localDetector }); alive(token);
-    const image = elementFor(item.source);
-    if (!image || image.naturalWidth !== report.width || image.naturalHeight !== report.height) throw new Error('Görsel kaynağı/boyutu değişti; sonuç uygulanmadı.');
-    item.imageId = report.imageId; item.regions = report.regions.length;
-    const translations = [], context = item.contextBefore || job.context || [];
-    item.contextBefore = context;
-    const eligible = report.regions.filter(r => r.crop && !r.needsReview && (r.bubbleId || r.kind === 'text_free'));
-    // Uncertain candidates stay visible for manual correction; never silently discarded.
-    for (let i = 0; i < eligible.length; i += 6) {
-      alive(token); item.state = 'translating'; await save(); alive(token);
-      status(`${job.pages.indexOf(item) + 1}/${job.pages.length} · ${job.config.provider}/${job.config.model} · yazı ${i + 1}–${Math.min(i + 6, eligible.length)}/${eligible.length}`);
-      const translationStarted = performance.now();
-      const response = await request('ML_TRANSLATE', { config: job.config, imageId: report.imageId, regions: eligible.slice(i, i + 6), context, retry });
-      translationMs += performance.now() - translationStarted;
-      alive(token); translations.push(...response.regions);
-    }
-    item.state = 'rendering'; await save(); alive(token);
-    const result = await request('ML_RENDER', { source: item.source, report, translations, minFont: 12, style: 'card' }); alive(token);
-    if (!elementFor(item.source)) throw new Error('Kaynak görsel sayfadan kaldırıldı.');
-    draw(item.source, report, result);
-    if (layers.get(item.source)?.geometryError) throw new Error(layers.get(item.source).geometryError);
-    if (!report.regions.length) result.issues.push({ regionId: null, textBox: [0, 0, report.width, report.height], reason: 'no_text_detected', translatedText: '' });
-    item.state = result.issues.length ? 'review' : 'done'; item.issues = result.issues; item.translated = result.patches.length;
-    item.timing = { ...report.timing, ...result.timing, translationMs, pageTotalMs: performance.now() - pageStarted }; item.backend = report.backend;
-    job.context = [...context, ...translations.filter(t => t.status === 'translated').map(t => ({ sourceText: t.sourceText, translatedText: t.translatedText }))].slice(-12);
-    await save();
+    if (!stopError) await dispatch();
+    await Promise.allSettled([...pending]); alive(token);
+    await Promise.allSettled([...rendering.values()]); alive(token);
+    if (stopError) { job.state = 'blocked'; await save(); blockedStatus(stopError); return false; }
+    return true;
   }
   async function start({ resume = false, retry = false } = {}) {
     ensurePanel();
@@ -218,7 +291,7 @@
       if (paused) { resumePending = { resume, retry }; status('Duraklatma tamamlanınca tarama otomatik devam edecek…'); }
       return;
     }
-    running = true; paused = false; controller = new AbortController(); const token = ++epoch;
+    running = true; paused = false; controller = new AbortController(); const token = ++epoch, segmentStarted = performance.now(); segmentClock = segmentStarted;
     try {
       const settings = await chrome.storage.sync.get({ enabled: true });
       alive(token);
@@ -233,34 +306,23 @@
         const config = await request('ML_CONFIG');
         status('Bölüm görselleri yükleniyor; kaydırma konumun korunacak…');
         const pages = await discover(token); alive(token);
-        job = { id: crypto.randomUUID(), url: location.href, config, pages, context: [], createdAt: Date.now(), state: 'running' };
+        job = { id: crypto.randomUUID(), url: location.href, config, pages, context: [], fixedContext: [], elapsedMs: 0, createdAt: Date.now(), state: 'running' };
       }
       alive(token); delete job.blocked; job.state = 'running'; await save(); alive(token);
-      for (const item of job.pages) {
-        alive(token);
-        if (item.state === 'error' && !retry) continue;
-        if (['done', 'review'].includes(item.state) && layers.has(item.source)) continue;
-        // Redraw completed pages after reload from deterministic detection/translation caches.
-        try { await processPage(item, token, retry); }
-        catch (error) {
-          alive(token);
-          if (error.name === 'AbortError') throw error;
-          item.state = 'error'; item.error = error.message; await save();
-          if (error.stopJob) {
-            alive(token); item.errorCode = error.code;
-            job.state = 'blocked'; job.blocked = { error: error.message, code: error.code, actionUrl: error.actionUrl };
-            await save(); alive(token); blockedStatus(error); return;
-          }
-        }
-      }
+      job.id ||= crypto.randomUUID();
+      await request('ML_JOB_CONTROL', { jobId: job.id, paused: false, retry }); alive(token);
+      if (!await processChapter(token, retry)) return;
       alive(token); job.state = 'finished'; await save(); alive(token);
       const done = job.pages.filter(p => p.state === 'done').length, review = job.pages.filter(p => p.state === 'review').length, errors = job.pages.filter(p => p.state === 'error').length;
       const cards = job.pages.reduce((n, p) => n + (p.translated || 0), 0), issues = job.pages.reduce((n, p) => n + (p.issues?.length || 0), 0);
+      const elapsed = ((job.elapsedMs || 0) + performance.now() - segmentStarted) / 1000;
+      const groups = job.metrics?.groups || [];
       const seconds = name => (job.pages.reduce((n, p) => n + (p.timing?.[name] || 0), 0) / 1000).toFixed(1);
-      status(`Tarama bitti: ${cards} çeviri gösterildi, ${done + review}/${job.pages.length} görsel işlendi, ${issues} alan kontrol gerekli, ${errors} hata.\n${job.config.provider} / ${job.config.model}\nSüre: tarama ${seconds('totalMs')} sn · çeviri ${seconds('translationMs')} sn · kart ${seconds('renderMs')} sn.\nÇeviriler sade kart olarak gösterilir; özgün görsel dosyası korunur. Bütün yazıların bulunduğu henüz doğrulanmadı.${errors ? '\nİlk hata: ' + job.pages.find(p => p.error)?.error : ''}`);
+      status(`Tarama bitti: ${cards} çeviri gösterildi, ${done + review}/${job.pages.length} görsel işlendi, ${issues} alan kontrol gerekli, ${errors} hata.\n${job.config.provider} / ${job.config.model}\nGeçen süre: ${elapsed.toFixed(1)} sn · tarama ${seconds('totalMs')} sn · kart ${seconds('renderMs')} sn.\nGruplar: ${groups.filter(g => !g.cached && !g.failed).length} başarılı, ${groups.filter(g => g.failed).length} hata, ${groups.filter(g => g.cached).length} önbellek. Toplam istek süresi (paralel): ${(groups.reduce((n,g) => n + (g.providerMs || 0),0)/1000).toFixed(1)} sn.\nÇeviriler sade kart olarak gösterilir; özgün görsel dosyası korunur. Bütün yazıların bulunduğu henüz doğrulanmadı.${errors ? '\nİlk hata: ' + job.pages.find(p => p.error)?.error : ''}`);
     } catch (error) {
       if (error.name !== 'AbortError' && token === epoch) status(error.message);
     } finally {
+      if (job && token === epoch && segmentClock) { job.elapsedMs = (job.elapsedMs || 0) + performance.now() - segmentClock; segmentClock = 0; await save(null).catch(() => {}); }
       running = false;
       controls();
       const next = resumePending; resumePending = null;

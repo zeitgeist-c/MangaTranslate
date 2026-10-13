@@ -12,6 +12,7 @@ test('background cancellation belongs to its tab and forwards correlated progres
       sendMessage: async message => { sent.push(message); if (message.command === 'prepare') return new Promise(resolve => { complete = resolve; }); return { ok: true }; }
     }, tabs: { sendMessage: async (id, message) => progress.push({ id, message }) } }
   });
+  vm.runInContext(await readFile(new URL('../src/page/queue.js', import.meta.url), 'utf8'), context);
   vm.runInContext(await readFile(new URL('../src/page-background.js', import.meta.url), 'utf8'), context);
   const invoke = (message, tab = 1) => new Promise(resolve => listener(message, { id: 'extension', tab: { id: tab } }, resolve));
   const operation = invoke({ type: 'ML_PREPARE', requestId: 'client', source: 'https://fixture/a' }); await tick();

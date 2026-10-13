@@ -1,0 +1,397 @@
+{
+  "version": "3.8.0",
+  "date": "2026-10-13",
+  "automaticTests": {
+    "passed": 82,
+    "failed": 0
+  },
+  "realProviderCalls": 0,
+  "browser": "155.0.8059.40",
+  "chapter": {
+    "images": 18,
+    "wallMs": 47472.4568,
+    "syntheticDelayMs": 15000,
+    "groups": 8,
+    "sentRegions": 159,
+    "cards": 155,
+    "reviewAreas": 38,
+    "peakConcurrency": 4,
+    "errors": [],
+    "groupTimings": [
+      {
+        "cached": false,
+        "cachedRegions": 0,
+        "concurrency": 4,
+        "groupId": "translation-group-v2:2d20ab7b64c1fcd8de7aabd812121e8ab9298bf8543bc1f0dc7dec9088f690c6",
+        "providerMs": 15011,
+        "queueMs": 0,
+        "regions": 20,
+        "wallMs": 15028.800000011921
+      },
+      {
+        "cached": false,
+        "cachedRegions": 0,
+        "concurrency": 4,
+        "groupId": "translation-group-v2:a7dd67cdd412f9d3c04a15271916651901d1ed1ce2301bcd3485aa778c23f922",
+        "providerMs": 15022,
+        "queueMs": 0,
+        "regions": 20,
+        "wallMs": 15053.90000000596
+      },
+      {
+        "cached": false,
+        "cachedRegions": 0,
+        "concurrency": 4,
+        "groupId": "translation-group-v2:cfa0a59cfa29bf148901ef6415a465eac8434667819caeb23761d3c08f4d291f",
+        "providerMs": 15016,
+        "queueMs": 0,
+        "regions": 20,
+        "wallMs": 15062.399999976158
+      },
+      {
+        "cached": false,
+        "cachedRegions": 0,
+        "concurrency": 4,
+        "groupId": "translation-group-v2:3031e9741afda07eb2813cf085061001cabc41b0930153e7e7cccfa6c38afc3b",
+        "providerMs": 15017,
+        "queueMs": 0,
+        "regions": 20,
+        "wallMs": 15034.59999999404
+      },
+      {
+        "cached": false,
+        "cachedRegions": 0,
+        "concurrency": 4,
+        "groupId": "translation-group-v2:87d2265c590b5f9d5b65bc1db477b2154bac1eaf98e680a4afa1323092e9abfb",
+        "providerMs": 15019,
+        "queueMs": 5584,
+        "regions": 20,
+        "wallMs": 20628.40000000596
+      },
+      {
+        "cached": false,
+        "cachedRegions": 0,
+        "concurrency": 4,
+        "groupId": "translation-group-v2:97bf4af152ceb0d5819f02b5ca0492d56e854c944f0a35983d1cd4518b9f19f9",
+        "providerMs": 15005,
+        "queueMs": 7618,
+        "regions": 20,
+        "wallMs": 22647.70000001788
+      },
+      {
+        "cached": false,
+        "cachedRegions": 0,
+        "concurrency": 4,
+        "groupId": "translation-group-v2:73b454bec98b08d8684101719842e63cfdd68d54deef6f78c1c04a6a8832a2fd",
+        "providerMs": 15011,
+        "queueMs": 6313,
+        "regions": 20,
+        "wallMs": 21370.5
+      },
+      {
+        "cached": false,
+        "cachedRegions": 0,
+        "concurrency": 6,
+        "groupId": "translation-group-v2:f1f05b95ab75a139d13111e13d050c7d84eb411ba499833e959bd35c3e99aae1",
+        "providerMs": 15018,
+        "queueMs": 7645,
+        "regions": 19,
+        "wallMs": 22693.29999998212
+      }
+    ],
+    "resumeProviderCalls": 0,
+    "restartProviderCalls": 0
+  },
+  "fixed184RegionBatchTest": {
+    "version": "3.8.0",
+    "regions": 184,
+    "calls": 10,
+    "peak": 4,
+    "wallMs": 45111.90000000596,
+    "records": [
+      {
+        "regions": 20,
+        "delay": 32000,
+        "maxTokens": 16384,
+        "stream": true
+      },
+      {
+        "regions": 20,
+        "delay": 15000,
+        "maxTokens": 16384,
+        "stream": true
+      },
+      {
+        "regions": 20,
+        "delay": 15000,
+        "maxTokens": 16384,
+        "stream": true
+      },
+      {
+        "regions": 20,
+        "delay": 15000,
+        "maxTokens": 16384,
+        "stream": true
+      },
+      {
+        "regions": 20,
+        "delay": 15000,
+        "maxTokens": 16384,
+        "stream": true
+      },
+      {
+        "regions": 20,
+        "delay": 15000,
+        "maxTokens": 16384,
+        "stream": true
+      },
+      {
+        "regions": 20,
+        "delay": 15000,
+        "maxTokens": 16384,
+        "stream": true
+      },
+      {
+        "regions": 20,
+        "delay": 15000,
+        "maxTokens": 16384,
+        "stream": true
+      },
+      {
+        "regions": 20,
+        "delay": 15000,
+        "maxTokens": 16384,
+        "stream": true
+      },
+      {
+        "regions": 4,
+        "delay": 15000,
+        "maxTokens": 16384,
+        "stream": true
+      }
+    ],
+    "queueLimit": 8,
+    "groupTimings": [
+      {
+        "queueMs": 0,
+        "concurrency": 4,
+        "providerMs": 32005,
+        "regions": 20,
+        "cachedRegions": 0
+      },
+      {
+        "queueMs": 0,
+        "concurrency": 4,
+        "providerMs": 15009,
+        "regions": 20,
+        "cachedRegions": 0
+      },
+      {
+        "queueMs": 0,
+        "concurrency": 4,
+        "providerMs": 15010,
+        "regions": 20,
+        "cachedRegions": 0
+      },
+      {
+        "queueMs": 0,
+        "concurrency": 4,
+        "providerMs": 15009,
+        "regions": 20,
+        "cachedRegions": 0
+      },
+      {
+        "queueMs": 15021,
+        "concurrency": 4,
+        "providerMs": 15006,
+        "regions": 20,
+        "cachedRegions": 0
+      },
+      {
+        "queueMs": 15020,
+        "concurrency": 4,
+        "providerMs": 15005,
+        "regions": 20,
+        "cachedRegions": 0
+      },
+      {
+        "queueMs": 15020,
+        "concurrency": 4,
+        "providerMs": 15004,
+        "regions": 20,
+        "cachedRegions": 0
+      },
+      {
+        "queueMs": 30028,
+        "concurrency": 6,
+        "providerMs": 15007,
+        "regions": 20,
+        "cachedRegions": 0
+      },
+      {
+        "queueMs": 30027,
+        "concurrency": 6,
+        "providerMs": 15006,
+        "regions": 20,
+        "cachedRegions": 0
+      },
+      {
+        "queueMs": 30027,
+        "concurrency": 6,
+        "providerMs": 15006,
+        "regions": 4,
+        "cachedRegions": 0
+      }
+    ],
+    "realProviderCalls": 0,
+    "synthetic": true,
+    "late32SecondSuccess": true
+  },
+  "alignment": [
+    {
+      "width": 1280,
+      "delta": 0
+    },
+    {
+      "width": 700,
+      "delta": 0
+    }
+  ],
+  "singleImageRestartProviderCalls": 0,
+  "crops": [
+    {
+      "name": "purple",
+      "groups": 2,
+      "cards": 2,
+      "issues": [],
+      "backend": "webgpu"
+    },
+    {
+      "name": "title",
+      "groups": 2,
+      "cards": 2,
+      "issues": [],
+      "backend": "webgpu"
+    },
+    {
+      "name": "black",
+      "groups": 2,
+      "cards": 2,
+      "issues": [],
+      "backend": "webgpu"
+    },
+    {
+      "name": "black-new1",
+      "groups": 2,
+      "cards": 2,
+      "issues": [],
+      "backend": "webgpu"
+    },
+    {
+      "name": "black-new2",
+      "groups": 1,
+      "cards": 1,
+      "issues": [],
+      "backend": "webgpu"
+    },
+    {
+      "name": "black-new3",
+      "groups": 2,
+      "cards": 1,
+      "issues": [
+        "small_text_candidate"
+      ],
+      "backend": "webgpu"
+    }
+  ],
+  "pngPixelsIdentical": true,
+  "dbReference": {
+    "source": "evaluation/fixtures/db-reference.json",
+    "cases": 4,
+    "coordinateToleranceModelPixels": 2,
+    "scoreTolerance": 0.03,
+    "opencv": "4.12.0.88",
+    "pyclipper": "1.3.0.post6",
+    "exactOpenCVPort": false
+  },
+  "settings": {
+    "version": "3.8.0",
+    "migration": true,
+    "multiKeyBothProviders": true,
+    "concurrentTabs": true,
+    "noSecretInDOM": true,
+    "metadataChecks": 2,
+    "responsiveWidths": [
+      1000,
+      500,
+      360
+    ],
+    "enlargedText": true,
+    "failedSaveRestoresSelection": true,
+    "dirtyPreferencesPreserved": true,
+    "lastKeyDisablesTranslation": true,
+    "settingsTabReused": true,
+    "workerRestart": true,
+    "keyboardAdd": true,
+    "popupTranslationActions": true,
+    "contributorConsent": true,
+    "modelCatalog": true,
+    "realProviderCalls": 0,
+    "browser": "155.0.8059.40"
+  },
+  "panel": {
+    "prepares": 3,
+    "syntheticProviderOperations": 1,
+    "localCancellationCount": 1,
+    "state": "finished",
+    "pageState": "done",
+    "ageRefusalStopsQueue": true,
+    "settingsLinkVisible": true,
+    "foldDoesNotPause": true,
+    "displayToolsWork": true,
+    "closePauses": true,
+    "browser": "155.0.8059.40",
+    "realProviderCalls": 0
+  },
+  "baseline": {
+    "version": "3.7.0",
+    "sameChapterSentRegions": 184,
+    "sameChapterGroups": 37,
+    "equalDetectionQualityProven": false
+  },
+  "limits": {
+    "parallelInitial": 4,
+    "parallelMax": 8,
+    "batchMax": 20,
+    "unverifiedMetadataBatchMax": 12,
+    "jsonBodyMaxBytes": 8388608,
+    "providerWatchdogMs": 60000
+  },
+  "acceptance": {
+    "syntheticChapterUnder120Seconds": true,
+    "fixed184Under120Seconds": true,
+    "cropDialogueBlocks": 10,
+    "liveProviderValidated": false,
+    "human98PercentQualityValidated": false,
+    "originalFullPagesForCropsValidated": false
+  },
+  "deferred": [
+    "Background texture reconstruction",
+    "Human-labelled full-page quality acceptance",
+    "User-run live Muse Spark latency and large-batch translation quality"
+  ],
+  "package": {
+    "bytes": 47028763,
+    "sha256": "b8209689fc9a0c0b58cdc101ccc9d9c112c61b0d11efddc1d7becbeec77c80ac",
+    "files": 35,
+    "name": "MangaLensTR-3.8.0.zip",
+    "sourceParity": true
+  },
+  "duplicateImageTest": {
+    "restartProviderCalls": 0,
+    "resumeProviderCalls": 0,
+    "providerCalls": 1,
+    "cards": 24,
+    "images": 2
+  }
+}

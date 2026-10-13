@@ -16,7 +16,7 @@ function fixture() {
   });
   return { context, calls };
 }
-const scripts = await Promise.all(['providers.js', 'page-background.js'].map(file => readFile(new URL(`../src/${file}`, import.meta.url), 'utf8')));
+const scripts = await Promise.all(['providers.js', 'page/queue.js', 'page-background.js'].map(file => readFile(new URL(`../src/${file}`, import.meta.url), 'utf8')));
 
 test('age confirmation refusal has a Turkish actionable job-blocking error, without model fallback', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
@@ -56,7 +56,7 @@ test('a saved 3.5.1 job with age refusal restores as blocked while keeping page 
   assert.equal(restored.state, 'blocked'); assert.equal(restored.blocked.code, 'AGE_CONFIRMATION_REQUIRED');
   assert.equal(restored.pages[0].translated, 2); assert.equal(restored.pages[2].state, 'queued');
 });
-test('all eight router adapters preserve exact chosen model and keep Google credentials separate', async () => {
+test('all six router adapters preserve exact chosen model and keep Google credentials separate', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   for (const [model] of context.MLProviders.catalog.openrouter) {
     const result = await context.mlProviderCall({ provider: 'openrouter', model }, 'Translate', [{ regionId: 'r', dataUrl: 'data:image/png;base64,AAAA' }]);
@@ -65,7 +65,7 @@ test('all eight router adapters preserve exact chosen model and keep Google cred
     assert.equal(request.headers.Authorization, 'Bearer router-private-key');
     assert.equal(request.headers['x-goog-api-key'], undefined); assert.ok(!JSON.stringify(request.body).includes('private-key'));
   }
-  assert.equal(calls.length, 8);
+  assert.equal(calls.length, 6);
 });
 test('all direct Google models use Google credentials; reasoning text never reaches translation', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));

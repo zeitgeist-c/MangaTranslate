@@ -5,7 +5,7 @@ import { readFile, access } from 'node:fs/promises';
 const root = new URL('../', import.meta.url);
 test('MV3 ships only local executable assets and declares the offscreen boundary', async () => {
   const manifest = JSON.parse(await readFile(new URL('manifest.json', root), 'utf8'));
-  assert.equal(manifest.version, '3.7.0'); assert.ok(manifest.permissions.includes('offscreen'));
+  assert.equal(manifest.version, '3.8.0'); assert.ok(manifest.permissions.includes('offscreen'));
   assert.ok(manifest.content_security_policy.extension_pages.includes("'wasm-unsafe-eval'"));
   assert.ok(!manifest.content_security_policy.extension_pages.includes('https:'));
   assert.ok(!manifest.content_security_policy.extension_pages.includes("'unsafe-eval'"));
@@ -22,6 +22,6 @@ test('packaged model bytes match pinned receipts and production geometry matches
     ['ppocrv5_det.onnx', '1eb7b4f7ab657ebd1c66d5f79bca7497f29768a2e3c15e52daecbba1a8e4a039'],
     ['detector-v4-s_int8.onnx', '5fe9e4f576e49d4e7e8b0e029d6d3cdc252abd4694113e1cae120e62c931ea79']
   ]) assert.equal(createHash('sha256').update(await readFile(new URL(`src/page/models/${file}`, root))).digest('hex'), expected);
-  for (const file of ['geometry.mjs', 'rtdetr.mjs', 'ppocr.mjs']) assert.deepEqual(
+  for (const file of ['geometry.mjs', 'rtdetr.mjs', 'ppocr.mjs', 'db.mjs']) assert.deepEqual(
     await readFile(new URL(`src/page/lib/${file}`, root)), await readFile(new URL(`evaluation/lib/${file}`, root)));
 });
