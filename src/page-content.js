@@ -4,11 +4,37 @@
   globalThis.__mlPageController = true;
   let job, running = false, paused = false, epoch = 0, panel, statusNode, original = false, boxes = false;
   const layers = new Map();
-  const request = async (type, data = {}) => {
-    const response = await chrome.runtime.sendMessage({ type, ...data });
-    if (!response?.ok) throw new Error(response?.error || 'Uzantı bağlantısı kesildi; devam düğmesiyle yeniden deneyin.');
-    return response.value;
-  };
+  let controller, resumePending;
+  const pendingRequests = new Set();
+  const request = (type, data = {}, signal = controller?.signal) => new Promise((resolve, reject) => {
+    const requestId = crypto.randomUUID();
+    const cancelLocal = () => {
+      if (type === 'ML_PREPARE' || type === 'ML_RENDER') chrome.runtime.sendMessage({ type: 'ML_CANCEL', requestId }).catch(() => {});
+    };
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return; settled = true;
+      clearTimeout(timer); signal?.removeEventListener('abort', abort); pendingRequests.delete(requestId);
+      if (error) reject(error); else resolve(value);
+    };
+    const abort = () => { cancelLocal(); finish(new DOMException('İş duraklatıldı', 'AbortError')); };
+    const limit = type === 'ML_PREPARE' ? 180000 : type === 'ML_TRANSLATE' ? 120000 : type === 'ML_RENDER' ? 60000 : 15000;
+    const timer = setTimeout(() => {
+      cancelLocal(); finish(new Error(type === 'ML_TRANSLATE'
+        ? 'Çeviri yanıtı zamanında gelmedi. Otomatik ücretli tekrar yapılmadı; geç yanıt önbellekte korunabilir.'
+        : 'İşlem zamanında yanıt vermedi. Hatalıları yeniden dene düğmesiyle tekrar deneyebilirsiniz.'));
+    }, limit);
+    if (signal?.aborted) { abort(); return; }
+    signal?.addEventListener('abort', abort, { once: true }); pendingRequests.add(requestId);
+    Promise.resolve().then(() => {
+      if (settled) return;
+      return chrome.runtime.sendMessage({ type, ...data, requestId });
+    }).then(response => {
+      if (settled) return;
+      if (!response?.ok) finish(new Error(response?.error || 'Uzantı bağlantısı kesildi; devam düğmesiyle yeniden deneyin.'));
+      else finish(null, response.value);
+    }, error => finish(error));
+  });
   const status = text => { ensurePanel(); statusNode.textContent = text; };
   function ensurePanel() {
     if (panel?.isConnected) return;
@@ -30,9 +56,10 @@
     button('Kapat', () => { pause(); panel.remove(); for (const entry of layers.values()) entry.root.remove(); layers.clear(); });
     shadow.append(style, section); document.documentElement.append(panel);
   }
-  async function save() { if (job) { job.updatedAt = Date.now(); await request('ML_JOB_SAVE', { job }); } }
+  async function save(signal = controller?.signal) { if (job) { job.updatedAt = Date.now(); await request('ML_JOB_SAVE', { job: structuredClone(job) }, signal); } }
   function pause() {
-    paused = true; epoch++; if (job) { job.state = 'paused'; save().catch(() => {}); }
+    paused = true; epoch++; resumePending = null; controller?.abort();
+    if (job) { job.state = 'paused'; save(null).catch(() => {}); }
     status('Duraklatıldı. Devam eden adımın geç sonucu sayfaya uygulanmayacak; tamamlanan çeviri önbellekte korunur.');
   }
   const alive = token => { if (paused || token !== epoch) throw new DOMException('İş duraklatıldı', 'AbortError'); };
@@ -119,7 +146,7 @@
   }
   async function processPage(item, token, retry) {
     status(`${job.pages.indexOf(item) + 1}/${job.pages.length} · Yerel tespit hazırlanıyor…`);
-    item.state = 'detecting'; delete item.error; await save();
+    item.state = 'detecting'; delete item.error; await save(); alive(token);
     const pendingImage = elementFor(item.source);
     if (pendingImage && !pendingImage.naturalWidth) {
       const loading = pendingImage.getAttribute('loading'); pendingImage.loading = 'eager';
@@ -137,12 +164,12 @@
     const eligible = report.regions.filter(r => r.crop && !r.needsReview && (r.bubbleId || r.kind === 'text_free'));
     // Uncertain candidates stay visible for manual correction; never silently discarded.
     for (let i = 0; i < eligible.length; i += 6) {
-      alive(token); item.state = 'translating'; await save();
+      alive(token); item.state = 'translating'; await save(); alive(token);
       status(`${job.pages.indexOf(item) + 1}/${job.pages.length} · ${job.config.provider}/${job.config.model} · yazı ${i + 1}–${Math.min(i + 6, eligible.length)}/${eligible.length}`);
       const response = await request('ML_TRANSLATE', { config: job.config, imageId: report.imageId, regions: eligible.slice(i, i + 6), context, retry });
       alive(token); translations.push(...response.regions);
     }
-    item.state = 'rendering'; await save();
+    item.state = 'rendering'; await save(); alive(token);
     const result = await request('ML_RENDER', { source: item.source, report, translations, minFont: 12 }); alive(token);
     if (!elementFor(item.source)) throw new Error('Kaynak görsel sayfadan kaldırıldı.');
     draw(item.source, report, result);
@@ -154,10 +181,14 @@
   }
   async function start({ resume = false, retry = false } = {}) {
     ensurePanel();
-    if (running) { status('Önceki adımın bitmesi bekleniyor; sonra Devam et düğmesini kullanabilirsiniz.'); return; }
-    running = true; paused = false; const token = ++epoch;
+    if (running) {
+      if (paused) { resumePending = { resume, retry }; status('Duraklatma tamamlanınca tarama otomatik devam edecek…'); }
+      return;
+    }
+    running = true; paused = false; controller = new AbortController(); const token = ++epoch;
     try {
       const settings = await chrome.storage.sync.get({ enabled: true });
+      alive(token);
       if (!settings.enabled) throw new Error('Uzantı kapalı.');
       if (resume) job = job || await request('ML_JOB_GET');
       if (resume && job) {
@@ -170,27 +201,33 @@
         const pages = await discover(token); alive(token);
         job = { id: crypto.randomUUID(), url: location.href, config, pages, context: [], createdAt: Date.now(), state: 'running' };
       }
-      job.state = 'running'; await save();
+      alive(token); job.state = 'running'; await save(); alive(token);
       for (const item of job.pages) {
         alive(token);
         if (item.state === 'error' && !retry) continue;
+        if (['done', 'review'].includes(item.state) && layers.has(item.source)) continue;
         // Redraw completed pages after reload from deterministic detection/translation caches.
         try { await processPage(item, token, retry); }
         catch (error) {
+          alive(token);
           if (error.name === 'AbortError') throw error;
           item.state = 'error'; item.error = error.message; await save();
         }
       }
-      alive(token); job.state = 'finished'; await save();
+      alive(token); job.state = 'finished'; await save(); alive(token);
       const done = job.pages.filter(p => p.state === 'done').length, review = job.pages.filter(p => p.state === 'review').length, errors = job.pages.filter(p => p.state === 'error').length;
       status(`Tarama bitti: ${done} otomatik işlendi, ${review} kontrol gerekli, ${errors} hata.\n${job.config.provider} / ${job.config.model}\nBütün yazıların bulunduğu henüz doğrulanmadı. Turuncu alanlarda otomatik kaplama yapılmadı; Alan Seç ile düzeltebilirsiniz.${errors ? '\nİlk hata: ' + job.pages.find(p => p.error)?.error : ''}`);
     } catch (error) {
-      if (error.name !== 'AbortError') status(error.message);
-    } finally { running = false; }
+      if (error.name !== 'AbortError' && token === epoch) status(error.message);
+    } finally {
+      running = false;
+      const next = resumePending; resumePending = null;
+      if (next) start(next);
+    }
   }
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (message.type === 'START_PAGE_TRANSLATION') { start(message); respond({ ok: true }); }
-    if (message.type === 'ML_PAGE_PROGRESS' && running && !paused) status(message.text);
+    if (message.type === 'ML_PAGE_PROGRESS' && running && !paused && pendingRequests.has(message.requestId)) status(message.text);
   });
   let scheduled = false;
   function schedule() { if (scheduled) return; scheduled = true; requestAnimationFrame(() => { scheduled = false; synchronize(); }); }
