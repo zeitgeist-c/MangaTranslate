@@ -40,6 +40,7 @@ async function mlConfig() {
   return MLProviders.settings({ ...settings, translationGlossary: local.translationGlossary ?? settings.translationGlossary });
 }
 async function mlKey(provider) {
+  if (typeof MLKeys !== 'undefined') return MLKeys.active(provider);
   if (provider === 'gemini') return getActiveApiKey();
   const stored = await chrome.storage.local.get(['openrouterApiKey']);
   return stored.openrouterApiKey || '';
@@ -137,6 +138,7 @@ async function mlTranslate(message) {
 }
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (!message?.type?.startsWith('ML_') || sender.id !== chrome.runtime.id) return;
+  if (message.type.startsWith('ML_KEYS_')) return;
   if (message.type === 'ML_HEARTBEAT') { respond({ ok: true }); return; }
   if (message.type === 'ML_PROGRESS') {
     if (sender.url !== chrome.runtime.getURL('src/page/offscreen.html')) return;

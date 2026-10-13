@@ -1,4 +1,4 @@
-# MangaLens TR 3.5.2 — full-chapter preview
+# MangaLens TR 3.6.0 — compact UI and shared API management
 
 [Türkçe kullanım kılavuzu](README.tr.md)
 
@@ -6,7 +6,9 @@ Manifest V3 extension for Brave/Chromium. Translates English manga, manhwa and m
 
 Full-chapter processing is a **preview**: complete coverage and the planned 98% quality target have not passed human-reviewed acceptance. Uncertain regions, unsafe backgrounds and text overflow remain available for review.
 
-Extract `MangaLensTR-3.5.2.zip`, load its folder through Developer mode in `brave://extensions`. For an existing unpacked installation, reload the extension and reader tab. Select a provider, add its separate key, choose a model and save. **Bölümün tamamını çevir** processes the current chapter sequentially; the page panel supports pause/resume, explicit retry, original toggle and review details.
+Extract `MangaLensTR-3.6.0.zip`, load its folder through Developer mode in `brave://extensions`. For an existing unpacked installation, reload the extension, reader tab and any old settings tabs. The compact popup selects provider/model automatically and shows the active key label. Its gear opens a separate settings page with matching multi-key lists for Gemini/OpenRouter and saved translation preferences. Existing Google keys remain intact; the single legacy router key migrates once. **Bölümün tamamını çevir** processes the current chapter sequentially; display/review tools are in the collapsible page panel.
+
+Key cards distinguish saved keys from explicitly checked connections. Checks use provider metadata endpoints without generating a translation; success does not confirm model access or age attestation. Keys remain masked, changing the active key affects subsequent requests, and deleting the last key disables translation for that provider. Collapsing the reader panel keeps processing; closing pauses it.
 
 Only the selected model is called. No silent model fallback or automatic retry of potentially billed requests. Completed results are cached by source, processing/profile version, model, glossary and context. Each job freezes its settings. Contributor models require explicit consent. Actual provider tests were declined by the owner; tests use synthetic translation replies.
 

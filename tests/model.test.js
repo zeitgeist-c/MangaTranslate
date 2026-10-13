@@ -36,10 +36,10 @@ const values = vm.runInContext('GEMINI_MODEL_VALUES', context);
   for (const model of values) assert.ok(labels[model], `etiket eksik: ${model}`);
   const popupSource = fs.readFileSync(path.join(root, 'popup/popup.js'), 'utf8');
   const popupHtml = fs.readFileSync(path.join(root, 'popup/popup.html'), 'utf8');
-  for (const model of values) {
-    assert.ok(popupSource.includes(`'${model}'`), `popup model listesinde yok: ${model}`);
-    assert.ok(popupHtml.includes(`value="${model}"`), `popup select secenegi yok: ${model}`);
-  }
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/providers.js'), 'utf8'), context);
+  assert.deepEqual(context.MLProviders.catalog.gemini.map(([id]) => id).join(','), [...values].join(','));
+  assert.ok(popupSource.includes('MLUI.models('), 'popup ortak model katalogunu kullanmali');
+  assert.ok(popupHtml.includes('id="model"'), 'popup model secimi bulunmali');
   assert.ok(!popupHtml.includes('gemma-4-31b-it'), 'kaldirilan model popup listesinde kalmamali');
 
   // ── Yedek zincir: secili modelden baslar, 3 modeli de dolasir ───────────────

@@ -1,4 +1,4 @@
-# MangaLens TR 3.5.2 — tam bölüm önizleme
+# MangaLens TR 3.6.0 — yeni arayüz ve ortak API yönetimi
 
 [English](README.md)
 
@@ -6,11 +6,15 @@ Brave/Chromium Manifest V3 uzantısı. İngilizce manga/manhwa/manhua yazıları
 
 ## Kullanım
 
-1. `MangaLensTR-3.5.2.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle.
-2. Popup'ta Gemini/OpenRouter seç; API alt sekmesinde ilgili anahtarı ekle. Google anahtarları korunur; OpenRouter ayrı saklanır.
-3. Modeli seç ve Kaydet. Manga çeviri tercihlerinden içerik türü, seri adı, yönerge ve sözlük ekleyebilirsin. Sözlük seri adına göre yerel saklanır.
+1. `MangaLensTR-3.6.0.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle. Açık eski ayarlar pencerelerini de yenile.
+
+   Güncellemede aynı yüklenmiş klasörü kullan: farklı klasörden ikinci bir uzantı eklemek ayrı uzantı kimliği oluşturabilir ve kayıtlı anahtarlarını yeni kimlikte göstermeyebilir. Mevcut uzantıyı kaldırmadan klasörünü güncelle ve **Yeniden yükle** kullan.
+2. Popup'taki dişliyle **Ayarlar → API Anahtarları** aç. Gemini/OpenRouter için etiketli birden fazla anahtar ekleyebilirsin; **Aktif yap** ile seç. Eski Google listesi korunur, eski tek OpenRouter anahtarı otomatik aktarılır. Ana popup yalnız aktif anahtar etiketini gösterir.
+3. Popup'ta sağlayıcı ve modeli seç; otomatik kaydedilir. İçerik türü, seri adı, yönerge ve sözlük için **Ayarlar → Çeviri Tercihleri → Kaydet** kullan. Sözlük seri adına göre yerel saklanır.
 4. **Bölümün tamamını çevir** mevcut bölümün görsellerini sırayla işler; sonraki bölüme geçmez. Lazy-load taraması sınırlıdır ve kaydırma konumu geri getirilir.
-5. Sayfa paneli: Duraklat, Devam et, Hatalıları yeniden dene, Orijinal/çeviri, Kutular ve Kontrol listesi. Belirsiz alanlar/sığmayan metin otomatik kaplanmaz; Alan Seç ile düzeltilebilir.
+5. Sayfa panelinde duruma göre Duraklat/Devam et ve Hatalıları yeniden dene görünür. **Görünüm ve kontrol araçları** bölümünde Orijinal/çeviri, Kutular, Kontrol listesi ve Kapat bulunur. Paneli katlamak taramayı durdurmaz; Kapat duraklatır. Belirsiz alanlar/sığmayan metin otomatik kaplanmaz; Alan Seç ile düzeltilebilir.
+
+Anahtar kartındaki **Kayıtlı** ve **Bağlantı doğrulandı** farklıdır: Kontrol et çeviri üretmeden sağlayıcının anahtar/model-listesi uç noktasına bağlanır. Seçili model erişimini, kredinin yeterli olduğunu veya yaş onayını kanıtlamaz. Kontroller yalnız düğmeye basınca çalışır; anahtarlar her zaman maskelenir. Aktif anahtar silinirse ilk kalan seçilir; hiç kalmazsa bu sağlayıcıyla çeviri başlatılamaz. Anahtar değişimi sonraki çağrıları etkiler.
 
 Yalnız seçili model kullanılır; başka modele sessiz geçiş olmaz. Hatalıları yeniden deneme yeni ücret oluşturabilir. Gönderilmiş bir isteğin cevabı kaybolursa otomatik tekrar yapılmaz. Tamamlanmış sonuçlar kaynak/model/profil/sözlük/bağlam cache'inden kullanılır. Başlamış iş ayarlarını sabitler; model değişimi yeni işleri etkiler.
 

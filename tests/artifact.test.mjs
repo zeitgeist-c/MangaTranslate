@@ -5,11 +5,13 @@ import { readFile, access } from 'node:fs/promises';
 const root = new URL('../', import.meta.url);
 test('MV3 ships only local executable assets and declares the offscreen boundary', async () => {
   const manifest = JSON.parse(await readFile(new URL('manifest.json', root), 'utf8'));
-  assert.equal(manifest.version, '3.5.2'); assert.ok(manifest.permissions.includes('offscreen'));
+  assert.equal(manifest.version, '3.6.0'); assert.ok(manifest.permissions.includes('offscreen'));
   assert.ok(manifest.content_security_policy.extension_pages.includes("'wasm-unsafe-eval'"));
   assert.ok(!manifest.content_security_policy.extension_pages.includes('https:'));
   assert.ok(!manifest.content_security_policy.extension_pages.includes("'unsafe-eval'"));
   for (const script of manifest.content_scripts.flatMap(entry => entry.js)) await access(new URL(script, root));
+  assert.equal(manifest.options_ui.open_in_tab, true); await access(new URL(manifest.options_ui.page, root));
+  for (const file of ['popup/ui.js', 'src/keys.js', 'options/settings.js']) await access(new URL(file, root));
   const offscreen = await readFile(new URL('src/page/offscreen.mjs', root), 'utf8');
   assert.ok(offscreen.includes("'./vendor/ort.all.bundle.min.mjs'"));
   assert.ok(!offscreen.includes('cdn.jsdelivr.net')); assert.ok(!offscreen.includes('apiKey'));
