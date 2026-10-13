@@ -85,6 +85,7 @@
       const groups = job?.metrics?.groups || [], summary = {
         model: job?.config?.model, provider: job?.config?.provider, elapsedMs: (job?.elapsedMs || 0) + (segmentClock ? performance.now() - segmentClock : 0),
         images: job?.pages?.length || 0, cards: job?.pages?.reduce((n,p)=>n+(p.translated||0),0) || 0,
+        errors: (job?.pages || []).map((p,index)=>p.error ? {image:index+1,message:p.error} : null).filter(Boolean),
         groups: groups.map(g=>({groupId:g.groupId,regions:g.regions || g.regionCount,queueMs:g.queueMs,providerMs:g.providerMs,wallMs:g.wallMs,concurrency:g.concurrency,cached:g.cached,failed:g.failed,code:g.code}))
       };
       const text = JSON.stringify(summary, null, 2); status(text);

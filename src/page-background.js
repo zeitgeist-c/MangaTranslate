@@ -21,14 +21,18 @@ async function mlCapabilities(config) {
   if (config.provider !== 'openrouter') return fallback;
   const memory = mlCapabilityMemory.get(config.model); if (memory?.expires > Date.now()) return memory.value;
   if (!mlCapabilityCalls.has(config.model)) mlCapabilityCalls.set(config.model, (async () => {
-    const cacheKey = `ml-model-capabilities:${config.model}`, cached = (await chrome.storage.local.get(cacheKey))[cacheKey];
+    const cacheKey = `ml-model-capabilities:v2:${config.model}`, cached = (await chrome.storage.local.get(cacheKey))[cacheKey];
     if (cached?.expires > Date.now()) return cached.value;
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 5000);
     try {
       const response = await fetch(`https://openrouter.ai/api/v1/models/${config.model}/endpoints`, { signal: controller.signal });
       if (!response.ok) return fallback;
-      const data = await response.json(), endpoints = data.data?.endpoints;
-      if (!Array.isArray(endpoints) || !endpoints.length) return fallback;
+      const data = await response.json(), listed = data.data?.endpoints;
+      if (!Array.isArray(listed) || !listed.length) return fallback;
+      const required = MLProviders.routerPolicy(config.model).requiredParameters;
+      const endpoints = listed.filter(e => (e.status === undefined || e.status === 0) &&
+        (!Array.isArray(e.supported_parameters) || required.every(p => e.supported_parameters.includes(p))));
+      if (!endpoints.length) throw Object.assign(new Error('Seçili modelin gerekli JSON/istek parametrelerini destekleyen kullanılabilir ucu bulunamadı; çeviri gönderilmedi.'), { notSent: true, stopJob: true, code: 'MODEL_PARAMETERS_UNAVAILABLE' });
       const positiveMin = key => endpoints.every(e => Number.isSafeInteger(e[key]) && e[key] > 0) ? Math.min(...endpoints.map(e => e[key])) : null;
       const contextLength = positiveMin('context_length'), completion = positiveMin('max_completion_tokens');
       const maxOutputTokens = completion ? Math.min(16384, completion) : 8192;
@@ -37,7 +41,7 @@ async function mlCapabilities(config) {
         contextLength ? Math.floor((contextLength - maxOutputTokens - 65536) / 10000) : 12));
       const value = { maxRegions, maxOutputTokens, contextLength, verified: !!contextLength && !!completion };
       await chrome.storage.local.set({ [cacheKey]: { expires: Date.now() + 86400000, value } }); return value;
-    } catch { return fallback; } finally { clearTimeout(timer); }
+    } catch (error) { if (error.code === 'MODEL_PARAMETERS_UNAVAILABLE') throw error; return fallback; } finally { clearTimeout(timer); }
   })());
   const operation = mlCapabilityCalls.get(config.model);
   try {
@@ -103,6 +107,10 @@ function mlAccessError(config, status, message) {
     actionUrl = 'https://openrouter.ai/settings/privacy';
   } else if (status === 429) {
     code = 'PROVIDER_RATE_LIMITED'; advice = 'Sağlayıcı istek sınırına ulaşıldı. Biraz bekleyip “Hatalıları yeniden dene”yi kullanın; otomatik tekrar yapılmadı.';
+  } else if (config.provider === 'openrouter' && status === 404 && /(?:no (?:available )?endpoints|no providers|parameters|routing)/i.test(message)) {
+    code = 'MODEL_ENDPOINT_UNAVAILABLE'; advice = 'Seçili model için hesap politikanıza ve gerekli JSON/istek parametrelerine uygun sağlayıcı bulunamadı. OpenRouter model erişimi ve hesap filtrelerini kontrol edin veya kendiniz başka model seçin; otomatik tekrar yapılmadı.';
+  } else if (config.provider === 'openrouter' && status === 400 && /(?:thinking|reasoning|response_format|json mode|unsupported.*parameter)/i.test(message)) {
+    code = 'MODEL_PARAMETER_REJECTED'; advice = 'Model sağlayıcısı düşünme/JSON parametrelerini reddetti. Uzantıyı güncelleyin; sürerse bu hata ile modeli bildirin. Otomatik tekrar yapılmadı.';
   } else return null;
   return Object.assign(new Error(`${config.provider}/${config.model}: HTTP ${status} — ${advice}`), { code, stopJob: true, httpStatus: status, actionUrl });
 }
@@ -148,12 +156,14 @@ async function mlProviderCall(config, prompt, images, keyOverride) {
     }
     const text = router ? data.choices?.[0]?.message?.content : data.candidates?.[0]?.content?.parts?.filter(p => !p.thought).map(p => p.text || '').join('');
     const finish = router ? data.choices?.[0]?.finish_reason : data.candidates?.[0]?.finishReason;
-    if (['length', 'MAX_TOKENS', 'SAFETY', 'content_filter'].includes(finish)) throw new Error(`Çeviri tamamlanmadı: ${finish}`);
+    if (['length', 'MAX_TOKENS'].includes(finish)) throw Object.assign(new Error(`Çeviri çıktı sınırında kesildi (${finish}); düşünme ve görünür yanıt aynı bütçeyi kullanabilir. Otomatik tekrar yapılmadı.`), { code: 'PROVIDER_OUTPUT_TRUNCATED', stopJob: true });
+    if (['SAFETY', 'content_filter'].includes(finish)) throw new Error(`Çeviri tamamlanmadı: ${finish}`);
     if (typeof text !== 'string' || !text.trim()) throw new Error('Sağlayıcı boş yanıt verdi.');
     return text;
   } catch (error) {
     if (error.name === 'AbortError') throw Object.assign(new Error('Sağlayıcı 60 saniyede yanıt vermedi; ücretlendirme durumu belirsiz. Otomatik tekrar yapılmadı.'), { stopJob: true, code: 'PROVIDER_TIMEOUT' });
-    error.message = String(error.message).replaceAll(key, '[anahtar]');
+    error.message = String(error.message).replaceAll(key, '[anahtar]').slice(0, 1000);
+    if (error.httpStatus && !error.code) throw mlAccessError(config, error.httpStatus, error.message) || error;
     throw error;
   } finally { clearTimeout(timer); if (heartbeat) globalThis.clearInterval(heartbeat); }
 }
@@ -163,7 +173,11 @@ async function mlReadStream(response) {
     const data = value.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n').trim();
     if (!data) return; if (data === '[DONE]') { doneMarker = true; return; }
     let parsed; try { parsed = JSON.parse(data); } catch { throw new Error('Sağlayıcı akış JSON verisi geçersiz.'); }
-    if (parsed.error) throw new Error('Sağlayıcı akış hatası: ' + String(parsed.error.code || 'unknown'));
+    if (parsed.error) {
+      const error = new Error('Sağlayıcı akış hatası: ' + String(parsed.error.message || parsed.error.code || 'unknown'));
+      error.httpStatus = Number.isInteger(parsed.error.code) ? parsed.error.code : undefined;
+      throw error;
+    }
     const choice = parsed.choices?.[0];
     if (choice?.finish_reason === 'error') throw new Error('Sağlayıcı akışı tamamlanamadı.');
     if (typeof choice?.delta?.content === 'string') content += choice.delta.content;

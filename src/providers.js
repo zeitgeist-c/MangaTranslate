@@ -15,6 +15,12 @@ globalThis.MLProviders = (() => {
     ['meta/muse-spark-1.3-contributor', 'Muse Spark 1.3 Contributor · veri paylaşımı'],
   ];
   const catalog = Object.freeze({ gemini: google, openrouter: router });
+  // Translation needs visible JSON, not a provider's default reasoning budget.
+  // Muse Spark requires reasoning; leave its working policy and Haiku unchanged.
+  function routerPolicy(model) {
+    const disableReasoning = ['qwen/qwen3.7-flash', 'qwen/qwen3.8-flash', 'deepseek/deepseek-v4.1-flash'].includes(model);
+    return { disableReasoning, requiredParameters: ['max_tokens', 'response_format', ...(disableReasoning ? ['reasoning'] : [])] };
+  }
   function settings(raw = {}) {
     const provider = raw.translationProvider === 'openrouter' ? 'openrouter' : 'gemini';
     const model = provider === 'gemini' ? raw.geminiModel || google[0][0] : raw.openrouterModel || router[1][0];
@@ -61,11 +67,12 @@ REGION ORDER: ${JSON.stringify(regions.map(r => r.regionId))}`;
   }
   function routerBody(model, promptText, images, maxTokens = 8192) {
     if (!router.some(([id]) => id === model)) throw new Error('Bilinmeyen OpenRouter modeli');
-    return { model, stream: false, max_tokens: maxTokens, provider: { allow_fallbacks: false }, response_format: { type: 'json_object' },
+    return { model, stream: false, max_tokens: maxTokens, provider: { allow_fallbacks: false, require_parameters: true }, response_format: { type: 'json_object' },
+      ...(routerPolicy(model).disableReasoning ? { reasoning: { enabled: false } } : {}),
       messages: [{ role: 'user', content: [{ type: 'text', text: promptText }, ...images.flatMap(image => [
         { type: 'text', text: `regionId=${image.regionId || 'manual'}` },
         { type: 'image_url', image_url: { url: image.dataUrl } }
       ])] }] };
   }
-  return { catalog, settings, style, prompt, parse, routerBody, version, processingVersion };
+  return { catalog, settings, style, prompt, parse, routerBody, routerPolicy, version, processingVersion };
 })();
