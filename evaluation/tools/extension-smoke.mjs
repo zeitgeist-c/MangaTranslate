@@ -38,8 +38,8 @@ try {
   }
   worker.on('console', message => { logs.push(message.text()); console.log('[worker] ' + message.text().slice(0, 250)); });
   const extensionId = new URL(worker.url()).host;
-  await worker.evaluate(async () => {
-    await chrome.storage.sync.set({ translationProvider: 'openrouter', openrouterModel: 'qwen/qwen3.8-flash', enabled: true, localDetector: globalThis.__testDetector || 'standard' });
+  await worker.evaluate(async detector => {
+    await chrome.storage.sync.set({ translationProvider: 'openrouter', openrouterModel: 'qwen/qwen3.8-flash', enabled: true, localDetector: detector });
     await chrome.storage.local.set({ openrouterApiKey: 'synthetic-key-no-real-provider-access' });
     globalThis.__providerCalls = [];
     const actualFetch = globalThis.fetch;
@@ -52,8 +52,7 @@ try {
       }
       return actualFetch(url, options);
     };
-  });
-  if (process.env.FULL_CHAPTER === '1') await worker.evaluate(() => chrome.storage.sync.set({ localDetector: 'small' }));
+  }, process.env.ML_DETECTOR || 'fast');
   const page = await browser.newPage(); page.on('pageerror', error => logs.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}/chapter`);
   await page.waitForFunction(() => [...document.images].some(img => img.naturalHeight === 16000));
@@ -154,7 +153,7 @@ try {
   const restartCalls = await worker.evaluate(() => globalThis.__unexpectedCalls);
   assert.equal(restartCalls, 0, 'Service-worker restart must preserve completed translation cache');
   const report = { date: new Date().toISOString(), extensionId, version: await worker.evaluate(() => chrome.runtime.getManifest().version), browser: await browser.browser().version(), firstWallMs,
-    pages: job.pages.map(p => ({ state: p.state, regions: p.regions, translated: p.translated, issues: p.issues?.length, error: p.error })),
+    pages: job.pages.map(p => ({ state: p.state, regions: p.regions, translated: p.translated, issues: p.issues?.length, error: p.error, timing: p.timing, backend: p.backend })),
     calls, alignment, shapeCheck, turkishGlyphRender: true, overflowRejected: true, resumeProviderCalls: secondCalls.length - calls.length, serviceWorkerRestartProviderCalls: restartCalls, profile, errors: logs, realLocalModels: true, syntheticTranslation: true, realProviderCalled: false,
     source: 'Local reader fixture using user-supplied chapter image; not live-site or human quality acceptance.' };
   await mkdir('reports', { recursive: true }); await writeFile(process.env.FULL_CHAPTER === '1' ? 'reports/extension-full-chapter.json' : process.env.ML_TEST_PROFILE ? 'reports/extension-resume-smoke.json' : 'reports/extension-smoke.json', JSON.stringify(report, null, 2));

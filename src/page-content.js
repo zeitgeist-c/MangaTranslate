@@ -50,7 +50,8 @@
   const status = text => { ensurePanel(); statusNode.textContent = text; actionLink.hidden = true; controls(); };
   const blockedStatus = error => {
     status('Tarama durduruldu; kalan görseller işlenmedi.\n' + error.message);
-    actionLink.hidden = error.actionUrl !== 'https://openrouter.ai/settings/preferences';
+    const allowed = ['https://openrouter.ai/settings/preferences', 'https://openrouter.ai/settings/privacy'];
+    actionLink.hidden = !allowed.includes(error.actionUrl); if (!actionLink.hidden) actionLink.href = error.actionUrl;
   };
   function ensurePanel() {
     if (panel?.isConnected) return;
@@ -75,6 +76,7 @@
     button('Orijinal / çeviri', () => { original = !original; synchronize(); }, tools);
     button('Kutuları göster / gizle', () => { boxes = !boxes; synchronize(); }, tools);
     button('Kontrol listesi', () => { status((job?.pages || []).flatMap((p, index) => [
+      p.timing ? `Görsel ${index + 1} süre: tarama ${((p.timing.totalMs || 0) / 1000).toFixed(2)} sn · çeviri ${((p.timing.translationMs || 0) / 1000).toFixed(2)} sn · kart ${((p.timing.renderMs || 0) / 1000).toFixed(2)} sn` : '',
       p.error ? `Görsel ${index + 1}: ${p.error}` : '',
       ...(p.issues || []).map(issue => `Görsel ${index + 1} · y=${Math.round(issue.textBox[1])}: ${issue.reason}${issue.translatedText ? '\n' + issue.translatedText : ''}`)
     ]).filter(Boolean).join('\n') || 'Kontrol gerektiren alan yok.'); }, tools);
@@ -100,9 +102,11 @@
       for (let step = 0; step < 120; step++) {
         alive(token);
         const height = document.documentElement.scrollHeight;
-        if (scrollY + innerHeight >= height - 4) { stable = height === lastHeight ? stable + 1 : 0; if (stable >= 3) break; }
+        const atBottom = scrollY + innerHeight >= height - 4;
+        if (atBottom) { stable = height === lastHeight ? stable + 1 : 0; if (stable >= 3) break; }
         lastHeight = height; window.scrollBy(0, Math.max(300, innerHeight * .8));
-        await new Promise(resolve => setTimeout(resolve, 160));
+        // Allow lazy loaders to observe every viewport; retain bottom settling.
+        await new Promise(resolve => setTimeout(resolve, atBottom ? 160 : 40));
       }
       const images = candidates(), seen = new Set(), list = [];
       for (const img of images) {
@@ -170,6 +174,7 @@
     layers.set(source, { root, inner, markers, width: report.width, height: report.height }); synchronize();
   }
   async function processPage(item, token, retry) {
+    const pageStarted = performance.now(); let translationMs = 0;
     status(`${job.pages.indexOf(item) + 1}/${job.pages.length} · Yerel tespit hazırlanıyor…`);
     item.state = 'detecting'; delete item.error; delete item.errorCode; await save(); alive(token);
     const pendingImage = elementFor(item.source);
@@ -191,16 +196,19 @@
     for (let i = 0; i < eligible.length; i += 6) {
       alive(token); item.state = 'translating'; await save(); alive(token);
       status(`${job.pages.indexOf(item) + 1}/${job.pages.length} · ${job.config.provider}/${job.config.model} · yazı ${i + 1}–${Math.min(i + 6, eligible.length)}/${eligible.length}`);
+      const translationStarted = performance.now();
       const response = await request('ML_TRANSLATE', { config: job.config, imageId: report.imageId, regions: eligible.slice(i, i + 6), context, retry });
+      translationMs += performance.now() - translationStarted;
       alive(token); translations.push(...response.regions);
     }
     item.state = 'rendering'; await save(); alive(token);
-    const result = await request('ML_RENDER', { source: item.source, report, translations, minFont: 12 }); alive(token);
+    const result = await request('ML_RENDER', { source: item.source, report, translations, minFont: 12, style: 'card' }); alive(token);
     if (!elementFor(item.source)) throw new Error('Kaynak görsel sayfadan kaldırıldı.');
     draw(item.source, report, result);
     if (layers.get(item.source)?.geometryError) throw new Error(layers.get(item.source).geometryError);
     if (!report.regions.length) result.issues.push({ regionId: null, textBox: [0, 0, report.width, report.height], reason: 'no_text_detected', translatedText: '' });
     item.state = result.issues.length ? 'review' : 'done'; item.issues = result.issues; item.translated = result.patches.length;
+    item.timing = { ...report.timing, ...result.timing, translationMs, pageTotalMs: performance.now() - pageStarted }; item.backend = report.backend;
     job.context = [...context, ...translations.filter(t => t.status === 'translated').map(t => ({ sourceText: t.sourceText, translatedText: t.translatedText }))].slice(-12);
     await save();
   }
@@ -247,7 +255,9 @@
       }
       alive(token); job.state = 'finished'; await save(); alive(token);
       const done = job.pages.filter(p => p.state === 'done').length, review = job.pages.filter(p => p.state === 'review').length, errors = job.pages.filter(p => p.state === 'error').length;
-      status(`Tarama bitti: ${done} otomatik işlendi, ${review} kontrol gerekli, ${errors} hata.\n${job.config.provider} / ${job.config.model}\nBütün yazıların bulunduğu henüz doğrulanmadı. Turuncu alanlarda otomatik kaplama yapılmadı; Alan Seç ile düzeltebilirsiniz.${errors ? '\nİlk hata: ' + job.pages.find(p => p.error)?.error : ''}`);
+      const cards = job.pages.reduce((n, p) => n + (p.translated || 0), 0), issues = job.pages.reduce((n, p) => n + (p.issues?.length || 0), 0);
+      const seconds = name => (job.pages.reduce((n, p) => n + (p.timing?.[name] || 0), 0) / 1000).toFixed(1);
+      status(`Tarama bitti: ${cards} çeviri gösterildi, ${done + review}/${job.pages.length} görsel işlendi, ${issues} alan kontrol gerekli, ${errors} hata.\n${job.config.provider} / ${job.config.model}\nSüre: tarama ${seconds('totalMs')} sn · çeviri ${seconds('translationMs')} sn · kart ${seconds('renderMs')} sn.\nÇeviriler sade kart olarak gösterilir; özgün görsel dosyası korunur. Bütün yazıların bulunduğu henüz doğrulanmadı.${errors ? '\nİlk hata: ' + job.pages.find(p => p.error)?.error : ''}`);
     } catch (error) {
       if (error.name !== 'AbortError' && token === epoch) status(error.message);
     } finally {

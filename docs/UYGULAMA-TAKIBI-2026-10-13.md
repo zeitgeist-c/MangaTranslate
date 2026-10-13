@@ -48,6 +48,8 @@ Kanıtlar `evaluation/reports/` altında yereldir: extension-full-chapter.json, 
 
 ## Geri dönüşte yeni veri
 
+3.7.0: kullanıcının yeni hız önceliğiyle PP-OCR GPU/CPU hızlı yol, kaynak üzerinde sade kartlar, PNG idle beklemesinin kaldırılması ve ayrı OpenRouter kuyruğu uygulandı. Üç kırpmada 6/6 tespit/kart; 18 yerel görsel sentetik yanıtlarla 18,33 sn. Gerçek AI süresi/kabulü hariç. [Hız ve tespit kaydı](HIZ-VE-TESPIT-3.7.0.md); zemin benzerliği sonraki geliştirmeye bırakıldı.
+
 Yeni arayüz sürümü 3.6.0: kompakt popup, ayrı ayarlar sayfası, iki sağlayıcıda ortak çoklu anahtar listesi ve yenilenmiş sayfa paneli. Mevcut 47 ve yeni 7 otomatik kontrol geçti; gerçek API kullanılmadı. [3.6.0 uygulama kaydı](YENI-ARAYUZ-3.6.0.md). Kalite kabul sınırı değişmedi; aşağıdaki sürümler tarihî kayıttır.
 
 Sonraki düzeltme 3.5.2: OpenRouter yaş onayı/anahtar/kredi engelinde ilk hatada tarama durur, kalan kuyruk korunur. 47 otomatik kontrol ve izole Brave testleri geçti; gerçek API kullanılmadı. [Hesap erişimi düzeltmesi](HESAP-ERISIM-DUZELTMESI-3.5.2.md). Önceki sürüm kayıtları aşağıda tarihî kanıttır.

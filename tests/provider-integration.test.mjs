@@ -40,7 +40,7 @@ test('legacy cached age refusal is actionable without a call; explicit retry can
   let value = { status: 'uncertain', error: 'openrouter/test: HTTP 403 — 18+ age confirmation. Confirm at https://openrouter.ai/settings/preferences.' }, attempts = 0;
   context.mlOffscreen = async (command, payload) => command === 'read' ? value : (value = payload.value);
   const imageId = 'b'.repeat(64), regionId = `${imageId}:r1`;
-  context.enqueueWithRateLimit = async () => { attempts++; return JSON.stringify({ regions: [{ regionId, sourceText: 'Hi', translatedText: 'Merhaba', status: 'translated' }] }); };
+  context.mlProviderCall = async () => { attempts++; return JSON.stringify({ regions: [{ regionId, sourceText: 'Hi', translatedText: 'Merhaba', status: 'translated' }] }); };
   context.incrementTranslationStats = async () => {};
   const message = { config: context.MLProviders.settings({ translationProvider: 'openrouter' }), imageId, regions: [{ regionId, crop: 'data:image/png;base64,AAAA' }] };
   await assert.rejects(context.mlTranslate(message), error => error.code === 'AGE_CONFIRMATION_REQUIRED'); assert.equal(attempts, 0);
@@ -98,13 +98,14 @@ test('resuming while a provider reply is pending reuses the same operation and c
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   const cache = new Map(); let release, attempts = 0;
   context.mlOffscreen = async (command, payload) => command === 'read' ? cache.get(payload.key) : cache.set(payload.key, payload.value);
-  context.enqueueWithRateLimit = async () => { attempts++; return new Promise(resolve => { release = resolve; }); };
+  context.mlProviderCall = async () => { attempts++; return new Promise(resolve => { release = resolve; }); };
   context.incrementTranslationStats = async () => {};
   const imageId = 'a'.repeat(64), regionId = `${imageId}:r1`;
   const config = context.MLProviders.settings({ translationProvider: 'openrouter', openrouterModel: 'qwen/qwen3.8-flash' });
   const message = { config, imageId, regions: [{ regionId, crop: 'data:image/png;base64,AAAA' }] };
   const first = context.mlTranslate(message);
-  while (!release) await new Promise(resolve => setImmediate(resolve));
+  for (let i = 0; i < 100 && !release; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.ok(release, 'Provider operation must have started');
   const resumed = context.mlTranslate(message);
   await new Promise(resolve => setImmediate(resolve)); assert.equal(attempts, 1);
   release(JSON.stringify({ regions: [{ regionId, sourceText: 'Hello', translatedText: 'Merhaba', status: 'translated' }] }));

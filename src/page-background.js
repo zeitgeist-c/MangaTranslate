@@ -2,6 +2,15 @@
 let mlOffscreenCreating;
 const mlCalls = new Map();
 const mlLocalRequests = new Map();
+let mlRouterQueue = Promise.resolve(), mlRouterBlockedUntil = 0;
+function mlEnqueue(config, task) {
+  if (config.provider !== 'openrouter') return enqueueWithRateLimit(task, { retry: false });
+  const operation = mlRouterQueue.then(() => {
+    if (Date.now() < mlRouterBlockedUntil) throw Object.assign(new Error('OpenRouter istek sınırı için bekleme sürüyor. Biraz sonra “Hatalıları yeniden dene”yi kullanın.'), { stopJob: true, code: 'PROVIDER_RATE_LIMITED' });
+    return task();
+  });
+  mlRouterQueue = operation.catch(() => {}); return operation;
+}
 async function mlOffscreen(command, payload = {}) {
   const { signal, ...data } = payload;
   const url = chrome.runtime.getURL('src/page/offscreen.html');
@@ -31,7 +40,7 @@ async function mlLocal(message, sender, command) {
   mlLocalRequests.set(key, controller);
   try {
     return await mlOffscreen(command, { source: message.source, detector: message.detector, report: message.report,
-      translations: message.translations, minFont: message.minFont, tabId: sender.tab.id,
+      translations: message.translations, minFont: message.minFont, style: message.style, tabId: sender.tab.id,
       clientRequestId: message.requestId, signal: controller.signal });
   } finally { mlLocalRequests.delete(key); }
 }
@@ -55,14 +64,19 @@ function mlAccessError(config, status, message) {
     code = 'PROVIDER_AUTH_REQUIRED'; advice = 'Sağlayıcı API anahtarını kabul etmedi. Popup’taki API sekmesinden ilgili anahtarı kontrol edip “Hatalıları yeniden dene”yi kullanın.';
   } else if (status === 402) {
     code = 'PROVIDER_CREDIT_REQUIRED'; advice = 'Sağlayıcı kredi veya ödeme koşulu nedeniyle isteği reddetti. Hesabınızın kredi durumunu kontrol edip “Hatalıları yeniden dene”yi kullanın.';
+  } else if (config.provider === 'openrouter' && status === 404 && /(?:paid model training violation|matching your (?:guardrail restrictions and )?data policy|no endpoints.*data policy)/i.test(message)) {
+    code = 'PROVIDER_DATA_POLICY_BLOCK'; advice = 'Seçili model OpenRouter hesabınızın veri politikasıyla uyuşmuyor. Veri paylaşımı koşullarını hesap ayarlarından değerlendirin veya başka model seçip yeni tarama başlatın. Ayarları değiştirdiyseniz “Hatalıları yeniden dene”yi kullanın.';
+    actionUrl = 'https://openrouter.ai/settings/privacy';
+  } else if (status === 429) {
+    code = 'PROVIDER_RATE_LIMITED'; advice = 'Sağlayıcı istek sınırına ulaşıldı. Biraz bekleyip “Hatalıları yeniden dene”yi kullanın; otomatik tekrar yapılmadı.';
   } else return null;
   return Object.assign(new Error(`${config.provider}/${config.model}: HTTP ${status} — ${advice}`), { code, stopJob: true, httpStatus: status, actionUrl });
 }
 function mlRestoreJob(job) {
   if (!job?.config || job.blocked) return job;
   for (const page of job.pages || []) {
-    if (!/HTTP 403/.test(page.error || '')) continue;
-    const error = mlAccessError(job.config, 403, page.error);
+    const match = /HTTP (403|404)/.exec(page.error || ''); if (!match) continue;
+    const error = mlAccessError(job.config, Number(match[1]), page.error);
     if (!error) continue;
     job.state = 'blocked'; job.blocked = { error: error.message, code: error.code, actionUrl: error.actionUrl };
     break;
@@ -87,6 +101,7 @@ async function mlProviderCall(config, prompt, images, keyOverride) {
       headers: { 'Content-Type': 'application/json', ...(router ? { Authorization: `Bearer ${key}` } : { 'x-goog-api-key': key }) }, body: JSON.stringify(body) });
     const data = await response.json();
     if (!response.ok || data.error) {
+      if (router && response.status === 429) mlRouterBlockedUntil = Date.now() + Math.min(300000, Math.max(1000, (Number(response.headers?.get('retry-after')) || 30) * 1000));
       const detail = String(data.error?.message || 'Sağlayıcı hatası').replaceAll(key, '[anahtar]');
       throw mlAccessError(config, response.status, detail) || new Error(`${config.provider}/${config.model}: HTTP ${response.status} — ${detail.slice(0, 240)}`);
     }
@@ -115,14 +130,14 @@ async function mlTranslate(message) {
     if (existing?.status === 'done') return { ...existing, cached: true };
     if (existing && !message.retry) {
       // Recognize the known 3.5.1 cached refusal as well as new structured blocks.
-      const refusal = mlAccessError(checked, existing.httpStatus || (/HTTP 403/.test(existing.error || '') ? 403 : 0), existing.error || '');
+      const refusal = mlAccessError(checked, existing.httpStatus || Number(/HTTP (403|404)/.exec(existing.error || '')?.[1] || 0), existing.error || '');
       if (existing.status === 'blocked') throw Object.assign(new Error(existing.error), { code: existing.code, stopJob: true, httpStatus: existing.httpStatus, actionUrl: existing.actionUrl });
       if (refusal) throw refusal;
     }
     if (existing && !message.retry) throw new Error('Önceki çağrı tamamlanamadı; tekrar ücret olasılığı nedeniyle durduruldu. “Hatalıları yeniden dene” ile açıkça tekrar deneyebilirsiniz.');
     await mlOffscreen('write', { key, value: { status: 'pending', startedAt: Date.now(), config: checked } });
     try {
-      const raw = await enqueueWithRateLimit(() => mlProviderCall(checked, MLProviders.prompt(checked, regions, context), regions.map(r => ({ regionId: r.regionId, dataUrl: r.crop }))), { retry: false });
+      const raw = await mlEnqueue(checked, () => mlProviderCall(checked, MLProviders.prompt(checked, regions, context), regions.map(r => ({ regionId: r.regionId, dataUrl: r.crop }))));
       const translated = MLProviders.parse(raw, regions.map(r => r.regionId));
       const result = { status: 'done', config: checked, regions: translated, completedAt: Date.now() };
       await mlOffscreen('write', { key, value: result }); await incrementTranslationStats();

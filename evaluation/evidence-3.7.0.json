@@ -1,0 +1,400 @@
+{
+  "version": "3.7.0",
+  "date": "2026-10-13",
+  "automaticTests": {
+    "passed": 61,
+    "failed": 0
+  },
+  "realProviderCalls": 0,
+  "pngPixelsIdentical": true,
+  "crops": [
+    {
+      "name": "purple",
+      "cards": 2,
+      "issues": [],
+      "backend": "webgpu",
+      "prepareWallMs": 1239.127
+    },
+    {
+      "name": "title",
+      "cards": 2,
+      "issues": [],
+      "backend": "webgpu",
+      "prepareWallMs": 66.87080000000014
+    },
+    {
+      "name": "black",
+      "cards": 2,
+      "issues": [],
+      "backend": "webgpu",
+      "prepareWallMs": 77.36579999999958
+    }
+  ],
+  "long": {
+    "name": "long",
+    "width": 900,
+    "height": 16000,
+    "backend": "webgpu",
+    "prepareWallMs": 1014.6606999999999,
+    "timing": {
+      "imageMs": 79.80000001192093,
+      "cached": false,
+      "detectMs": 838.2999999821186,
+      "totalMs": 997.4000000059605
+    },
+    "renderWallMs": 46.148299999999836,
+    "warmPrepareMs": 137.45470000000023,
+    "groups": 17,
+    "cards": 12,
+    "issues": [
+      "small_text_candidate",
+      "small_text_candidate",
+      "small_text_candidate",
+      "small_text_candidate",
+      "small_text_candidate"
+    ]
+  },
+  "chapter": {
+    "wallMs": 18326.307,
+    "imageCount": 18,
+    "syntheticProviderOperations": 37,
+    "pages": [
+      {
+        "state": "review",
+        "regions": 13,
+        "translated": 10,
+        "issues": 3,
+        "timing": {
+          "cached": false,
+          "detectMs": 1218.7000000178814,
+          "imageMs": 12.599999994039536,
+          "pageTotalMs": 1373.699999988079,
+          "renderMs": 20.599999994039536,
+          "totalMs": 1289.5,
+          "translationMs": 8.5
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "review",
+        "regions": 17,
+        "translated": 12,
+        "issues": 5,
+        "timing": {
+          "cached": false,
+          "detectMs": 862.1999999880791,
+          "imageMs": 89.80000001192093,
+          "pageTotalMs": 1102.7999999821186,
+          "renderMs": 16.599999994039536,
+          "totalMs": 1029.4000000059605,
+          "translationMs": 19.80000001192093
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "review",
+        "regions": 9,
+        "translated": 2,
+        "issues": 7,
+        "timing": {
+          "cached": false,
+          "detectMs": 151.30000001192093,
+          "imageMs": 11.800000011920929,
+          "pageTotalMs": 188.19999998807907,
+          "renderMs": 3.5,
+          "totalMs": 172.30000001192093,
+          "translationMs": 3.5999999940395355
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "review",
+        "regions": 24,
+        "translated": 13,
+        "issues": 11,
+        "timing": {
+          "cached": false,
+          "detectMs": 805.4000000059605,
+          "imageMs": 69.09999999403954,
+          "pageTotalMs": 977.1999999880791,
+          "renderMs": 19.700000017881393,
+          "totalMs": 914.9000000059605,
+          "translationMs": 15.400000005960464
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "done",
+        "regions": 3,
+        "translated": 3,
+        "issues": 0,
+        "timing": {
+          "cached": false,
+          "detectMs": 152.30000001192093,
+          "imageMs": 13.900000005960464,
+          "pageTotalMs": 202.5,
+          "renderMs": 4.300000011920929,
+          "totalMs": 177.2000000178814,
+          "translationMs": 5.600000023841858
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "review",
+        "regions": 29,
+        "translated": 26,
+        "issues": 3,
+        "timing": {
+          "cached": false,
+          "detectMs": 781.5999999940395,
+          "imageMs": 74.19999998807907,
+          "pageTotalMs": 1038.300000011921,
+          "renderMs": 27.599999994039536,
+          "totalMs": 919,
+          "translationMs": 30.099999994039536
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "review",
+        "regions": 0,
+        "translated": 0,
+        "issues": 1,
+        "timing": {
+          "cached": false,
+          "detectMs": 48.900000005960464,
+          "imageMs": 2.5999999940395355,
+          "pageTotalMs": 58.20000001788139,
+          "renderMs": 0,
+          "totalMs": 52,
+          "translationMs": 0
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "review",
+        "regions": 21,
+        "translated": 17,
+        "issues": 4,
+        "timing": {
+          "cached": false,
+          "detectMs": 812.8999999761581,
+          "imageMs": 64.7999999821186,
+          "pageTotalMs": 993.5,
+          "renderMs": 20.5,
+          "totalMs": 916.7999999821186,
+          "translationMs": 18.5
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "review",
+        "regions": 0,
+        "translated": 0,
+        "issues": 1,
+        "timing": {
+          "cached": false,
+          "detectMs": 148.60000002384186,
+          "imageMs": 14,
+          "pageTotalMs": 171.19999998807907,
+          "renderMs": 0,
+          "totalMs": 163.19999998807907,
+          "translationMs": 0
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "review",
+        "regions": 16,
+        "translated": 10,
+        "issues": 6,
+        "timing": {
+          "cached": false,
+          "detectMs": 821.0999999940395,
+          "imageMs": 101.59999999403954,
+          "pageTotalMs": 1029.9000000059605,
+          "renderMs": 12.699999988079071,
+          "totalMs": 962.6999999880791,
+          "translationMs": 15.900000005960464
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "review",
+        "regions": 23,
+        "translated": 15,
+        "issues": 8,
+        "timing": {
+          "cached": false,
+          "detectMs": 795.0999999940395,
+          "imageMs": 74.5,
+          "pageTotalMs": 1016.1999999880791,
+          "renderMs": 21.19999998807907,
+          "totalMs": 918.5999999940395,
+          "translationMs": 19.499999970197678
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "done",
+        "regions": 2,
+        "translated": 2,
+        "issues": 0,
+        "timing": {
+          "cached": false,
+          "detectMs": 102.2000000178814,
+          "imageMs": 7.9000000059604645,
+          "pageTotalMs": 136.39999997615814,
+          "renderMs": 2.4000000059604645,
+          "totalMs": 116.60000002384186,
+          "translationMs": 3.5999999940395355
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "review",
+        "regions": 23,
+        "translated": 17,
+        "issues": 6,
+        "timing": {
+          "cached": false,
+          "detectMs": 790,
+          "imageMs": 67.59999999403954,
+          "pageTotalMs": 968.5999999940395,
+          "renderMs": 17.900000005960464,
+          "totalMs": 892.6999999880791,
+          "translationMs": 19.799999982118607
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "review",
+        "regions": 0,
+        "translated": 0,
+        "issues": 1,
+        "timing": {
+          "cached": false,
+          "detectMs": 97.59999999403954,
+          "imageMs": 6.399999976158142,
+          "pageTotalMs": 113.69999998807907,
+          "renderMs": 0,
+          "totalMs": 104.59999999403954,
+          "translationMs": 0
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "review",
+        "regions": 21,
+        "translated": 19,
+        "issues": 2,
+        "timing": {
+          "cached": false,
+          "detectMs": 791,
+          "imageMs": 69.40000000596046,
+          "pageTotalMs": 1019.3000000119209,
+          "renderMs": 21.099999994039536,
+          "totalMs": 907.8000000119209,
+          "translationMs": 24.900000005960464
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "review",
+        "regions": 0,
+        "translated": 0,
+        "issues": 1,
+        "timing": {
+          "cached": false,
+          "detectMs": 69.09999999403954,
+          "imageMs": 4,
+          "pageTotalMs": 83.69999998807907,
+          "renderMs": 0.10000002384185791,
+          "totalMs": 73.7999999821186,
+          "translationMs": 0
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "review",
+        "regions": 25,
+        "translated": 14,
+        "issues": 11,
+        "timing": {
+          "cached": false,
+          "detectMs": 800.5999999940395,
+          "imageMs": 87.09999999403954,
+          "pageTotalMs": 1054.5,
+          "renderMs": 17.80000001192093,
+          "totalMs": 940.7000000178814,
+          "translationMs": 26
+        },
+        "backend": "webgpu"
+      },
+      {
+        "state": "review",
+        "regions": 38,
+        "translated": 15,
+        "issues": 23,
+        "timing": {
+          "cached": false,
+          "detectMs": 763,
+          "imageMs": 68.69999998807907,
+          "pageTotalMs": 1057.7000000178814,
+          "renderMs": 19,
+          "totalMs": 896.6999999880791,
+          "translationMs": 39.50000002980232
+        },
+        "backend": "webgpu"
+      }
+    ],
+    "errors": []
+  },
+  "settings": {
+    "version": "3.7.0",
+    "migration": true,
+    "multiKeyBothProviders": true,
+    "concurrentTabs": true,
+    "noSecretInDOM": true,
+    "metadataChecks": 2,
+    "responsiveWidths": [
+      1000,
+      500,
+      360
+    ],
+    "enlargedText": true,
+    "failedSaveRestoresSelection": true,
+    "dirtyPreferencesPreserved": true,
+    "lastKeyDisablesTranslation": true,
+    "settingsTabReused": true,
+    "workerRestart": true,
+    "keyboardAdd": true,
+    "popupTranslationActions": true,
+    "contributorConsent": true,
+    "modelCatalog": true,
+    "realProviderCalls": 0,
+    "browser": "155.0.8059.40"
+  },
+  "lifecycle": {
+    "prepares": 3,
+    "syntheticProviderOperations": 1,
+    "localCancellationCount": 1,
+    "state": "finished",
+    "pageState": "done",
+    "ageRefusalStopsQueue": true,
+    "settingsLinkVisible": true,
+    "foldDoesNotPause": true,
+    "displayToolsWork": true,
+    "closePauses": true,
+    "browser": "155.0.8059.40",
+    "realProviderCalls": 0
+  },
+  "limitations": [
+    "Synthetic translations: actual provider latency, cost and reading accuracy unverified",
+    "No human-labelled 98 percent acceptance",
+    "Crops did not reliably match available full source pages"
+  ],
+  "deferred": [
+    "Background reconstruction and texture matching"
+  ]
+}

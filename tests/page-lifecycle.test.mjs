@@ -13,7 +13,7 @@ function fixture({ blocked = false } = {}) {
   const config = { processingVersion: 'page-v4', localDetector: 'standard', provider: 'openrouter', model: 'synthetic' };
   let saved = { config, pages: [{ source: 'https://fixture/image.png', state: 'queued' }, ...(blocked ? [{ source: 'https://fixture/second.png', state: 'queued' }] : [])], context: [] };
   const image = { currentSrc: 'https://fixture/image.png', naturalWidth: 900, naturalHeight: 1000, isConnected: true };
-  const context = vm.createContext({ AbortController, DOMException, structuredClone, crypto: webcrypto, URL, console,
+  const context = vm.createContext({ AbortController, DOMException, structuredClone, crypto: webcrypto, URL, console, performance,
     setTimeout(fn, ms) { timers.set(++timerId, { fn, ms }); return timerId; }, clearTimeout(id) { timers.delete(id); },
     document: { createElement: node, images: [image], documentElement: node('html') },
     window: { addEventListener() {} }, MutationObserver: class { observe() {} }, ResizeObserver: class { observe() {} },

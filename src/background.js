@@ -172,7 +172,7 @@ async function handleExtract({ dataUrl, w, h, translationMode, alternativeAttemp
     const config = await mlConfig(), started = Date.now();
     const prompt = buildTranslationPrompt(translationMode, alternativeAttempt) + '\n' + MLProviders.style(config) +
       '\nRead the complete selected crop. Image dimensions: ' + w + 'x' + h;
-    const raw = await enqueueWithRateLimit(() => mlProviderCall(config, prompt, [{ dataUrl }]), { retry: false });
+    const raw = await mlEnqueue(config, () => mlProviderCall(config, prompt, [{ dataUrl }]));
     const bubbles = parseBubbleArray(raw, w, h);
     if (bubbles.length) await incrementTranslationStats();
     return { bubbles, model: config.model, modelLabel: config.model, provider: config.provider, fallbackUsed: false, elapsedMs: Date.now() - started };
