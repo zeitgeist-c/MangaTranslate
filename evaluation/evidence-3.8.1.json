@@ -1,0 +1,237 @@
+{
+  "version": "3.8.1",
+  "date": "2026-10-13",
+  "automatedTests": 90,
+  "passed": 90,
+  "realProviderCalls": 0,
+  "limitations": [
+    "Original user error messages unavailable; exact historical cause unproven",
+    "Public metadata is not account access or real translation quality",
+    "No automatic paid retry or model fallback"
+  ],
+  "packagedModelSmoke": {
+    "version": "3.8.1",
+    "models": [
+      "qwen/qwen3.7-flash",
+      "qwen/qwen3.8-flash",
+      "anthropic/claude-haiku-5.5",
+      "deepseek/deepseek-v4.1-flash",
+      "meta/muse-spark-1.3",
+      "meta/muse-spark-1.3-contributor"
+    ],
+    "calls": [
+      {
+        "model": "qwen/qwen3.7-flash",
+        "stream": false,
+        "images": 2,
+        "reasoningDisabled": true
+      },
+      {
+        "model": "qwen/qwen3.7-flash",
+        "stream": true,
+        "images": 2,
+        "reasoningDisabled": true
+      },
+      {
+        "model": "qwen/qwen3.8-flash",
+        "stream": false,
+        "images": 2,
+        "reasoningDisabled": true
+      },
+      {
+        "model": "qwen/qwen3.8-flash",
+        "stream": true,
+        "images": 2,
+        "reasoningDisabled": true
+      },
+      {
+        "model": "anthropic/claude-haiku-5.5",
+        "stream": false,
+        "images": 2,
+        "reasoningDisabled": false
+      },
+      {
+        "model": "anthropic/claude-haiku-5.5",
+        "stream": true,
+        "images": 2,
+        "reasoningDisabled": false
+      },
+      {
+        "model": "deepseek/deepseek-v4.1-flash",
+        "stream": false,
+        "images": 2,
+        "reasoningDisabled": true
+      },
+      {
+        "model": "deepseek/deepseek-v4.1-flash",
+        "stream": true,
+        "images": 2,
+        "reasoningDisabled": true
+      },
+      {
+        "model": "meta/muse-spark-1.3",
+        "stream": false,
+        "images": 2,
+        "reasoningDisabled": false
+      },
+      {
+        "model": "meta/muse-spark-1.3",
+        "stream": true,
+        "images": 2,
+        "reasoningDisabled": false
+      },
+      {
+        "model": "meta/muse-spark-1.3-contributor",
+        "stream": false,
+        "images": 2,
+        "reasoningDisabled": false
+      },
+      {
+        "model": "meta/muse-spark-1.3-contributor",
+        "stream": true,
+        "images": 2,
+        "reasoningDisabled": false
+      }
+    ],
+    "uiSelectionPersists": true,
+    "shuffledRepliesPreserveIdentity": true,
+    "realProviderCalls": 0
+  },
+  "settingsSmoke": {
+    "version": "3.8.1",
+    "migration": true,
+    "multiKeyBothProviders": true,
+    "concurrentTabs": true,
+    "noSecretInDOM": true,
+    "metadataChecks": 2,
+    "responsiveWidths": [
+      1000,
+      500,
+      360
+    ],
+    "enlargedText": true,
+    "failedSaveRestoresSelection": true,
+    "dirtyPreferencesPreserved": true,
+    "lastKeyDisablesTranslation": true,
+    "settingsTabReused": true,
+    "workerRestart": true,
+    "keyboardAdd": true,
+    "popupTranslationActions": true,
+    "contributorConsent": true,
+    "modelCatalog": true,
+    "realProviderCalls": 0,
+    "browser": "155.0.8059.40"
+  },
+  "lifecycleSmoke": {
+    "prepares": 3,
+    "syntheticProviderOperations": 1,
+    "localCancellationCount": 1,
+    "state": "finished",
+    "pageState": "done",
+    "ageRefusalStopsQueue": true,
+    "settingsLinkVisible": true,
+    "foldDoesNotPause": true,
+    "displayToolsWork": true,
+    "closePauses": true,
+    "browser": "155.0.8059.40",
+    "realProviderCalls": 0,
+    "profile": "C:\\Users\\user\\AppData\\Local\\Temp\\mangalens-lifecycle-lxngc0"
+  },
+  "readerFixture": {
+    "date": "2026-10-13T19:03:20.982Z",
+    "extensionId": "dpeaamihpojkamjniglllgmelcanpcom",
+    "version": "3.8.1",
+    "browser": "155.0.8059.40",
+    "firstWallMs": 5177.033200000001,
+    "pages": [
+      {
+        "state": "review",
+        "regions": 14,
+        "translated": 12,
+        "issues": 2,
+        "timing": {
+          "cached": false,
+          "detectMs": 3371.199999988079,
+          "imageMs": 80.30000001192093,
+          "renderMs": 26.80000001192093,
+          "totalMs": 3574.4000000059605
+        },
+        "backend": "webgpu"
+      }
+    ],
+    "calls": [
+      {
+        "model": "qwen/qwen3.8-flash",
+        "ids": [
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r13",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r12",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r11",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r10",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r8",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r7",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r6",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r5",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r4",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r3",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r1",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r0"
+        ],
+        "startedAt": 1791918197922,
+        "maxTokens": 16384
+      }
+    ],
+    "peakConcurrency": 1,
+    "syntheticDelayMs": 0,
+    "metrics": {
+      "groups": [
+        {
+          "cached": false,
+          "cachedRegions": 0,
+          "concurrency": 4,
+          "groupId": "translation-group-v2:416d61b764bf9659059fd463d6c54f3fd5fd37f89b5983bba3062d5cd7a5816c",
+          "providerMs": 4,
+          "queueMs": 0,
+          "regions": 12,
+          "wallMs": 18.299999982118607
+        }
+      ]
+    },
+    "alignment": [
+      {
+        "width": 1280,
+        "delta": 0
+      },
+      {
+        "width": 700,
+        "delta": 0
+      }
+    ],
+    "shapeCheck": {
+      "cornerRGBA": [
+        85,
+        85,
+        85,
+        255
+      ],
+      "paintedPixels": 148500
+    },
+    "turkishGlyphRender": true,
+    "overflowRejected": true,
+    "resumeProviderCalls": 0,
+    "serviceWorkerRestartProviderCalls": 0,
+    "errors": [],
+    "realLocalModels": true,
+    "syntheticTranslation": true,
+    "realProviderCalled": false,
+    "source": "Local reader fixture using user-supplied chapter image; not live-site or human quality acceptance."
+  },
+  "packageVerification": {
+    "version": "3.8.1",
+    "files": 35,
+    "bytes": 47029543,
+    "sha256": "4652192d685882eca8e038a52a3f32b8570e28af178b10bd3e472d005eaca68c",
+    "allEntriesMatchSource": true,
+    "oldPackageSha256": "b8209689fc9a0c0b58cdc101ccc9d9c112c61b0d11efddc1d7becbeec77c80ac",
+    "braveBackupSha256": "aa090a82f4769c13440bfb6f4b01eb3d23a2eb1ecdb121df28ae207de3a4bbeb"
+  }
+}

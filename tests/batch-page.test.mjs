@@ -95,6 +95,26 @@ test('in-flight budget refusal is distinct from an exhausted balance',async()=>{
   const f=fixture();f.context.mlKey=async()=> 'synthetic';f.context.fetch=async()=>new Response(JSON.stringify({error:{message:'In flight',metadata:{limit_source:'openrouter_in_flight_budget'}}}),{status:402,headers:{'Content-Type':'application/json'}});
   await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash'},'',[]),e=>e.code==='PROVIDER_IN_FLIGHT_BUDGET'&&e.stopJob);
 });
+
+test('model metadata excludes JSON-incompatible and unavailable endpoints and ignores v1 cache',async()=>{
+  const f=fixture();
+  f.stored['ml-model-capabilities:deepseek/deepseek-v4.1-flash']={expires:Date.now()+100000,value:{maxRegions:20,maxOutputTokens:16384}};
+  f.context.fetch=async()=>({ok:true,json:async()=>({data:{endpoints:[
+    {status:0,context_length:1048576,max_completion_tokens:2000,supported_parameters:['max_tokens','reasoning']},
+    {status:-5,context_length:1048576,max_completion_tokens:1000,supported_parameters:['max_tokens','reasoning','response_format']},
+    {status:0,context_length:1048576,max_completion_tokens:32768,supported_parameters:['max_tokens','reasoning','response_format']}
+  ]}})});
+  const caps=await f.actualCapabilities({provider:'openrouter',model:'deepseek/deepseek-v4.1-flash'});
+  assert.equal(caps.maxRegions,20);assert.equal(caps.maxOutputTokens,16384);
+});
+
+test('known incompatible model metadata refuses before translation, without paid probing',async()=>{
+  const f=fixture();let fetched=0;
+  f.context.fetch=async()=>{fetched++;return {ok:true,json:async()=>({data:{endpoints:[{status:0,supported_parameters:['max_tokens','reasoning']}]}})};};
+  f.context.mlCapabilities=f.actualCapabilities;
+  await assert.rejects(f.context.mlTranslate(f.message([f.region(1)])),e=>e.code==='MODEL_PARAMETERS_UNAVAILABLE'&&e.notSent);
+  assert.equal(fetched,1);assert.equal(f.calls.length,0);
+});
 test('stream reader preserves split UTF-8 and ignores reasoning while requiring explicit completion',async()=>{
   const f=fixture(),bytes=new TextEncoder().encode('data: {"choices":[{"delta":{"reasoning":"secret"}}]}\r\n\r\ndata: {"choices":[{"delta":{"content":"İŞĞ"}}]}\r\n\r\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\r\n\r\ndata: [DONE]\r\n\r\n');
   const stream=new ReadableStream({start(controller){for(let i=0;i<bytes.length;i+=3)controller.enqueue(bytes.slice(i,i+3));controller.close();}});

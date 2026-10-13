@@ -6,7 +6,7 @@ function fixture() {
   const calls = [], stored = { openrouterApiKey: 'router-private-key', googleApiKeys: [{ id: 'g', key: 'google-private-key' }], activeGoogleApiKeyId: 'g' };
   const context = vm.createContext({
     chrome: { runtime: { onMessage: { addListener() {} } }, storage: { local: { get: async () => stored } } },
-    setTimeout, clearTimeout, AbortController, TextEncoder, crypto,
+    setTimeout, clearTimeout, AbortController, TextEncoder, TextDecoder, crypto,
     getActiveApiKey: async () => 'google-private-key',
     fetch: async (url, options) => {
       calls.push({ url, ...options, body: JSON.parse(options.body) });
@@ -74,6 +74,61 @@ test('all direct Google models use Google credentials; reasoning text never reac
     assert.ok(calls.at(-1).url.includes(model)); assert.equal(calls.at(-1).headers['x-goog-api-key'], 'google-private-key');
     assert.equal(calls.at(-1).headers.Authorization, undefined); assert.ok(!calls.at(-1).url.includes('private-key'));
   }
+});
+
+test('Qwen and DeepSeek disable default reasoning; mandatory Muse reasoning is untouched', async () => {
+  const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  for (const [model] of context.MLProviders.catalog.openrouter) {
+    await context.mlProviderCall({ provider: 'openrouter', model }, 'Return JSON', []);
+    const body = calls.at(-1).body;
+    assert.equal(body.provider.require_parameters, true);
+    assert.equal(body.provider.allow_fallbacks, false);
+    assert.equal(body.response_format.type, 'json_object');
+    if (model.startsWith('qwen/') || model.startsWith('deepseek/')) assert.deepEqual(body.reasoning, { enabled: false });
+    else assert.equal(body.reasoning, undefined);
+  }
+  assert.equal(calls.length, 6);
+});
+
+test('upstream thinking/JSON rejection is actionable and never retried or routed to another model', async () => {
+  const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  context.fetch = async (url, options) => { calls.push({ url, options }); return { ok: false, status: 400,
+    json: async () => ({ error: { message: 'Json mode response is not supported when enable_thinking is true' } }) }; };
+  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'qwen/qwen3.7-flash' }, '', []), e => e.code === 'MODEL_PARAMETER_REJECTED' && e.stopJob);
+  assert.equal(calls.length, 1);
+});
+
+test('no matching JSON endpoint is distinguished from data policy and age restrictions', () => {
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  const config = { provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash' };
+  assert.equal(context.mlAccessError(config, 404, 'No endpoints found that support all requested parameters').code, 'MODEL_ENDPOINT_UNAVAILABLE');
+  assert.equal(context.mlAccessError(config, 404, 'No endpoints matching your data policy').code, 'PROVIDER_DATA_POLICY_BLOCK');
+});
+
+test('streamed upstream error preserves its explanation, redacts key and stops without a retry', async () => {
+  const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  context.fetch = async (url, options) => { calls.push({ url, options }); return new Response(
+    'data: '+JSON.stringify({ error: { code: 400, message: 'response_format thinking rejected router-private-key' } })+'\n\n',
+    { headers: { 'Content-Type': 'text/event-stream' } }); };
+  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'qwen/qwen3.8-flash', maxOutputTokens: 16384 }, '', []),
+    e => e.code === 'MODEL_PARAMETER_REJECTED' && !e.message.includes('router-private-key'));
+  assert.equal(calls.length, 1);
+});
+
+test('reasoning-only output hitting the token limit is not accepted as translation', async () => {
+  const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  context.fetch = async (url, options) => { calls.push({ url, options }); return { ok: true,
+    json: async () => ({ choices: [{ message: { content: '', reasoning: '{"regions":[]}' }, finish_reason: 'length' }] }) }; };
+  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash' }, '', []), e => e.code === 'PROVIDER_OUTPUT_TRUNCATED');
+  assert.equal(calls.length, 1);
+});
+
+test('stream messages redact the complete credential before applying length limits', async () => {
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  context.fetch = async () => new Response('data: '+JSON.stringify({error:{code:502,message:'x'.repeat(470)+'router-private-key'+'y'.repeat(1200)}})+'\n\n',
+    {headers:{'Content-Type':'text/event-stream'}});
+  await assert.rejects(context.mlProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash',maxOutputTokens:16384},'',[]),
+    e=>e.message.includes('[anahtar]')&&!e.message.includes('router-')&&e.message.length<=1000);
 });
 test('provider error never invokes another model and redacts echoed credentials', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
