@@ -6,7 +6,7 @@
   const layers = new Map();
   let controller, resumePending, actionLink, pauseButton, resumeButton, retryButton, counterNode, panelCollapsed = false;
   const pendingRequests = new Set();
-  let saveChain = Promise.resolve(), segmentClock = 0;
+  let saveChain = Promise.resolve(), segmentClock = 0, blockedTimer;
   const request = (type, data = {}, signal = controller?.signal) => new Promise((resolve, reject) => {
     const requestId = crypto.randomUUID();
     const cancelLocal = () => {
@@ -33,7 +33,7 @@
     }).then(response => {
       if (settled) return;
       if (!response?.ok) finish(Object.assign(new Error(response?.error || 'Uzantı bağlantısı kesildi; devam düğmesiyle yeniden deneyin.'),
-        { code: response?.code, stopJob: response?.stopJob === true, actionUrl: response?.actionUrl, timing: response?.timing, notSent: response?.notSent }));
+        { code: response?.code, stopJob: response?.stopJob === true, actionUrl: response?.actionUrl, timing: response?.timing, notSent: response?.notSent, retryAt:response?.retryAt, cooldownScope:response?.cooldownScope }));
       else finish(null, response.value);
     }, error => finish(error));
   });
@@ -44,15 +44,23 @@
     pauseButton.hidden = !running || paused || blocked || finished;
     resumeButton.hidden = running && !paused && !blocked || finished;
     retryButton.hidden = !blocked && !(job?.pages || []).some(p => p.state === 'error');
+    retryButton.disabled = Number(job?.blocked?.retryAt || 0) > Date.now();
     const phase = job?.state === 'paused' ? 'Duraklatıldı' : blocked ? 'İşlem gerekli' : finished ? 'Bitti' :
       ({ detecting: 'Tespit', translating: 'Çeviri', rendering: 'Yerleşim' })[(job?.pages || []).find(p => ['detecting', 'translating', 'rendering'].includes(p.state))?.state] || 'Çalışıyor';
     counterNode.textContent = job ? `${phase} · ${job.pages.filter(p => ['done', 'review', 'error'].includes(p.state)).length}/${job.pages.length}` : 'Hazırlanıyor';
   }
-  const status = text => { ensurePanel(); statusNode.textContent = text; actionLink.hidden = true; controls(); };
+  const status = text => { if (blockedTimer) { globalThis.clearInterval?.(blockedTimer); blockedTimer=null; } ensurePanel(); statusNode.textContent = text; actionLink.hidden = true; controls(); };
   const blockedStatus = error => {
     status('Tarama durduruldu; kalan görseller işlenmedi.\n' + error.message);
     const allowed = ['https://openrouter.ai/settings/preferences', 'https://openrouter.ai/settings/privacy'];
     actionLink.hidden = !allowed.includes(error.actionUrl); if (!actionLink.hidden) actionLink.href = error.actionUrl;
+    if (error.retryAt > Date.now()) {
+      const base=statusNode.textContent;
+      const tick=()=>{ const seconds=Math.max(0,Math.ceil((error.retryAt-Date.now())/1000));
+        statusNode.textContent=base+'\n'+(seconds ? `Yeniden deneme için kalan süre: ${seconds} sn.` : 'Bekleme doldu; otomatik istek gönderilmedi.'); controls();
+        if (!seconds && blockedTimer) { globalThis.clearInterval?.(blockedTimer); blockedTimer=null; }
+      }; tick(); blockedTimer=globalThis.setInterval?.(tick,1000);
+    }
   };
   function ensurePanel() {
     if (panel?.isConnected) return;
@@ -79,7 +87,7 @@
     button('Kontrol listesi', () => { status((job?.pages || []).flatMap((p, index) => [
       p.timing ? `Görsel ${index + 1} süre: tarama ${((p.timing.totalMs || 0) / 1000).toFixed(2)} sn · kart ${((p.timing.renderMs || 0) / 1000).toFixed(2)} sn (çeviri süreleri Tanılama özeti içinde grup bazında)` : '',
       p.error ? `Görsel ${index + 1}: ${p.error}` : '',
-      ...(p.issues || []).map(issue => `Görsel ${index + 1} · y=${Math.round(issue.textBox[1])}: ${issue.reason}${issue.translatedText ? '\n' + issue.translatedText : ''}`)
+      ...(p.issues || []).map(issue => `Görsel ${index + 1} · y=${Math.round(issue.textBox[1])}: ${issue.reason==='invalid_translation_result' ? 'Sağlayıcı bu alanı geçerli çeviri biçiminde döndürmedi; Alan Seç ile kontrol edin.' : issue.reason}${issue.translatedText ? '\n' + issue.translatedText : ''}`)
     ]).filter(Boolean).join('\n') || 'Kontrol gerektiren alan yok.'); }, tools);
     button('Tanılama özeti', async () => {
       const groups = job?.metrics?.groups || [], summary = {
@@ -209,7 +217,7 @@
     };
     const dispatch = async () => {
       if (!buffer.length || stopError) return;
-      while (pending.size >= 8) { await Promise.race(pending); alive(token); if (stopError) return; }
+      while (pending.size >= (caps.maxPending || 8)) { await Promise.race(pending); alive(token); if (stopError) return; }
       const group = buffer; buffer = []; bytes = 65536;
       const imageIds = new Set(group.map(r => r.imageId));
       const affectedItems = () => job.pages.filter(p => imageIds.has(p.imageId) && reports.has(p));
@@ -229,7 +237,7 @@
           job.metrics.groups.push({ ...error.timing, failed: true, code: error.code, wallMs: performance.now() - started, regionCount: group.length });
           for (const item of affectedItems()) { item.state = 'error'; item.error = error.message; item.errorCode = error.code; }
           if (error.stopJob) {
-            if (!stopError || stopError.code === 'DISPATCH_STOPPED' && error.code !== 'DISPATCH_STOPPED') { stopError = error; job.blocked = { error: error.message, code: error.code, actionUrl: error.actionUrl }; }
+            if (!stopError || stopError.code === 'DISPATCH_STOPPED' && error.code !== 'DISPATCH_STOPPED') { stopError = error; job.blocked = { error: error.message, code: error.code, actionUrl: error.actionUrl, retryAt:error.retryAt, cooldownScope:error.cooldownScope }; }
             detecting?.abort();
           }
           await save();
@@ -311,7 +319,8 @@
       }
       alive(token); delete job.blocked; job.state = 'running'; await save(); alive(token);
       job.id ||= crypto.randomUUID();
-      await request('ML_JOB_CONTROL', { jobId: job.id, paused: false, retry }); alive(token);
+      const control=await request('ML_JOB_CONTROL', { jobId: job.id, paused: false, retry, config:job.config }); alive(token);
+      if (control?.batching) { job.config.batching=control.batching; await save(); alive(token); }
       if (!await processChapter(token, retry)) return;
       alive(token); job.state = 'finished'; await save(); alive(token);
       const done = job.pages.filter(p => p.state === 'done').length, review = job.pages.filter(p => p.state === 'review').length, errors = job.pages.filter(p => p.state === 'error').length;

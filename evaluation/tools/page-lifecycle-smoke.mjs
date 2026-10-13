@@ -38,6 +38,7 @@ try {
           return { ok: true, value: f.report };
         }
         if (message.type === 'ML_TRANSLATE') {
+          if (f.rateLimit) { f.rateAttempts=(f.rateAttempts||0)+1; return {ok:false,error:'Haiku istek sınırına ulaştı.',code:'PROVIDER_RATE_LIMITED',stopJob:true,retryAt:Date.now()+2500,cooldownScope:'model'}; }
           if (f.refusal) return { ok: false, error: 'Bu model için OpenRouter hesabında 18+ yaş onayı gerekiyor.',
             code: 'AGE_CONFIRMATION_REQUIRED', stopJob: true, actionUrl: 'https://openrouter.ai/settings/preferences' };
           if (!f.translation) { f.billed++; f.translation = new Promise(resolve => { f.translated = resolve; }); }
@@ -97,6 +98,14 @@ try {
   assert.ok(await link.isVisible()); assert.ok(await page.getByRole('status').isVisible());
   await page.getByRole('button', { name: 'Paneli genişlet', exact: true }).click();
   if (!await page.locator('[data-mangalens-ui="page"] details').evaluate(el => el.open)) await page.getByText('Görünüm ve kontrol araçları', { exact: true }).click();
+  await page.evaluate(()=>{fixture.refusal=false;fixture.rateLimit=true;fixture.listeners[0]({type:'START_PAGE_TRANSLATION'},{},()=>{});});
+  await page.waitForFunction(()=>fixture.job.blocked?.code==='PROVIDER_RATE_LIMITED');
+  const retry=page.getByRole('button',{name:'Hatalıları yeniden dene',exact:true});
+  assert.ok(await retry.isDisabled());assert.match(await page.getByRole('status').textContent(),/kalan süre/);
+  await page.waitForFunction(()=>fixture.job.blocked?.retryAt<Date.now());
+  await page.waitForFunction(()=>[...document.querySelector('[data-mangalens-ui="page"]').shadowRoot.querySelectorAll('button')].find(b=>b.textContent==='Hatalıları yeniden dene').disabled===false);
+  assert.equal(await page.evaluate(()=>fixture.rateAttempts),1,'Cooldown expiry must not send a request');
+  result.cooldownCountdown=true;result.retryDisabledUntilDeadline=true;result.noAutomaticRetry=true;
   await page.getByRole('button', { name: 'Kapat', exact: true }).click();
   assert.equal(await page.locator('[data-mangalens-ui="page"]').count(), 0);
   assert.equal(await page.evaluate(() => fixture.job.state), 'paused'); result.closePauses = true;

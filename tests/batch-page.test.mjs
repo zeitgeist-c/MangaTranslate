@@ -5,10 +5,10 @@ import { readFile } from 'node:fs/promises';
 import { webcrypto } from 'node:crypto';
 const sources = await Promise.all(['providers.js','page/queue.js','page-background.js'].map(x=>readFile(new URL('../src/'+x,import.meta.url),'utf8')));
 const flush = async()=>{for(let i=0;i<8;i++) await new Promise(r=>setImmediate(r));};
-function fixture(cache=new Map()) {
-  const stored={}, calls=[];
+function fixture(cache=new Map(),initialStored={}) {
+  const stored={...initialStored}, calls=[];
   const context=vm.createContext({crypto:webcrypto,TextEncoder,TextDecoder,AbortController,setTimeout,clearTimeout,console,
-    chrome:{runtime:{onMessage:{addListener(){}}},storage:{sync:{get:async()=>({})},local:{get:async key=>({[key]:stored[key]}),set:async x=>Object.assign(stored,x)}}},
+    chrome:{runtime:{onMessage:{addListener(){}}},storage:{sync:{get:async()=>({})},local:{get:async key=>Array.isArray(key)?Object.fromEntries(key.map(k=>[k,stored[k]])):({[key]:stored[key]}),set:async x=>Object.assign(stored,x)}}},
     enqueueWithRateLimit:async fn=>fn(),incrementTranslationStats:async()=>{},fetch:async()=>{throw new Error('Real network forbidden');}});
   sources.forEach(s=>vm.runInContext(s,context));
   const actualProviderCall = context.mlProviderCall, actualCapabilities = context.mlCapabilities;
@@ -101,11 +101,11 @@ test('model metadata excludes JSON-incompatible and unavailable endpoints and ig
   f.stored['ml-model-capabilities:deepseek/deepseek-v4.1-flash']={expires:Date.now()+100000,value:{maxRegions:20,maxOutputTokens:16384}};
   f.context.fetch=async()=>({ok:true,json:async()=>({data:{endpoints:[
     {status:0,context_length:1048576,max_completion_tokens:2000,supported_parameters:['max_tokens','reasoning']},
-    {status:-5,context_length:1048576,max_completion_tokens:1000,supported_parameters:['max_tokens','reasoning','response_format']},
-    {status:0,context_length:1048576,max_completion_tokens:32768,supported_parameters:['max_tokens','reasoning','response_format']}
+    {status:-5,context_length:1048576,max_completion_tokens:1000,supported_parameters:['max_tokens','reasoning','response_format','structured_outputs']},
+    {status:0,context_length:1048576,max_completion_tokens:32768,supported_parameters:['max_tokens','reasoning','response_format','structured_outputs']}
   ]}})});
   const caps=await f.actualCapabilities({provider:'openrouter',model:'deepseek/deepseek-v4.1-flash'});
-  assert.equal(caps.maxRegions,20);assert.equal(caps.maxOutputTokens,16384);
+  assert.equal(caps.maxRegions,8);assert.equal(caps.maxOutputTokens,16384);
 });
 
 test('known incompatible model metadata refuses before translation, without paid probing',async()=>{
@@ -121,10 +121,10 @@ test('stream reader preserves split UTF-8 and ignores reasoning while requiring 
   const value=await f.context.mlReadStream(new Response(stream));assert.equal(value.choices[0].message.content,'İŞĞ');
   await assert.rejects(f.context.mlReadStream(new Response('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n')),/eksik/);
 });
-test('provider watchdog is 60 seconds and timeout is never silently retried',async()=>{
+test('Qwen watchdog is 90 seconds and timeout is never silently retried',async()=>{
   const f=fixture();let watchdog,limit,network=0;f.context.setTimeout=(fn,ms)=>{watchdog=fn;limit=ms;return 1;};f.context.clearTimeout=()=>{};f.context.mlKey=async()=> 'synthetic';
   f.context.fetch=async(url,options)=>{network++;return new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))));};
-  const promise=f.actualProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash'},'',[]);await flush();assert.equal(limit,60000);watchdog();await assert.rejects(promise,e=>e.code==='PROVIDER_TIMEOUT'&&e.stopJob);assert.equal(network,1);
+  const promise=f.actualProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash'},'',[]);await flush();assert.equal(limit,90000);watchdog();await assert.rejects(promise,e=>e.code==='PROVIDER_TIMEOUT'&&e.stopJob);assert.equal(network,1);
 });
 test('failed pending reservation prevents a provider call; successful results survive stats failure',async()=>{
   const f=fixture(),actual=f.context.mlOffscreen;f.context.mlOffscreen=async(cmd,p)=>{if(cmd==='writeMany')throw new Error('Disk full');return actual(cmd,p);};
@@ -139,4 +139,69 @@ test('known context overflow is rejected before any provider submission',async()
 test('a new explicit manual selection is not trapped by another chapter account block',async()=>{
   const f=fixture();await assert.rejects(f.context.mlEnqueue({provider:'openrouter'},async()=>{throw Object.assign(new Error('account'),{stopJob:true,code:'PROVIDER_AUTH_REQUIRED'});},'old-chapter'));
   assert.equal(await f.context.mlEnqueue({provider:'openrouter'},async()=> 'new manual action'),'new manual action');
+});
+
+test('late failure from an old owner cannot cancel a new owner or another tab',async()=>{
+  const {context}=fixture(),q=new context.MLQueue();q.limit=1;let fail;
+  const old=q.enqueue('old',()=>new Promise((_,reject)=>fail=reject));const rejected=assert.rejects(old,/old failure/);await flush();
+  q.begin('new');let newCalls=0;const fresh=q.enqueue('new',async()=>++newCalls);
+  fail(Object.assign(new Error('old failure'),{stopJob:true}));await Promise.all([rejected,fresh]);
+  assert.equal(newCalls,1);assert.equal(q.isBlocked('old'),true);assert.equal(q.isBlocked('new'),false);
+});
+
+test('model lanes cap concurrent sends across owners without starving a different model',async()=>{
+  const {context}=fixture(),q=new context.MLQueue();q.limit=8;const releases=[];let active=0,peak=0,other=0;
+  const jobs=Array.from({length:5},(_,i)=>q.enqueue('owner'+i,async()=>{active++;peak=Math.max(peak,active);await new Promise(r=>releases.push(r));active--;},{lane:'slow',maxConcurrency:2}));
+  const fast=q.enqueue('other',async()=>++other,{lane:'fast',maxConcurrency:8});await flush();
+  assert.equal(peak,2);assert.equal(other,1);
+  while(releases.length){releases.splice(0).forEach(r=>r());await flush();}await Promise.all([...jobs,fast]);assert.equal(peak,2);
+});
+
+test('known IDs with one malformed translation retain neighboring successes and never auto-retry',async()=>{
+  const f=fixture();f.context.mlProviderCall=async(config,prompt,images)=>{f.calls.push(images);return JSON.stringify({regions:images.map((r,i)=>({regionId:r.regionId,sourceText:'Hello',translatedText:i?null:'Merhaba',status:'translated'}))});};
+  const rs=[f.region(1),f.region(2)],result=await f.context.mlTranslate(f.message(rs));
+  assert.equal(result.regions[0].translatedText,'Merhaba');assert.equal(result.regions[1].validationError,'invalid_translation_result');
+  assert.equal((await f.context.mlTranslate(f.message(rs))).cached,true);assert.equal(f.calls.length,1);
+});
+
+test('DeepSeek has a bounded 120 second deadline while Muse remains at 60 seconds',async()=>{
+  for(const [model,ms] of [['deepseek/deepseek-v4.1-flash',120000],['meta/muse-spark-1.3',60000]]){
+    const f=fixture();let watchdog,limit,network=0;f.context.setTimeout=(fn,ms)=>{watchdog=fn;limit=ms;return 1;};f.context.clearTimeout=()=>{};f.context.mlKey=async()=> 'synthetic';
+    f.context.fetch=async(url,options)=>{network++;return new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))));};
+    const promise=f.actualProviderCall({provider:'openrouter',model},'',[]);await flush();assert.equal(limit,ms);watchdog();
+    await assert.rejects(promise,e=>e.code==='PROVIDER_TIMEOUT'&&e.message.includes(model));assert.equal(network,1);
+  }
+});
+
+test('provider-origin 429 is model-scoped, survives restart, and blocks only unsent matching work',async()=>{
+  const f=fixture();f.context.mlKey=async()=> 'synthetic';f.context.fetch=async()=>new Response(JSON.stringify({error:{message:'provider quota',metadata:{provider_name:'Anthropic'}}}),{status:429,headers:{'Retry-After':'60','Content-Type':'application/json'}});
+  await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'anthropic/claude-haiku-5.5'},'',[]),e=>e.code==='PROVIDER_RATE_LIMITED'&&e.cooldownScope==='model'&&e.retryAt>Date.now());
+  let sent=0;await assert.rejects(f.context.mlEnqueue({provider:'openrouter',model:'anthropic/claude-haiku-5.5'},async()=>++sent),e=>e.notSent&&e.code==='PROVIDER_COOLDOWN');
+  assert.equal(await f.context.mlEnqueue({provider:'openrouter',model:'meta/muse-spark-1.3'},async()=>++sent),1);
+  const restarted=fixture(undefined,f.stored);
+  await restarted.context.mlEnqueue({provider:'openrouter',model:'meta/muse-spark-1.3'},async()=>{});
+  assert.equal(restarted.context.mlCooldownError('anthropic/claude-haiku-5.5').notSent,true);assert.equal(sent,1);
+});
+
+test('unknown 429 remains account-wide and clearly identifies the source instead of blaming the next model',async()=>{
+  const f=fixture();f.context.mlKey=async()=> 'synthetic';f.context.fetch=async()=>new Response(JSON.stringify({error:{message:'account quota'}}),{status:429,headers:{'Retry-After':'30','Content-Type':'application/json'}});
+  await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'anthropic/claude-haiku-5.5'},'',[]),e=>e.cooldownScope==='account');
+  let sent=0;await assert.rejects(f.context.mlEnqueue({provider:'openrouter',model:'meta/muse-spark-1.3'},async()=>++sent),e=>e.notSent&&e.message.includes('claude-haiku-5.5')&&e.message.includes('henüz gönderilmedi'));
+  assert.equal(sent,0);
+});
+
+test('SSE 429 also honors Retry-After and records a model-scoped cooldown',async()=>{
+  const f=fixture();f.context.mlKey=async()=> 'synthetic';
+  f.context.fetch=async()=>new Response('data: '+JSON.stringify({error:{code:429,message:'provider quota',metadata:{provider_name:'Alibaba'}}})+'\n\n',
+    {headers:{'Retry-After':'45','Content-Type':'text/event-stream'}});
+  await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash',maxOutputTokens:16384},'',[]),e=>e.code==='PROVIDER_RATE_LIMITED'&&e.retryAt>Date.now()+40000);
+  assert.equal(f.context.mlCooldownError('qwen/qwen3.8-flash').cooldownScope,'model');
+  assert.equal(f.context.mlCooldownError('meta/muse-spark-1.3'),null);
+});
+
+test('model-specific crop limits preserve Muse throughput and constrain slower model batches',async()=>{
+  const f=fixture();f.context.fetch=async()=>({ok:true,json:async()=>({data:{endpoints:[{status:0,context_length:1048576,max_completion_tokens:32768}]}})});
+  for(const [model,regions,pending] of [['deepseek/deepseek-v4.1-flash',8,4],['qwen/qwen3.8-flash',12,4],['anthropic/claude-haiku-5.5',12,4],['meta/muse-spark-1.3',20,8]]){
+    const caps=await f.actualCapabilities({provider:'openrouter',model});assert.equal(caps.maxRegions,regions);assert.equal(caps.maxPending,pending);
+  }
 });

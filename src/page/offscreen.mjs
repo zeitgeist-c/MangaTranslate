@@ -109,6 +109,7 @@ async function renderCards(report, translations, minFont, signal) {
     signal.throwIfAborted(); const translation = translations.find(t => t.regionId === region.regionId);
     const fail = reason => issues.push({ regionId: region.regionId, textBox: region.textBox, reason, translatedText: translation?.translatedText || '' });
     if (region.needsReview) { fail(region.reason || 'needs_review'); continue; }
+    if (translation?.validationError) { fail('invalid_translation_result'); continue; }
     if (!translation || translation.status !== 'translated') { fail('unreadable_or_pending'); continue; }
     const fit = cardLayout(measure, translation.translatedText, region.textBox, report.width, report.height, minFont || 12);
     if (!fit || fit.box[2] - fit.box[0] > 1200 || fit.box[3] - fit.box[1] > 1200) { fail('text_overflow'); continue; }

@@ -28,6 +28,7 @@ test('old standard setting moves to the fast path; detailed mode is explicit and
 test('router queue starts concurrently without Google delay and keeps Google pacing intact', async () => {
   let googleCalls = 0;
   const context = vm.createContext({ chrome: { runtime: { onMessage: { addListener() {} } } }, enqueueWithRateLimit: async fn => { googleCalls++; return fn(); } });
+  vm.runInContext(await readFile(new URL('../src/providers.js', import.meta.url), 'utf8'), context);
   vm.runInContext(await readFile(new URL('../src/page/queue.js', import.meta.url), 'utf8'), context);
   vm.runInContext(await readFile(new URL('../src/page-background.js', import.meta.url), 'utf8'), context);
   let active=0, peak=0; const releases=[];

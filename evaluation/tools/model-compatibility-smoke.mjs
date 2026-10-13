@@ -16,12 +16,14 @@ try {
     globalThis.fetch=async(url,options)=>{
       if(String(url)!=='https://openrouter.ai/api/v1/chat/completions')throw new Error('External network forbidden');
       const body=JSON.parse(options.body),requiresOff=body.model.startsWith('qwen/')||body.model.startsWith('deepseek/');
+      const schemaExpected=body.stream&&['qwen/qwen3.8-flash','deepseek/deepseek-v4.1-flash'].includes(body.model);
+      if(body.response_format.type!==(schemaExpected?'json_schema':'json_object'))throw new Error('Incorrect model output contract');
       if(body.provider.require_parameters!==true||body.provider.allow_fallbacks!==false)throw new Error('Routing policy missing');
       if(requiresOff&&body.reasoning?.enabled!==false)return new Response(JSON.stringify({error:{message:'thinking/JSON incompatible'}}),{status:400});
       if(!requiresOff&&body.reasoning!==undefined)throw new Error('Working model reasoning changed');
       const ids=body.messages[0].content.filter(x=>x.type==='text'&&x.text.startsWith('regionId=')).map(x=>x.text.slice(9));
       const content=JSON.stringify({regions:ids.reverse().map(regionId=>({regionId,sourceText:'Hello',translatedText:'Merhaba',status:'translated'}))});
-      __modelCalls.push({model:body.model,stream:body.stream,images:ids.length,reasoningDisabled:requiresOff});
+      __modelCalls.push({model:body.model,stream:body.stream,images:ids.length,reasoningDisabled:requiresOff,responseFormat:body.response_format.type});
       if(!body.stream)return new Response(JSON.stringify({choices:[{message:{content},finish_reason:'stop'}]}),{headers:{'Content-Type':'application/json'}});
       return new Response('data: '+JSON.stringify({choices:[{delta:{content}}]})+'\n\ndata: '+JSON.stringify({choices:[{delta:{},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n',{headers:{'Content-Type':'text/event-stream'}});
     };
@@ -38,7 +40,7 @@ try {
       const images=[{regionId:'a:r1',dataUrl:'data:image/png;base64,AAAA'},{regionId:'b:r2',dataUrl:'data:image/png;base64,AAAA'}];
       const outputs=[];
       for(const streaming of [false,true]){
-        const raw=await mlProviderCall({...config,...(streaming?{maxOutputTokens:16384}:{})},MLProviders.prompt(config,images),images);
+        const raw=await mlProviderCall({...config,...(streaming?{maxOutputTokens:16384,regionsOutput:true}:{})},MLProviders.prompt(config,images),images);
         outputs.push(MLProviders.parse(raw,images.map(r=>r.regionId)).map(r=>r.regionId));
       }
       return outputs;
@@ -47,5 +49,5 @@ try {
   }
   const calls=await worker.evaluate(()=>__modelCalls);assert.equal(calls.length,12);
   const result={version:await worker.evaluate(()=>chrome.runtime.getManifest().version),models,calls,uiSelectionPersists:true,shuffledRepliesPreserveIdentity:true,realProviderCalls:0};
-  await mkdir('reports',{recursive:true});await writeFile('reports/model-compatibility-3.8.1.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  await mkdir('reports',{recursive:true});await writeFile(`reports/model-compatibility-${result.version}.json`,JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }finally{await browser.close();await rm(profile,{recursive:true,force:true});}

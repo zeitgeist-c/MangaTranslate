@@ -1,0 +1,257 @@
+{
+  "version": "3.8.2",
+  "date": "2026-10-14",
+  "automatedTests": 101,
+  "passed": 101,
+  "realProviderCalls": 0,
+  "baselineReproduction": {
+    "newJobCalls": 0,
+    "code": "DISPATCH_STOPPED",
+    "lateOldOwnerFailureCancelsNewOwner": true,
+    "version": "3.8.1"
+  },
+  "limitations": [
+    "Real DeepSeek latency and provider quotas remain external",
+    "Original malformed Qwen fields unavailable; malformed fixture used",
+    "Unknown 429 origin keeps account-wide cooldown",
+    "No automatic paid retry"
+  ],
+  "packagedModelSmoke": {
+    "version": "3.8.2",
+    "models": [
+      "qwen/qwen3.7-flash",
+      "qwen/qwen3.8-flash",
+      "anthropic/claude-haiku-5.5",
+      "deepseek/deepseek-v4.1-flash",
+      "meta/muse-spark-1.3",
+      "meta/muse-spark-1.3-contributor"
+    ],
+    "calls": [
+      {
+        "model": "qwen/qwen3.7-flash",
+        "stream": false,
+        "images": 2,
+        "reasoningDisabled": true,
+        "responseFormat": "json_object"
+      },
+      {
+        "model": "qwen/qwen3.7-flash",
+        "stream": true,
+        "images": 2,
+        "reasoningDisabled": true,
+        "responseFormat": "json_object"
+      },
+      {
+        "model": "qwen/qwen3.8-flash",
+        "stream": false,
+        "images": 2,
+        "reasoningDisabled": true,
+        "responseFormat": "json_object"
+      },
+      {
+        "model": "qwen/qwen3.8-flash",
+        "stream": true,
+        "images": 2,
+        "reasoningDisabled": true,
+        "responseFormat": "json_schema"
+      },
+      {
+        "model": "anthropic/claude-haiku-5.5",
+        "stream": false,
+        "images": 2,
+        "reasoningDisabled": false,
+        "responseFormat": "json_object"
+      },
+      {
+        "model": "anthropic/claude-haiku-5.5",
+        "stream": true,
+        "images": 2,
+        "reasoningDisabled": false,
+        "responseFormat": "json_object"
+      },
+      {
+        "model": "deepseek/deepseek-v4.1-flash",
+        "stream": false,
+        "images": 2,
+        "reasoningDisabled": true,
+        "responseFormat": "json_object"
+      },
+      {
+        "model": "deepseek/deepseek-v4.1-flash",
+        "stream": true,
+        "images": 2,
+        "reasoningDisabled": true,
+        "responseFormat": "json_schema"
+      },
+      {
+        "model": "meta/muse-spark-1.3",
+        "stream": false,
+        "images": 2,
+        "reasoningDisabled": false,
+        "responseFormat": "json_object"
+      },
+      {
+        "model": "meta/muse-spark-1.3",
+        "stream": true,
+        "images": 2,
+        "reasoningDisabled": false,
+        "responseFormat": "json_object"
+      },
+      {
+        "model": "meta/muse-spark-1.3-contributor",
+        "stream": false,
+        "images": 2,
+        "reasoningDisabled": false,
+        "responseFormat": "json_object"
+      },
+      {
+        "model": "meta/muse-spark-1.3-contributor",
+        "stream": true,
+        "images": 2,
+        "reasoningDisabled": false,
+        "responseFormat": "json_object"
+      }
+    ],
+    "uiSelectionPersists": true,
+    "shuffledRepliesPreserveIdentity": true,
+    "realProviderCalls": 0
+  },
+  "settingsSmoke": {
+    "version": "3.8.2",
+    "migration": true,
+    "multiKeyBothProviders": true,
+    "concurrentTabs": true,
+    "noSecretInDOM": true,
+    "metadataChecks": 2,
+    "responsiveWidths": [
+      1000,
+      500,
+      360
+    ],
+    "enlargedText": true,
+    "failedSaveRestoresSelection": true,
+    "dirtyPreferencesPreserved": true,
+    "lastKeyDisablesTranslation": true,
+    "settingsTabReused": true,
+    "workerRestart": true,
+    "keyboardAdd": true,
+    "popupTranslationActions": true,
+    "contributorConsent": true,
+    "modelCatalog": true,
+    "realProviderCalls": 0,
+    "browser": "155.0.8059.40"
+  },
+  "lifecycleSmoke": {
+    "prepares": 3,
+    "syntheticProviderOperations": 1,
+    "localCancellationCount": 1,
+    "state": "finished",
+    "pageState": "done",
+    "ageRefusalStopsQueue": true,
+    "settingsLinkVisible": true,
+    "foldDoesNotPause": true,
+    "displayToolsWork": true,
+    "cooldownCountdown": true,
+    "retryDisabledUntilDeadline": true,
+    "noAutomaticRetry": true,
+    "closePauses": true,
+    "browser": "155.0.8059.40",
+    "realProviderCalls": 0
+  },
+  "packagedMalformedRegionFixture": {
+    "date": "2026-10-13T22:33:50.454Z",
+    "extensionId": "ooonaahecdkmdfbcoeccdkglpbmeocbg",
+    "version": "3.8.2",
+    "browser": "155.0.8059.40",
+    "firstWallMs": 6157.0887999999995,
+    "pages": [
+      {
+        "state": "review",
+        "regions": 14,
+        "translated": 11,
+        "issues": 3,
+        "timing": {
+          "cached": false,
+          "detectMs": 3927.300000011921,
+          "imageMs": 84.59999999403954,
+          "renderMs": 23.599999994039536,
+          "totalMs": 4136.800000011921
+        },
+        "backend": "webgpu"
+      }
+    ],
+    "calls": [
+      {
+        "model": "qwen/qwen3.8-flash",
+        "ids": [
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r13",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r12",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r11",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r10",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r8",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r7",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r6",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r5",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r4",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r3",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r1",
+          "846eec925e1b44244f08f5a0963ab9579dc6ce9c4443d24a9738cbbe9e146118:fast-v6:r0"
+        ],
+        "startedAt": 1791930827002,
+        "maxTokens": 16384
+      }
+    ],
+    "peakConcurrency": 1,
+    "syntheticDelayMs": 0,
+    "metrics": {
+      "groups": [
+        {
+          "cached": false,
+          "cachedRegions": 0,
+          "concurrency": 2,
+          "groupId": "translation-group-v2:416d61b764bf9659059fd463d6c54f3fd5fd37f89b5983bba3062d5cd7a5816c",
+          "providerMs": 4,
+          "queueMs": 0,
+          "regions": 12,
+          "wallMs": 18.600000023841858
+        }
+      ]
+    },
+    "alignment": [
+      {
+        "width": 1280,
+        "delta": 0
+      },
+      {
+        "width": 700,
+        "delta": 0
+      }
+    ],
+    "shapeCheck": {
+      "cornerRGBA": [
+        85,
+        85,
+        85,
+        255
+      ],
+      "paintedPixels": 148500
+    },
+    "turkishGlyphRender": true,
+    "overflowRejected": true,
+    "resumeProviderCalls": 0,
+    "serviceWorkerRestartProviderCalls": 0,
+    "errors": [],
+    "realLocalModels": true,
+    "syntheticTranslation": true,
+    "realProviderCalled": false,
+    "source": "Local reader fixture using user-supplied chapter image; not live-site or human quality acceptance."
+  },
+  "packageVerification": {
+    "version": "3.8.2",
+    "files": 35,
+    "bytes": 47031552,
+    "sha256": "a41e4030005741f283ed90eac965f6e696cde56929170e6bae8a6a0aa9e65c9d",
+    "allEntriesMatchSource": true,
+    "previousArtifactsUnchanged": true
+  }
+}
