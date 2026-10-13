@@ -1,0 +1,31 @@
+{
+  "version": "3.5.2",
+  "date": "2026-10-13",
+  "automatedChecks": 47,
+  "realProviderCalls": 0,
+  "browser": "155.0.8059.40",
+  "ageRefusalStopsQueue": true,
+  "settingsLinkVisible": true,
+  "pages": [
+    {
+      "state": "review",
+      "regions": 19,
+      "translated": 7,
+      "issues": 12
+    }
+  ],
+  "alignment": [
+    {
+      "width": 1280,
+      "delta": 0
+    },
+    {
+      "width": 700,
+      "delta": 0
+    }
+  ],
+  "resumeProviderCalls": 0,
+  "serviceWorkerRestartProviderCalls": 0,
+  "errors": [],
+  "humanQualityAccepted": false
+}

@@ -37,6 +37,8 @@ try {
           return { ok: true, value: f.report };
         }
         if (message.type === 'ML_TRANSLATE') {
+          if (f.refusal) return { ok: false, error: 'Bu model için OpenRouter hesabında 18+ yaş onayı gerekiyor.',
+            code: 'AGE_CONFIRMATION_REQUIRED', stopJob: true, actionUrl: 'https://openrouter.ai/settings/preferences' };
           if (!f.translation) { f.billed++; f.translation = new Promise(resolve => { f.translated = resolve; }); }
           return f.translation;
         }
@@ -64,6 +66,21 @@ try {
     localCancellationCount: fixture.cancels.length, state: fixture.job.state, pageState: fixture.job.pages[0].state }));
   assert.equal(result.syntheticProviderOperations, 1); assert.equal(result.pageState, 'done');
   assert.equal(result.localCancellationCount, 1);
+  await page.evaluate(() => {
+    fixture.refusal = true;
+    const other = document.createElement('img'); other.src = 'https://fixture.invalid/second.png'; other.width = 900; other.height = 1000;
+    Object.defineProperties(other, { naturalWidth: { value: 900 }, naturalHeight: { value: 1000 } }); document.body.append(other);
+    fixture.listeners[0]({ type: 'START_PAGE_TRANSLATION' }, {}, () => {});
+  });
+  await page.waitForFunction(() => fixture.job.state === 'blocked');
+  assert.equal(await page.evaluate(() => fixture.job.pages[1].state), 'queued');
+  const link = page.getByRole('link', { name: 'OpenRouter ayarlarını aç' });
+  assert.ok(await link.isVisible()); assert.equal(await link.getAttribute('href'), 'https://openrouter.ai/settings/preferences');
+  assert.match(await page.getByRole('status').textContent(), /yaş onayı/);
+  const stopped = await page.evaluate(() => fixture.prepares);
+  await page.getByRole('button', { name: 'Devam et', exact: true }).click(); await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => fixture.prepares), stopped);
+  result.ageRefusalStopsQueue = true; result.settingsLinkVisible = true;
   await mkdir('reports', { recursive: true });
   await page.screenshot({ path: 'reports/page-lifecycle-smoke.png' });
   await writeFile('reports/page-lifecycle-smoke.json', JSON.stringify({ ...result, browser: browser.browser().version(), realProviderCalls: 0, profile }, null, 2));

@@ -1,4 +1,4 @@
-# MangaLens TR 3.5.1 — tam bölüm önizleme
+# MangaLens TR 3.5.2 — tam bölüm önizleme
 
 [English](README.md)
 
@@ -6,7 +6,7 @@ Brave/Chromium Manifest V3 uzantısı. İngilizce manga/manhwa/manhua yazıları
 
 ## Kullanım
 
-1. `MangaLensTR-3.5.1.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle.
+1. `MangaLensTR-3.5.2.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle.
 2. Popup'ta Gemini/OpenRouter seç; API alt sekmesinde ilgili anahtarı ekle. Google anahtarları korunur; OpenRouter ayrı saklanır.
 3. Modeli seç ve Kaydet. Manga çeviri tercihlerinden içerik türü, seri adı, yönerge ve sözlük ekleyebilirsin. Sözlük seri adına göre yerel saklanır.
 4. **Bölümün tamamını çevir** mevcut bölümün görsellerini sırayla işler; sonraki bölüme geçmez. Lazy-load taraması sınırlıdır ve kaydırma konumu geri getirilir.
@@ -17,6 +17,8 @@ Yalnız seçili model kullanılır; başka modele sessiz geçiş olmaz. Hatalıl
 3.5.1: Duraklat bekleyen yerel işlemi iptal eder; Devam et tek tıklamayla sürdürür. Yanıtsız adımlar süre sınırında hata olarak kaydedilir ve diğer görsellere geçilir. Gönderilmiş çeviri isteğinin geç cevabı önbelleğe alınabilir; devam ederken aynı çağrı paylaşılır. Sayfada zaten gösterilen tamamlanmış katmanlar yeniden işlenmez. Güncellemeden sonra uzantıyı ve manga sekmesini yeniden yükleyin.
 
 ## Modeller ve tespit
+
+3.5.2: OpenRouter 18+ yaş onayı istediğinde tarama ilk etkilenen görselde durur ve ayarlar bağlantısı gösterir. Bu onay uzantıdan verilemez. Hesabınızda gerekli onayı kendiniz tamamladıktan sonra **Hatalıları yeniden dene** kullanın. Başka modele geçmek için popup’tan modeli seçip yeni bölüm taraması başlatın. Eksik/geçersiz anahtar ve kredi hataları da kalan kuyruğu durdurur; içerik denetimi nedeniyle verilen diğer 403 hataları yaş onayı sayılmaz. 3.5.1’den kalan bilinen yaş onayı hataları açılışta anlaşılır mesaja dönüştürülür.
 
 Gemini: Gemini3.5 Flash Lite, Gemini3.1 Flash Lite, Gemma4 26B A4B.
 
