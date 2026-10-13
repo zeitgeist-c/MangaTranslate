@@ -17,9 +17,13 @@ globalThis.MLProviders = (() => {
   const catalog = Object.freeze({ gemini: google, openrouter: router });
   // Translation needs visible JSON, not a provider's default reasoning budget.
   // Muse Spark requires reasoning; leave its working policy and Haiku unchanged.
-  function routerPolicy(model) {
+  function routerPolicy(model = '') {
     const disableReasoning = ['qwen/qwen3.7-flash', 'qwen/qwen3.8-flash', 'deepseek/deepseek-v4.1-flash'].includes(model);
-    return { disableReasoning, requiredParameters: ['max_tokens', 'response_format', ...(disableReasoning ? ['reasoning'] : [])] };
+    const structuredRegions = ['qwen/qwen3.8-flash', 'deepseek/deepseek-v4.1-flash'].includes(model);
+    return { disableReasoning, structuredRegions, maxRegions: model.startsWith('deepseek/') ? 8 : model.startsWith('meta/') ? 20 : 12,
+      maxConcurrency: model.startsWith('meta/') ? 8 : disableReasoning || model.startsWith('anthropic/') ? 2 : 4,
+      timeoutMs: model.startsWith('deepseek/') ? 120000 : model.startsWith('qwen/') || model.startsWith('anthropic/') ? 90000 : 60000,
+      requiredParameters: ['max_tokens', 'response_format', ...(disableReasoning ? ['reasoning'] : []), ...(structuredRegions ? ['structured_outputs'] : [])] };
   }
   function settings(raw = {}) {
     const provider = raw.translationProvider === 'openrouter' ? 'openrouter' : 'gemini';
@@ -48,26 +52,40 @@ Each supplied crop belongs only to its regionId. Read that crop and translate it
 Neighboring crops and previous translations are context; never transfer text between IDs or merge IDs.
 Return ONLY JSON {"regions":[{"regionId":"exact supplied ID","sourceText":"read text","translatedText":"Turkish","status":"translated or unreadable"}]}.
 Return each supplied ID exactly once. For unreadable, translatedText must be empty.
+Use exactly the lowercase status values "translated" or "unreadable". All text fields must be strings, never null.
 PREVIOUS CONTEXT: ${JSON.stringify(context.slice(-12))}
 REGION ORDER: ${JSON.stringify(regions.map(r => r.regionId))}`;
   }
-  function parse(raw, expected) {
+  function parse(raw, expected, partial = false) {
     const cleaned = String(raw).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
     const data = JSON.parse(cleaned);
-    if (!Array.isArray(data.regions) || data.regions.length !== expected.length) throw new Error('Çeviri bölge sayısı uyuşmuyor.');
+    if (!data || !Array.isArray(data.regions) || data.regions.length !== expected.length) throw new Error('Çeviri bölge sayısı uyuşmuyor.');
     const allowed = new Set(expected), seen = new Set();
     for (const r of data.regions) {
-      if (!allowed.has(r.regionId) || seen.has(r.regionId)) throw new Error('Çeviri kimlikleri uyuşmuyor.');
+      if (!r || !allowed.has(r.regionId) || seen.has(r.regionId)) throw new Error('Çeviri kimlikleri uyuşmuyor.');
       seen.add(r.regionId);
+      delete r.validationError;
+      if (typeof r.status === 'string') r.status = r.status.trim().toLowerCase();
+      if (r.status === 'unreadable') { r.sourceText ??= ''; r.translatedText ??= ''; if (typeof r.translatedText === 'string' && !r.translatedText.trim()) r.translatedText=''; }
       if (!['translated', 'unreadable'].includes(r.status) || typeof r.translatedText !== 'string' || typeof r.sourceText !== 'string' || r.sourceText.length > 10000 ||
           r.translatedText.length > 10000 || (r.status === 'translated' && (!r.translatedText.trim() || !r.sourceText.trim())) ||
-          (r.status === 'unreadable' && r.translatedText !== '')) throw new Error('Geçersiz çeviri sonucu.');
+          (r.status === 'unreadable' && r.translatedText !== '')) {
+        if (!partial) throw new Error('Geçersiz çeviri sonucu.');
+        // Identity is validated above. Never draw or invent malformed field values.
+        r.sourceText = ''; r.translatedText = ''; r.status = 'unreadable'; r.validationError = 'invalid_translation_result';
+      }
     }
     return expected.map(id => data.regions.find(r => r.regionId === id));
   }
-  function routerBody(model, promptText, images, maxTokens = 8192) {
+  function routerBody(model, promptText, images, maxTokens = 8192, regionsOutput = false) {
     if (!router.some(([id]) => id === model)) throw new Error('Bilinmeyen OpenRouter modeli');
-    return { model, stream: false, max_tokens: maxTokens, provider: { allow_fallbacks: false, require_parameters: true }, response_format: { type: 'json_object' },
+    const schema = { type: 'object', additionalProperties: false, required: ['regions'], properties: { regions: { type: 'array', items: {
+      type: 'object', additionalProperties: false, required: ['regionId', 'sourceText', 'translatedText', 'status'], properties: {
+        regionId: { type: 'string', enum: images.map(image => image.regionId) }, sourceText: { type: 'string' }, translatedText: { type: 'string' }, status: { type: 'string', enum: ['translated', 'unreadable'] }
+      }
+    } } } };
+    return { model, stream: false, max_tokens: maxTokens, provider: { allow_fallbacks: false, require_parameters: true },
+      response_format: regionsOutput && images.length && routerPolicy(model).structuredRegions ? { type: 'json_schema', json_schema: { name: 'manga_regions', strict: true, schema } } : { type: 'json_object' },
       ...(routerPolicy(model).disableReasoning ? { reasoning: { enabled: false } } : {}),
       messages: [{ role: 'user', content: [{ type: 'text', text: promptText }, ...images.flatMap(image => [
         { type: 'text', text: `regionId=${image.regionId || 'manual'}` },

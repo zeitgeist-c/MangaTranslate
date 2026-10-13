@@ -27,6 +27,33 @@ test('router sends chosen model only, vision crops and JSON without silent provi
   assert.equal(request.messages[0].content.at(-1).type, 'image_url');
   assert.ok(request.messages[0].content[0].text.includes('Never invent unreadable text'));
 });
+
+test('one malformed field is review-only in batch mode; valid neighbors stay usable', () => {
+  const raw=JSON.stringify({regions:[{regionId:'a',sourceText:'Hi',translatedText:'Merhaba',status:' TRANSLATED '},
+    {regionId:'b',sourceText:null,translatedText:12,status:'translated'}]});
+  const values=providers.parse(raw,['a','b'],true);
+  assert.equal(values[0].translatedText,'Merhaba');assert.equal(values[0].status,'translated');
+  assert.equal(values[1].status,'unreadable');assert.equal(values[1].translatedText,'');assert.equal(values[1].validationError,'invalid_translation_result');
+  assert.throws(()=>providers.parse(raw,['a','b']),/Geçersiz/);
+});
+
+test('partial batch mode never guesses missing or duplicate identities and null unreadable text is normalized',()=>{
+  assert.throws(()=>providers.parse('{"regions":[{"regionId":"x"}]}',['a'],true),/kimlik/);
+  assert.throws(()=>providers.parse('{"regions":[]}',['a'],true),/sayısı/);
+  const value=providers.parse('{"regions":[{"regionId":"a","sourceText":null,"translatedText":null,"status":"Unreadable"}]}',['a'],true)[0];
+  assert.equal(value.sourceText,'');assert.equal(value.translatedText,'');assert.equal(value.validationError,undefined);
+});
+
+test('schema is restricted to supported batch models; manual crop keeps its separate output contract',()=>{
+  const images=[{regionId:'a',dataUrl:'data:image/png;base64,AAAA'}];
+  for(const model of ['qwen/qwen3.8-flash','deepseek/deepseek-v4.1-flash']){
+    const batch=providers.routerBody(model,'JSON',images,16384,true);
+    assert.equal(batch.response_format.type,'json_schema');assert.equal(batch.response_format.json_schema.strict,true);
+    assert.deepEqual(Array.from(batch.response_format.json_schema.schema.properties.regions.items.properties.regionId.enum),['a']);
+    assert.equal(providers.routerBody(model,'JSON',images).response_format.type,'json_object');
+  }
+  assert.equal(providers.routerBody('qwen/qwen3.7-flash','JSON',images,8192,true).response_format.type,'json_object');
+});
 test('independent uncovered lines remain reviewable; no guessed bubble assignment', () => {
   const result = fuseGroups({ regions: [], bubbles: [] }, { regions: [{ regionId: 'x', textBox: [1, 1, 10, 10] }] });
   assert.equal(result.length, 1); assert.equal(result[0].needsReview, true);

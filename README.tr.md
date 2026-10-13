@@ -1,4 +1,6 @@
-# MangaLens TR 3.8.1 — model uyumluluğu
+# MangaLens TR 3.8.2 — kuyruk ve yanıt dayanıklılığı
+
+3.8.2: Qwen/DeepSeek/Haiku için model başına 2 eşzamanlı istek; DeepSeek 8, Qwen/Haiku 12 kırpma. DeepSeek 120 sn, Qwen/Haiku 90 sn, Muse 60 sn watchdog kullanır. Eski iş hatası yeni işi durdurmaz. 429 kaynak modeli/geri sayımıyla gösterilir, worker restart'ta korunur. Kimliği belli tek bozuk yanıt alanı kontrol listesine ayrılır; diğer kartlar çizilir. Otomatik ücretli tekrar yok. [Ayrıntılar ve sınırlar](docs/KUYRUK-VE-YANIT-3.8.2.md).
 
 3.8.1: Qwen 3.7/3.8 Flash ve DeepSeek V4.1 Flash çevirisinde varsayılan düşünme kapatıldı; OpenRouter yönlendirmesinde gerekli JSON/istek parametrelerinin desteklenmesi zorunlu. Altı model korundu. Haiku ve Muse Spark düşünme ayarları aynı; otomatik ücretli tekrar yok. [Model incelemesi ve doğrulama sınırları](docs/MODEL-UYUMLULUGU-3.8.1.md).
 
@@ -10,7 +12,7 @@ Brave/Chromium Manifest V3 uzantısı. İngilizce manga/manhwa/manhua yazıları
 
 ## Kullanım
 
-1. `MangaLensTR-3.8.1.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle. Açık eski ayarlar pencerelerini de yenile. 3.7.0 ve daha eski işlere Devam et yerine popup’tan yeni bölüm taraması başlat; bölge gruplama sürümü değişti.
+1. `MangaLensTR-3.8.2.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle. Açık eski ayarlar pencerelerini de yenile. 3.7.0 ve daha eski işlere Devam et yerine popup’tan yeni bölüm taraması başlat; bölge gruplama sürümü değişti.
 
    Güncellemede aynı yüklenmiş klasörü kullan: farklı klasörden ikinci bir uzantı eklemek ayrı uzantı kimliği oluşturabilir ve kayıtlı anahtarlarını yeni kimlikte göstermeyebilir. Mevcut uzantıyı kaldırmadan klasörünü güncelle ve **Yeniden yükle** kullan.
 2. Popup'taki dişliyle **Ayarlar → API Anahtarları** aç. Gemini/OpenRouter için etiketli birden fazla anahtar ekleyebilirsin; **Aktif yap** ile seç. Eski Google listesi korunur, eski tek OpenRouter anahtarı otomatik aktarılır. Ana popup yalnız aktif anahtar etiketini gösterir.

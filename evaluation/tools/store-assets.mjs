@@ -25,6 +25,7 @@ try {
  await promo.setContent('<html lang="tr"><meta charset="utf-8"><style>*{box-sizing:border-box}body{margin:0;padding:36px;background:#111722;color:#eef4ff;font-family:Arial}small{color:#8fa6c9}h1{margin:18px 0;font-size:36px}p{line-height:1.5;font-size:18px}.mark{color:#79a8ff;font-weight:700;letter-spacing:3px}</style><div class="mark">ML · TÜRKÇE ÇEVİRİ</div><h1>MangaLens TR</h1><p>Manga · Manhwa · Manhua<br>Seç, çevir, okumaya devam et.</p><small>Kendi Gemini / OpenRouter API anahtarınla</small></html>');
  await promo.screenshot({path:join(output,'small-promo.png')});
  await copyFile(join(root,'assets','icon128.png'),join(output,'icon128.png'));
- await writeFile(join(output,'README.md'),'# Mağaza görselleri\n\nsettings.png ve preferences.png: 1280×800, gerçek 3.8.1 arayüzü, temsili anahtar kaydı. Gerçek anahtar, manga içeriği veya canlı API kullanılmadı. small-promo.png: 440×280. icon128.png: mevcut uygulama ikonu. Çeviri kartı ekran görüntüsü henüz bu sete dahil değil.\n');
+ const version=await worker.evaluate(()=>chrome.runtime.getManifest().version);
+ await writeFile(join(output,'README.md'),`# Mağaza görselleri\n\nsettings.png ve preferences.png: 1280×800, gerçek ${version} arayüzü, temsili anahtar kaydı. Gerçek anahtar, manga içeriği veya canlı API kullanılmadı. small-promo.png: 440×280. icon128.png: mevcut uygulama ikonu. Çeviri kartı ekran görüntüsü henüz bu sete dahil değil.\n`);
  console.log(JSON.stringify({screenshots:2,size:[1280,800],promo:[440,280],realProviderCalls:0}));
 } finally {await browser.close();await rm(profile,{recursive:true,force:true});}

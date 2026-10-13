@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-const root = resolve('..'), profile = process.env.ML_TEST_PROFILE || await mkdtemp(join(tmpdir(), 'mangalens-extension-'));
+const root = resolve(process.env.ML_EXTENSION_ROOT || '..'), profile = process.env.ML_TEST_PROFILE || await mkdtemp(join(tmpdir(), 'mangalens-extension-'));
 const image = await readFile(resolve('.local/chapter-174/002.webp'));
 const fixtureManifest = JSON.parse(await readFile('.local/chapter-174/manifest.json', 'utf8'));
 const fixtureFiles = process.env.FULL_CHAPTER === '1' ? fixtureManifest.pages.map(p => p.file) : process.env.DUPLICATE_IMAGES === '1' ? ['002.webp', '002.webp'] : ['002.webp'];
@@ -38,10 +38,11 @@ try {
   }
   worker.on('console', message => { logs.push(message.text()); console.log('[worker] ' + message.text().slice(0, 250)); });
   const extensionId = new URL(worker.url()).host;
-  await worker.evaluate(async ({detector, delay}) => {
+  await worker.evaluate(async ({detector, delay, invalidRegion}) => {
     await chrome.storage.sync.set({ translationProvider: 'openrouter', openrouterModel: 'qwen/qwen3.8-flash', enabled: true, localDetector: detector });
     await chrome.storage.local.set({ openrouterApiKey: 'synthetic-key-no-real-provider-access' });
     globalThis.__providerCalls = []; globalThis.__activeProviderCalls = 0; globalThis.__peakProviderCalls = 0; globalThis.__syntheticDelay = delay;
+    globalThis.__invalidRegion=invalidRegion;
     const actualFetch = globalThis.fetch;
     globalThis.fetch = async (url, options) => {
       if (String(url).includes('/endpoints')) return new Response(JSON.stringify({data:{endpoints:[{context_length:1048576,max_completion_tokens:32768}]}}),{headers:{'Content-Type':'application/json'}});
@@ -52,11 +53,12 @@ try {
         await new Promise(resolve=>setTimeout(resolve,globalThis.__syntheticDelay));
         globalThis.__activeProviderCalls--;
         const regions = ids.reverse().map(regionId => ({ regionId, sourceText: 'Synthetic source', translatedText: 'BU BİR DENEME.', status: 'translated' }));
+        if (globalThis.__invalidRegion && regions.length) regions[0].translatedText=null;
         return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ regions }) } }] }), { headers: { 'Content-Type': 'application/json' } });
       }
       return actualFetch(url, options);
     };
-  }, {detector:process.env.ML_DETECTOR || 'fast',delay:Number(process.env.PROVIDER_DELAY_MS || 0)});
+  }, {detector:process.env.ML_DETECTOR || 'fast',delay:Number(process.env.PROVIDER_DELAY_MS || 0),invalidRegion:process.env.INVALID_REGION==='1'});
   const page = await browser.newPage(); page.on('pageerror', error => logs.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}/chapter`);
   await page.waitForFunction(() => [...document.images].some(img => img.naturalHeight === 16000));
@@ -86,6 +88,7 @@ try {
   console.log('[render-summary] ' + JSON.stringify(job.pages.map(p => ({ state: p.state, translated: p.translated, issues: p.issues?.length, error: p.error }))));
   assert.ok(['done', 'review'].includes(job.pages[0].state), job.pages[0].error);
   assert.ok(job.pages.some(p => p.translated > 0), 'At least one safe region must be rendered');
+  if (process.env.INVALID_REGION==='1') assert.ok(job.pages.some(p=>p.issues?.some(i=>i.reason==='invalid_translation_result')),'Malformed region must remain explicitly reviewable');
   const calls = await worker.evaluate(() => globalThis.__providerCalls);
   if (process.env.DUPLICATE_IMAGES === '1') { assert.equal(job.pages.length, 2); assert.equal(calls.length, 1); assert.equal(job.pages[0].translated, job.pages[1].translated); assert.ok(job.pages[1].translated > 0); }
   if (!process.env.ML_TEST_PROFILE) assert.ok(calls.length > 0, 'Must exercise synthetic provider adapter');

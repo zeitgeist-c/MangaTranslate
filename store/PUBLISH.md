@@ -3,7 +3,7 @@
 Durum: yerel hazırlık; hesapta yükleme/inceleme/yayın yapılmadı. Mevcut Hera AI kaydı değiştirilmeyecek.
 
 1. Hera AI'nin bulunduğu yayıncı hesabıyla https://chrome.google.com/webstore/devconsole adresini açın.
-2. **Add new item → Choose file → MangaLensTR-3.8.1.zip → Upload**. Kaynak yedeğini veya şifreli profil yedeğini yüklemeyin. MangaLens TR kaydı zaten açıldıysa **Package → Upload new package** üzerinden o kaydı güncelleyin; Hera AI kaydını seçmeyin.
+2. **Add new item → Choose file → MangaLensTR-3.8.2.zip → Upload**. Kaynak yedeğini veya şifreli profil yedeğini yüklemeyin. MangaLens TR kaydı zaten açıldıysa **Package → Upload new package** üzerinden o kaydı güncelleyin; Hera AI kaydını seçmeyin.
 3. **Store listing**: LISTING-TR.md açıklaması, Türkçe dil, ikon ve ekran görüntüleri.
 4. **Privacy**: tek amaç ve izin açıklamaları aşağıdadır. Herkese açık gizlilik politikası URL'si gerekir; Unlisted bunu kaldırmaz.
 5. **Distribution → Visibility → Unlisted**. Bağlantıyı bilen herkes erişebilir. Yalnız arkadaş hesaplarına erişim istenirse Private seçeneği ayrıca değerlendirilmeli.
