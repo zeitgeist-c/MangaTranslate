@@ -103,7 +103,8 @@ try {
   await popup.waitForFunction(() => document.querySelector('#key-summary').textContent.includes('Son anahtar'));
   await popup.setViewportSize({ width: 360, height: 650 });
   assert.ok(await popup.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-  await popup.locator('body').screenshot({ path: 'reports/popup-3.6.0.png' });
+  const version = await worker.evaluate(() => chrome.runtime.getManifest().version);
+  await popup.locator('body').screenshot({ path: `reports/popup-${version}.png` });
   // Settings action focuses an existing page rather than creating a duplicate.
   const count = browser.pages().length; await popup.locator('#settings').click(); await popup.waitForTimeout(100);
   assert.equal(browser.pages().length, count);
@@ -139,7 +140,7 @@ try {
   const session = await browser.newCDPSession(other); await session.send('ServiceWorker.enable'); await session.send('ServiceWorker.stopAllWorkers');
   const afterRestart = await other.evaluate(() => MLUI.keys('openrouter')); assert.equal(afterRestart.length, 1); assert.equal(afterRestart[0].label, 'Son anahtar');
   assert.equal(checks.length, 2); assert.ok(checks.every(r => r.method === 'GET')); assert.deepEqual(errors, []);
-  const result = { version: '3.6.0', migration: true, multiKeyBothProviders: true, concurrentTabs: true, noSecretInDOM: true,
+  const result = { version, migration: true, multiKeyBothProviders: true, concurrentTabs: true, noSecretInDOM: true,
     metadataChecks: checks.length, responsiveWidths: [1000, 500, 360], enlargedText: true, failedSaveRestoresSelection: true,
     dirtyPreferencesPreserved: true, lastKeyDisablesTranslation: true, settingsTabReused: true, workerRestart: true, keyboardAdd: true,
     popupTranslationActions: true, contributorConsent: true, modelCatalog: true, realProviderCalls: 0, browser: browser.browser().version() };

@@ -1,5 +1,50 @@
 import { area, intersection, clipBox } from './lib/geometry.mjs';
 
+// Fast path: group source-pixel text lines, without expensive balloon reconstruction.
+export function groupTextLines(report) {
+  const unionBox = items => [Math.min(...items.map(r => r.box[0])), Math.min(...items.map(r => r.box[1])), Math.max(...items.map(r => r.box[2])), Math.max(...items.map(r => r.box[3]))];
+  const raw = report.regions.map(r => ({ box: r.textBox, score: r.score, clipped: r.reason === 'tile_boundary' }));
+  const pieces = raw.filter((r, i) => !raw.some((other, j) => j !== i && intersection(r.box, other.box) / area(r.box) > .9 &&
+    (area(other.box) > area(r.box) * 1.05 || area(other.box) >= area(r.box) && j < i)));
+  const join = (items, compatible) => {
+    const parents = items.map((_, i) => i), find = i => parents[i] === i ? i : (parents[i] = find(parents[i]));
+    for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) if (compatible(items[i].box, items[j].box)) parents[find(j)] = find(i);
+    const groups = new Map(); items.forEach((r, i) => { const key = find(i); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(r); });
+    return [...groups.values()].map(group => ({ box: unionBox(group), score: Math.min(...group.map(r => r.score)), clipped: group.some(r => r.clipped), lineCount: group.reduce((n, r) => n + (r.lineCount || 1), 0) }));
+  };
+  const lines = join(pieces, (a, b) => {
+    const ah = a[3] - a[1], bh = b[3] - b[1], overlap = Math.min(a[3], b[3]) - Math.max(a[1], b[1]);
+    const gap = Math.max(a[0], b[0]) - Math.min(a[2], b[2]);
+    return overlap >= Math.min(ah, bh) * .55 && Math.abs((a[1] + a[3] - b[1] - b[3]) / 2) <= Math.max(ah, bh) * .4 && gap <= Math.max(ah, bh) * 1.5;
+  });
+  const groups = join(lines, (a, b) => {
+    const ah = a[3] - a[1], bh = b[3] - b[1], gap = Math.max(a[1], b[1]) - Math.min(a[3], b[3]);
+    const overlap = Math.min(a[2], b[2]) - Math.max(a[0], b[0]);
+    return gap >= -Math.min(ah, bh) * .2 && gap <= Math.max(ah, bh) * 1.2 && Math.max(ah, bh) <= Math.min(ah, bh) * 1.8 &&
+      overlap >= Math.min(a[2] - a[0], b[2] - b[0]) * .35;
+  });
+  return groups.sort((a, b) => a.box[1] - b.box[1] || a.box[0] - b.box[0]).map((r, i) => {
+    const small = r.box[2] - r.box[0] < 24 || r.box[3] - r.box[1] < 12;
+    return { regionId: `${report.imageId}:fast-v5:r${i}`, textBox: r.box, score: r.score, kind: 'text_free', bubbleId: null, bubbleBox: null,
+      needsReview: small || r.clipped, reason: small ? 'small_text_candidate' : r.clipped ? 'tile_boundary' : null, lineCount: r.lineCount };
+  });
+}
+
+export function cardLayout(ctx, text, textBox, width, height, minFont = 12) {
+  const b = textBox, centerX = (b[0] + b[2]) / 2, centerY = (b[1] + b[3]) / 2;
+  const maxWidth = Math.min(width, Math.max(80, b[2] - b[0] + 16));
+  for (let size = Math.min(26, Math.max(minFont, (b[3] - b[1]) / 2.3)); size >= minFont; size--) {
+    ctx.font = `600 ${size}px Arial, sans-serif`;
+    const lines = wrapText(text, value => ctx.measureText(value).width, maxWidth - 16);
+    if (!lines?.length) continue;
+    const h = Math.max(b[3] - b[1] + 8, lines.length * size * 1.2 + 16);
+    if (h > height || h > Math.max(80, 2 * (b[3] - b[1]))) continue;
+    const left = Math.max(0, Math.min(width - maxWidth, centerX - maxWidth / 2)), top = Math.max(0, Math.min(height - h, centerY - h / 2));
+    return { box: [Math.floor(left), Math.floor(top), Math.ceil(left + maxWidth), Math.ceil(top + h)], size, lines, step: size * 1.2 };
+  }
+  return null;
+}
+
 export function fuseGroups(primary, independent) {
   const regions = primary.regions.map(r => ({ ...r }));
   const unassigned = [];

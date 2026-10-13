@@ -1,7 +1,7 @@
 import * as ort from './vendor/ort.all.bundle.min.mjs';
 import { detectImage } from './lib/rtdetr.mjs';
 import { detectPPOCR } from './lib/ppocr.mjs';
-import { fuseGroups, interior, fitText, regionCrop } from './layout.mjs';
+import { fuseGroups, groupTextLines, cardLayout, interior, fitText, regionCrop } from './layout.mjs';
 import { read, write, hash } from './store.mjs';
 ort.env.wasm.wasmPaths = chrome.runtime.getURL('src/page/vendor/');
 ort.env.wasm.numThreads = 1; ort.env.wasm.proxy = false;
@@ -10,13 +10,18 @@ const models = [
   { id: 'ppocrv5-mobile-det', file: 'ppocrv5_det.onnx', sha256: '1eb7b4f7ab657ebd1c66d5f79bca7497f29768a2e3c15e52daecbba1a8e4a039' },
   { id: 'rtdetr-v4-small', file: 'detector-v4-s_int8.onnx', sha256: '5fe9e4f576e49d4e7e8b0e029d6d3cdc252abd4694113e1cae120e62c931ea79' }
 ];
-const sessions = new Map(), active = new Map();
+const sessions = new Map(), backends = new Map(), active = new Map();
 let serial = Promise.resolve();
 async function modelSession(model) {
   if (!sessions.has(model.id)) {
     const bytes = await (await fetch(chrome.runtime.getURL(`src/page/models/${model.file}`))).arrayBuffer();
     if (await hash(bytes) !== model.sha256) throw new Error('Yerel model hash doğrulaması başarısız.');
-    sessions.set(model.id, await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' }));
+    let session;
+    if (model.id === 'ppocrv5-mobile-det' && globalThis.navigator?.gpu) {
+      try { session = await ort.InferenceSession.create(bytes, { executionProviders: ['webgpu'], graphOptimizationLevel: 'all' }); backends.set(model.id, 'webgpu'); } catch { /* Unsupported GPUs use the same model on CPU. */ }
+    }
+    if (!session) { session = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' }); backends.set(model.id, 'wasm'); }
+    sessions.set(model.id, session);
   }
   return sessions.get(model.id);
 }
@@ -38,34 +43,55 @@ async function imageFromSource(source, signal) {
   return { image, imageId };
 }
 async function dataUrl(canvas) {
-  const blob = await canvas.convertToBlob({ type: 'image/png' });
-  return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(reader.error); reader.readAsDataURL(blob); });
+  // convertToBlob's idle encoder is throttled in an invisible offscreen document
+  // (~1 second per crop on Brave). The bounded synchronous encoder avoids that
+  // scheduler entirely, while retaining PNG pixels and the same wire format.
+  const output = document.createElement('canvas'); output.width = canvas.width; output.height = canvas.height;
+  try { output.getContext('2d').drawImage(canvas, 0, 0); return output.toDataURL('image/png'); }
+  finally { output.width = 1; output.height = 1; }
 }
 async function crop(image, box) {
   const canvas = new OffscreenCanvas(Math.ceil(box[2] - box[0]), Math.ceil(box[3] - box[1]));
   canvas.getContext('2d').drawImage(image, ...box.slice(0, 2), box[2] - box[0], box[3] - box[1], 0, 0, canvas.width, canvas.height);
   return canvas;
 }
-async function prepare(source, signal, progress, detector = 'standard') {
+async function prepare(source, signal, progress, detector = 'fast') {
+  const started = performance.now(), timing = {};
   const { image, imageId } = await imageFromSource(source, signal);
+  timing.imageMs = performance.now() - started;
   try {
-    const model = detector === 'small' ? models[2] : models[0], version = detector === 'small' ? 'd4-small' : 'd4-standard';
-    const key = `detection-v4:${model.sha256}:${imageId}`;
+    const fast = !['small', 'detailed'].includes(detector), model = fast ? models[1] : detector === 'small' ? models[2] : models[0];
+    const version = fast ? 'fast-v5' : detector === 'small' ? 'd5-small' : 'd5-detailed';
+    const key = `detection-v5:${version}:${model.sha256}:${imageId}`;
     let report = await read(key);
+    timing.cached = !!report;
     if (!report) {
-      const first = await detectImage({ image, imageId, ort, model, session: await modelSession(model), signal,
-        onProgress: value => progress(`Balon tespiti ${value.done}/${value.total}`) });
-      const second = await detectPPOCR({ image, imageId, ort, model: models[1], session: await modelSession(models[1]), signal,
-        onProgress: value => progress(`Bağımsız yazı araması ${value.done}/${value.total}`) });
-      const combined = fuseGroups(first, second);
-      report = { imageId, width: image.width, height: image.height, bubbles: first.bubbles,
-        regions: combined.map((r, i) => ({ ...r, regionId: `${imageId}:${version}:r${i}` })), detectorVersion: version, modelSHA256: model.sha256, backend: 'wasm' };
+      const detectStarted = performance.now(); let first;
+      if (!fast) first = await detectImage({ image, imageId, ort, model, session: await modelSession(model), signal,
+        onProgress: value => progress(`Ayrıntılı balon tespiti ${value.done}/${value.total}`) });
+      const runText = async () => detectPPOCR({ image, imageId, ort, model: models[1], session: await modelSession(models[1]), signal,
+        onProgress: value => progress(`Hızlı yazı taraması ${value.done}/${value.total}`) });
+      let second;
+      try { second = await runText(); }
+      catch (error) {
+        signal.throwIfAborted(); if (backends.get(models[1].id) !== 'webgpu') throw error;
+        await sessions.get(models[1].id)?.release(); sessions.delete(models[1].id);
+        const bytes = await (await fetch(chrome.runtime.getURL(`src/page/models/${models[1].file}`))).arrayBuffer();
+        if (await hash(bytes) !== models[1].sha256) throw new Error('Yerel model hash doğrulaması başarısız.');
+        sessions.set(models[1].id, await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' })); backends.set(models[1].id, 'wasm');
+        progress('GPU kullanılamadı; yazı taraması CPU ile sürüyor.'); second = await runText();
+      }
+      const combined = fast ? groupTextLines(second) : fuseGroups(first, second);
+      timing.detectMs = performance.now() - detectStarted;
+      report = { imageId, width: image.width, height: image.height, bubbles: first?.bubbles || [],
+        regions: combined.map((r, i) => ({ ...r, regionId: `${imageId}:${version}:r${i}` })), detectorVersion: version, modelSHA256: model.sha256, backend: backends.get(models[1].id), timing };
       await write(key, report);
     }
     signal.throwIfAborted();
     const regions = [];
     for (const region of report.regions) {
       signal.throwIfAborted();
+      if (region.needsReview) { regions.push({ ...region }); continue; }
       const bounds = regionCrop(region, image.width, image.height);
       // A giant merged detection is flagged, never downscaled into unreadable text.
       if (bounds[2] - bounds[0] > 1200 || bounds[3] - bounds[1] > 1200) { regions.push({ ...region, needsReview: true, reason: 'oversized_region' }); continue; }
@@ -73,10 +99,31 @@ async function prepare(source, signal, progress, detector = 'standard') {
       regions.push({ ...region, crop: await dataUrl(canvas) });
       canvas.width = 1; canvas.height = 1;
     }
-    return { ...report, regions };
+    return { ...report, regions, timing: { ...timing, totalMs: performance.now() - started } };
   } finally { image.close(); }
 }
-async function render(source, report, translations, minFont, signal) {
+async function renderCards(report, translations, minFont, signal) {
+  if (!Number.isSafeInteger(report.width) || !Number.isSafeInteger(report.height) || report.width < 1 || report.height < 1 || report.width * report.height > 100_000_000) throw new Error('Geçersiz görsel boyutu.');
+  const started = performance.now(), measure = new OffscreenCanvas(1, 1).getContext('2d'), patches = [], issues = [];
+  for (const region of report.regions) {
+    signal.throwIfAborted(); const translation = translations.find(t => t.regionId === region.regionId);
+    const fail = reason => issues.push({ regionId: region.regionId, textBox: region.textBox, reason, translatedText: translation?.translatedText || '' });
+    if (region.needsReview) { fail(region.reason || 'needs_review'); continue; }
+    if (!translation || translation.status !== 'translated') { fail('unreadable_or_pending'); continue; }
+    const fit = cardLayout(measure, translation.translatedText, region.textBox, report.width, report.height, minFont || 12);
+    if (!fit || fit.box[2] - fit.box[0] > 1200 || fit.box[3] - fit.box[1] > 1200) { fail('text_overflow'); continue; }
+    if (patches.some(p => Math.min(p.box[2], fit.box[2]) > Math.max(p.box[0], fit.box[0]) && Math.min(p.box[3], fit.box[3]) > Math.max(p.box[1], fit.box[1]))) { fail('card_overlap'); continue; }
+    const b = fit.box, canvas = new OffscreenCanvas(b[2] - b[0], b[3] - b[1]), ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#171d29'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.strokeStyle = '#7386aa'; ctx.strokeRect(.5, .5, canvas.width - 1, canvas.height - 1);
+    ctx.font = `600 ${fit.size}px Arial, sans-serif`; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const top = (canvas.height - fit.lines.length * fit.step) / 2;
+    fit.lines.forEach((line, i) => ctx.fillText(line, canvas.width / 2, top + (i + .5) * fit.step));
+    patches.push({ regionId: region.regionId, box: b, dataUrl: await dataUrl(canvas), fontSize: fit.size, style: 'card' }); canvas.width = 1; canvas.height = 1;
+  }
+  return { imageId: report.imageId, width: report.width, height: report.height, patches, issues, timing: { renderMs: performance.now() - started } };
+}
+async function render(source, report, translations, minFont, signal, style) {
+  if (style === 'card') return renderCards(report, translations, minFont, signal);
   const { image, imageId } = await imageFromSource(source, signal);
   try {
     if (imageId !== report.imageId || image.width !== report.width || image.height !== report.height) throw new Error('Kaynak görsel değişti; eski çeviri uygulanmadı.');
@@ -125,7 +172,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   const execute = async () => {
     controller.signal.throwIfAborted();
     if (message.command === 'prepare') return prepare(message.source, controller.signal, progress, message.detector);
-    if (message.command === 'render') return render(message.source, message.report, message.translations, message.minFont, controller.signal);
+    if (message.command === 'render') return render(message.source, message.report, message.translations, message.minFont, controller.signal, message.style);
     if (message.command === 'read') return read(message.key);
     if (message.command === 'write') return write(message.key, message.value);
     throw new Error('Bilinmeyen görüntü komutu');

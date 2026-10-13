@@ -19,7 +19,7 @@ try {
     Object.defineProperties(image, { naturalWidth: { value: 900 }, naturalHeight: { value: 1000 } });
     const attach = Element.prototype.attachShadow;
     Element.prototype.attachShadow = function (options) { return attach.call(this, { ...options, mode: 'open' }); };
-    const config = { processingVersion: 'page-v4', provider: 'openrouter', model: 'synthetic', localDetector: 'standard' };
+    const config = { processingVersion: 'page-v5', provider: 'openrouter', model: 'synthetic', localDetector: 'fast' };
     globalThis.fixture = { prepares: 0, billed: 0, cancels: [], listeners: [],
       job: { config, pages: [{ source: image.src, state: 'queued' }], context: [] } };
     const f = fixture;

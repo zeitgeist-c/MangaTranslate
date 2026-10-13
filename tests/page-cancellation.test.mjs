@@ -41,3 +41,19 @@ test('offscreen cache remains accessible while inference is blocked; queued canc
   release(); assert.equal((await first).ok, false); assert.equal((await queued).ok, false);
   assert.deepEqual(executed, ['a']);
 });
+
+test('a failed GPU text run releases its session and falls back once to the identical verified CPU model', async () => {
+  const sha = '1eb7b4f7ab657ebd1c66d5f79bca7497f29768a2e3c15e52daecbba1a8e4a039';
+  const backends = []; let runs = 0, released = 0;
+  const context = vm.createContext({ AbortController, performance, navigator: { gpu: {} },
+    ort: { env: { wasm: {} }, InferenceSession: { create: async (bytes, options) => { backends.push(options.executionProviders[0]); return { release: async () => released++ }; } } },
+    read: async () => null, write: async () => {}, hash: async () => sha, groupTextLines: () => [],
+    detectPPOCR: async () => { runs++; if (runs === 1) throw new Error('GPU lost'); return { regions: [] }; },
+    fetch: async () => ({ arrayBuffer: async () => new ArrayBuffer(1) }),
+    chrome: { runtime: { getURL: x => x, onMessage: { addListener() {} } } }
+  });
+  vm.runInContext((await readFile(new URL('../src/page/offscreen.mjs', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/gm, ''), context);
+  context.imageFromSource = async () => ({ image: { width: 900, height: 1000, close() {} }, imageId: 'image' });
+  const result = await context.prepare('https://fixture/image', new AbortController().signal, () => {}, 'fast');
+  assert.equal(result.backend, 'wasm'); assert.deepEqual(backends, ['webgpu', 'wasm']); assert.equal(released, 1); assert.equal(runs, 2);
+});

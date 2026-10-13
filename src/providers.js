@@ -1,7 +1,7 @@
 'use strict';
 // Shared by the popup and service worker. Never exposed to the web page.
 globalThis.MLProviders = (() => {
-  const version = 'manga-tr-v1', processingVersion = 'page-v4';
+  const version = 'manga-tr-v1', processingVersion = 'page-v5';
   const google = [
     ['gemini-3.5-flash-lite', 'Gemini 3.5 Flash Lite'],
     ['gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite'],
@@ -23,7 +23,7 @@ globalThis.MLProviders = (() => {
     if (!catalog[provider].some(([id]) => id === model)) throw new Error('Seçili model desteklenmiyor; ayarlardan yeniden seçin.');
     if (model.endsWith('-contributor') && raw.contributorConsent !== true) throw new Error('Contributor modeli için veri paylaşımı seçeneğini onaylayın.');
     return { provider, model, profileVersion: version, processingVersion, contentType: ['manga', 'manhwa', 'manhua'].includes(raw.contentType) ? raw.contentType : 'auto',
-      localDetector: raw.localDetector === 'small' ? 'small' : 'standard',
+      localDetector: ['small', 'detailed'].includes(raw.localDetector) ? raw.localDetector : 'fast',
       series: String(raw.seriesName || '').slice(0, 200), instructions: String(raw.translationInstructions || '').slice(0, 1500),
       glossary: String(raw.translationGlossary || '').slice(0, 6000) };
   }
