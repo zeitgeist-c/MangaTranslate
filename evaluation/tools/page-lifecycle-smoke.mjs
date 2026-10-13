@@ -19,7 +19,7 @@ try {
     Object.defineProperties(image, { naturalWidth: { value: 900 }, naturalHeight: { value: 1000 } });
     const attach = Element.prototype.attachShadow;
     Element.prototype.attachShadow = function (options) { return attach.call(this, { ...options, mode: 'open' }); };
-    const config = { processingVersion: 'page-v5', provider: 'openrouter', model: 'synthetic', localDetector: 'fast' };
+    const config = { processingVersion: 'page-v6', provider: 'openrouter', model: 'synthetic', localDetector: 'fast', batching: { maxRegions: 1 } };
     globalThis.fixture = { prepares: 0, billed: 0, cancels: [], listeners: [],
       job: { config, pages: [{ source: image.src, state: 'queued' }], context: [] } };
     const f = fixture;
@@ -32,6 +32,7 @@ try {
         if (message.type === 'ML_JOB_GET') return { ok: true, value: structuredClone(f.job) };
         if (message.type === 'ML_JOB_SAVE') { f.job = structuredClone(message.job); return { ok: true }; }
         if (message.type === 'ML_CANCEL') { f.cancels.push(message.requestId); return { ok: true }; }
+        if (message.type === 'ML_JOB_CONTROL') return { ok: true };
         if (message.type === 'ML_PREPARE') {
           f.prepares++; if (f.prepares === 1) return new Promise(resolve => { f.late = resolve; });
           return { ok: true, value: f.report };

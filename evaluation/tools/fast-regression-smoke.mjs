@@ -9,6 +9,9 @@ const samples = [
   ['purple', resolve('.local/regressions/purple.png'), ['NEDEN… VIKIR?', 'NASIL…?']],
   ['title', resolve('.local/regressions/title.png'), ['BEELZEBUB: SİNEKLERİN OBURLUĞU / KÖPEK DİŞİ', '1. YUVA: ÖLÜMCÜL ZEHİR — SEKİZ BACAKLI MADAM (S)']],
   ['black', resolve('.local/regressions/black.png'), ['YALNIZCA GEÇİCİ FELCE YOL AÇAN ETKİSİZLEŞTİRİLMİŞ BİR ZEHİR…', 'BUNUN İÇİN SENDEN NEFRET EDECEKLERİNİ BİLİYORSUN, DEĞİL Mİ?']],
+  ['black-new1', resolve('.local/regressions/black-new1.png'), ['UNUTMADIN, DEĞİL Mİ?', 'ÖLEN YA DA İÇERİDE MAHSUR KALAN ÖĞRENCİLER ANCAK SEN ÇIKARSAN DİRİLİP AYRILABİLİR.']],
+  ['black-new2', resolve('.local/regressions/black-new2.png'), ['YİNE DE, BİR SONRAKİ KATTA ÖLEBİLECEK TEK BİR KIZI KURTARMAK İÇİN…']],
+  ['black-new3', resolve('.local/regressions/black-new3.png'), ['HAYATINI BURADA HARCAMAYA RAZI MISIN?']],
   ['long', resolve('.local/chapter-174/002.webp'), null]
 ];
 const buffers = new Map(await Promise.all(samples.map(async ([name, file]) => [name, await readFile(file)])));
@@ -42,13 +45,19 @@ try {
     const report = await worker.evaluate(source => mlOffscreen('prepare', { source, detector: 'fast' }), source);
     const prepareWallMs = performance.now() - wall;
     const eligible = report.regions.filter(r => !r.needsReview && r.crop);
-    if (labels) assert.equal(eligible.length, 2, name + ' must contain two readable groups');
+    if (labels && eligible.length !== labels.length) console.log('Unexpected groups', name, report.regions.map(r => ({box:r.textBox,ink:r.inkBox,review:r.reason,lineCount:r.lineCount})));
+    if (labels) assert.equal(eligible.length, labels.length, name + ' must contain the expected readable groups');
     const translations = eligible.map((r, index) => ({ regionId: r.regionId, status: 'translated', translatedText: labels?.[index] || 'BU BİR DENEME ÇEVİRİSİDİR.', sourceText: 'Synthetic reading' }));
     const beforeRender = requests.get(name), renderWall = performance.now();
     const rendered = await worker.evaluate(({ source, report, translations }) => mlOffscreen('render', { source, report, translations, style: 'card', minFont: 12 }), { source, report, translations });
     const renderWallMs = performance.now() - renderWall;
+    if (labels && rendered.issues.length) console.log('Unexpected review', name, rendered.issues);
     assert.equal(requests.get(name), beforeRender, 'Card rendering must not download the original again');
-    if (labels) { assert.equal(rendered.patches.length, 2, name + ' must show both Turkish cards'); assert.equal(rendered.issues.length, 0); }
+    if (labels) {
+      assert.equal(rendered.patches.length, labels.length, name + ' must show all Turkish cards');
+      if (name === 'black-new3') { assert.equal(rendered.issues.length, 1); assert.equal(rendered.issues[0].reason, 'small_text_candidate'); assert.ok(rendered.issues[0].textBox[0] > 450, 'The review candidate is separate border art, not the dialogue'); }
+      else assert.equal(rendered.issues.length, 0);
+    }
     for (const patch of rendered.patches) { assert.ok(patch.fontSize >= 12); assert.ok(patch.box[0] >= 0 && patch.box[1] >= 0 && patch.box[2] <= report.width && patch.box[3] <= report.height); }
     if (labels) {
       await page.evaluate(({ source, patches }) => { const host = document.querySelector('#view'); host.replaceChildren(); const image = document.createElement('img'); image.src = source; host.append(image); for (const patch of patches) { const overlay = document.createElement('img'); overlay.src = patch.dataUrl; overlay.style.cssText = `position:absolute;left:${patch.box[0]}px;top:${patch.box[1]}px`; host.append(overlay); } }, { source, patches: rendered.patches });
@@ -59,6 +68,6 @@ try {
       groups: report.regions.length, cards: rendered.patches.length, issues: rendered.issues.map(i => i.reason), geometry: report.regions.map(r => ({ textBox: r.textBox, review: r.needsReview })) });
     console.log(JSON.stringify(results.at(-1)));
   }
-  const output = { version: '3.7.0', browser: browser.browser().version(), realProviderCalls: 0, pngPixelsIdentical, note: 'Real local detection, synthetic Turkish translations; not live model reading accuracy.', results };
+  const output = { version: await worker.evaluate(() => chrome.runtime.getManifest().version), browser: browser.browser().version(), realProviderCalls: 0, pngPixelsIdentical, note: 'Real local detection, synthetic Turkish translations; not live model reading accuracy.', results };
   await writeFile('reports/fast-regression-smoke.json', JSON.stringify(output, null, 2));
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

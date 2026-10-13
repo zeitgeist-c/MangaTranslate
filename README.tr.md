@@ -1,17 +1,19 @@
-# MangaLens TR 3.7.0 — hızlı yazı taraması ve çeviri kartları
+# MangaLens TR 3.8.0 — toplu ve uyarlanabilir bölüm çevirisi
 
 [English](README.md)
 
 Brave/Chromium Manifest V3 uzantısı. İngilizce manga/manhwa/manhua yazılarını Gemini veya OpenRouter üzerinden Türkçeye çevirir. Alan Seç ve Oto Çevir korunur. Tam bölüm özelliği **önizlemedir**: bütün yazıların bulunması ve %98 kalite hedefi henüz insan etiketleriyle doğrulanmadı.
 
+3.8.0: OpenRouter gönderimleri 4→6→8 uyarlanabilir paralellik kullanır; belgelenmiş kapasiteye göre en fazla 20 kırpma/16384 çıktı token’ı, metadata bilinmiyorsa 12/8192. Tam gövde sınırı 8 MiB. Sonuçlar geldikçe kartlar yerleşir; 60 saniyelik watchdog ve bölge bazlı kayıt tekrar ücret riskini sınırlar. OpenRouter listesindeki iki Gemini modeli kaldırıldı; doğrudan Gemini sekmesi korundu. [Ölçümler, gereksinim takibi ve sınırlar](docs/TOPLU-CEVIRI-3.8.0.md). Canlı model hız garantisi verilmez.
+
 ## Kullanım
 
-1. `MangaLensTR-3.7.0.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle. Açık eski ayarlar pencerelerini de yenile. 3.6.0 işlerine Devam et yerine popup’tan yeni bölüm taraması başlat; bölge gruplama sürümü değişti.
+1. `MangaLensTR-3.8.0.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle. Açık eski ayarlar pencerelerini de yenile. 3.7.0 ve daha eski işlere Devam et yerine popup’tan yeni bölüm taraması başlat; bölge gruplama sürümü değişti.
 
    Güncellemede aynı yüklenmiş klasörü kullan: farklı klasörden ikinci bir uzantı eklemek ayrı uzantı kimliği oluşturabilir ve kayıtlı anahtarlarını yeni kimlikte göstermeyebilir. Mevcut uzantıyı kaldırmadan klasörünü güncelle ve **Yeniden yükle** kullan.
 2. Popup'taki dişliyle **Ayarlar → API Anahtarları** aç. Gemini/OpenRouter için etiketli birden fazla anahtar ekleyebilirsin; **Aktif yap** ile seç. Eski Google listesi korunur, eski tek OpenRouter anahtarı otomatik aktarılır. Ana popup yalnız aktif anahtar etiketini gösterir.
 3. Popup'ta sağlayıcı ve modeli seç; otomatik kaydedilir. İçerik türü, seri adı, yönerge ve sözlük için **Ayarlar → Çeviri Tercihleri → Kaydet** kullan. Sözlük seri adına göre yerel saklanır.
-4. **Bölümün tamamını çevir** mevcut bölümün görsellerini sırayla işler; sonraki bölüme geçmez. Lazy-load taraması sınırlıdır ve kaydırma konumu geri getirilir.
+4. **Bölümün tamamını çevir** mevcut bölümün görsellerini yerel olarak tarar; komşu görsellerin yazılarını ortak gruplarda paralel çevirir; sonraki bölüme geçmez. Lazy-load taraması sınırlıdır ve kaydırma konumu geri getirilir.
 5. Sayfa panelinde duruma göre Duraklat/Devam et ve Hatalıları yeniden dene görünür. **Görünüm ve kontrol araçları** bölümünde Orijinal/çeviri, Kutular, Kontrol listesi ve Kapat bulunur. Paneli katlamak taramayı durdurmaz; Kapat duraklatır. Belirsiz alanlar/sığmayan metin otomatik kaplanmaz; Alan Seç ile düzeltilebilir.
 
 Anahtar kartındaki **Kayıtlı** ve **Bağlantı doğrulandı** farklıdır: Kontrol et çeviri üretmeden sağlayıcının anahtar/model-listesi uç noktasına bağlanır. Seçili model erişimini, kredinin yeterli olduğunu veya yaş onayını kanıtlamaz. Kontroller yalnız düğmeye basınca çalışır; anahtarlar her zaman maskelenir. Aktif anahtar silinirse ilk kalan seçilir; hiç kalmazsa bu sağlayıcıyla çeviri başlatılamaz. Anahtar değişimi sonraki çağrıları etkiler.
@@ -26,13 +28,13 @@ Yalnız seçili model kullanılır; başka modele sessiz geçiş olmaz. Hatalıl
 
 Gemini: Gemini3.5 Flash Lite, Gemini3.1 Flash Lite, Gemma4 26B A4B.
 
-OpenRouter: Qwen3.7/3.8 Flash, Claude Haiku5.5, DeepSeekV4.1 Flash, Muse Spark1.3 ve Contributor, Gemini2.5/3.1 Flash Lite. Haiku4.5 yok. Contributor veri paylaşımı nedeniyle ayrı açık seçime bağlıdır. Hesap erişimi/fiyat/çeviri kalitesini kullanıcı deneyecek; canlı API testleri kullanıcı isteğiyle yapılmadı.
+OpenRouter: Qwen3.7/3.8 Flash, Claude Haiku5.5, DeepSeekV4.1 Flash, Muse Spark1.3 ve Contributor. OpenRouter’daki Gemini2.5/3.1 Flash Lite kaldırıldı; doğrudan Gemini sekmesi korunur. Haiku4.5 yok. Contributor veri paylaşımı nedeniyle ayrı açık seçime bağlıdır. Hesap erişimi/fiyat/çeviri kalitesini kullanıcı deneyecek; canlı API testleri kullanıcı isteğiyle yapılmadı.
 
 **Hızlı yazı taraması (önerilen)** varsayılandır: yazı dedektörü satırları kaynak piksel konumunda gruplar; ağır balon modeli çalışmaz. Desteklenen GPU’da PP-OCR WebGPU, desteklenmeyen veya başarısız GPU’da aynı doğrulanmış model WASM/CPU ile çalışır. Önceki Standart seçimi hızlı yola eşlenir. Önceden küçük modeli seçtiysen **Ayarlar → Çeviri Tercihleri → Yerel tarama** bölümünden hızlı yolu seçip Kaydet. Alternatif/ayrıntılı balon modelleri isteğe bağlı ve daha yavaştır.
 
 Çeviri modeli koordinat üretmez: yerel kaynak-piksel kutuları ve sabit bölge kimlikleri kullanılır. Model yalnız kimlikli kırpmayı okur/çevirir. Çeviriler özgün görsel dosyası değiştirilmeden yazının üzerinde okunaklı koyu kartlarla gösterilir; zemin taklit edilmez. Sığmayan/çakışan kartlar ve çok küçük veya kesilmiş adaylar kontrol listesinde korunur. Süre özeti tarama, çeviri bekleme ve kart çizimini ayrı gösterir. Japonca/dikey yazı doğrulanmadı.
 
-OpenRouter çağrıları sırayla, Google’a ait sabit 2,5 saniyelik beklemeye girmeden yapılır; Google’ın kota aralığı korunur. 429’da tarama durur ve sağlayıcının bekleme süresi gözetilir; otomatik ücretli tekrar yapılmaz. Veri politikası kaynaklı bilinen 404 hataları da ilk çağrıda durdurulur. Zemin için ek bir AI çağrısı yoktur; daha fazla metin çevirmek sağlayıcı kullanımını artırabilir. Gerçek çeviri süresini seçtiğin model belirler. [Ölçüm ve sınırlar](docs/HIZ-VE-TESPIT-3.7.0.md).
+OpenRouter grupları uzantı genelinde ortak 4→6→8 paralel kuyrukla, Google’a ait sabit 2,5 saniyelik beklemeye girmeden yapılır; Google’ın kota aralığı korunur. 429/eşzamanlı kredi bütçesi engelinde yeni gönderimler durur ve sağlayıcının bekleme süresi gözetilir; otomatik ücretli tekrar yapılmaz. Veri politikası kaynaklı bilinen 404 hataları da taramayı durdurur. Zemin için ek bir AI çağrısı yoktur; daha fazla metin çevirmek sağlayıcı kullanımını artırabilir. Gerçek çeviri süresini seçtiğin model belirler. [Ölçüm ve sınırlar](docs/TOPLU-CEVIRI-3.8.0.md).
 
 ## Veri ve geri dönüş
 

@@ -12,7 +12,7 @@ async function refresh() {
   const active = keys.find(k => k.active);
   $('key-summary').textContent = active ? `Aktif anahtar: ${active.label} · Kayıtlı` : 'Aktif API anahtarı yok';
   $('key-dot').classList.toggle('ready', !!active); $('add-key').hidden = !!active;
-  for (const id of ['btn-full-chapter', 'btn-translate-page', 'btn-quick-translate']) $(id).disabled = saving || !active || !config.enabled;
+  for (const id of ['btn-full-chapter', 'btn-translate-page', 'btn-quick-translate']) $(id).disabled = saving || !active || !config.enabled || !$('model').value;
   $('model').disabled = saving; $('enabled-toggle').disabled = saving; $('contributor-consent').disabled = saving;
   for (const provider of ['gemini', 'openrouter']) $(`provider-${provider}`).disabled = saving;
 }

@@ -23,20 +23,22 @@ test('old standard setting moves to the fast path; detailed mode is explicit and
   const context = vm.createContext({}); vm.runInContext(await readFile(new URL('../src/providers.js', import.meta.url), 'utf8'), context);
   assert.equal(context.MLProviders.settings({ localDetector: 'standard' }).localDetector, 'fast');
   assert.equal(context.MLProviders.settings({ localDetector: 'detailed' }).localDetector, 'detailed');
-  assert.equal(context.MLProviders.settings({}).processingVersion, 'page-v5');
+  assert.equal(context.MLProviders.settings({}).processingVersion, 'page-v6');
 });
-test('router queue has no Google quota delay, stays serial, and keeps Google pacing intact', async () => {
+test('router queue starts concurrently without Google delay and keeps Google pacing intact', async () => {
+  let googleCalls = 0;
   const context = vm.createContext({ chrome: { runtime: { onMessage: { addListener() {} } } }, enqueueWithRateLimit: async fn => { googleCalls++; return fn(); } });
-  let googleCalls = 0; vm.runInContext(await readFile(new URL('../src/page-background.js', import.meta.url), 'utf8'), context);
-  const order = []; let release;
-  const first = context.mlEnqueue({ provider: 'openrouter' }, async () => { order.push('first'); await new Promise(resolve => { release = resolve; }); order.push('done'); });
-  await Promise.resolve(); await Promise.resolve();
-  const second = context.mlEnqueue({ provider: 'openrouter' }, async () => order.push('second'));
-  assert.deepEqual(order, ['first']); release(); await Promise.all([first, second]); assert.deepEqual(order, ['first', 'done', 'second']); assert.equal(googleCalls, 0);
-  await context.mlEnqueue({ provider: 'gemini' }, async () => 'ok'); assert.equal(googleCalls, 1);
+  vm.runInContext(await readFile(new URL('../src/page/queue.js', import.meta.url), 'utf8'), context);
+  vm.runInContext(await readFile(new URL('../src/page-background.js', import.meta.url), 'utf8'), context);
+  let active=0, peak=0; const releases=[];
+  const operations = Array.from({length:4}, () => context.mlEnqueue({provider:'openrouter'},async()=>{active++;peak=Math.max(peak,active);await new Promise(r=>releases.push(r));active--;}));
+  for(let i=0;i<15;i++)await Promise.resolve();assert.equal(peak,4);releases.forEach(r=>r());await Promise.all(operations);
+  await context.mlEnqueue({provider:'gemini'},async()=>{});assert.equal(googleCalls,1);
 });
+
 test('data-policy 404 and quota 429 stop the job; unrelated 404 is not misclassified', async () => {
   const context = vm.createContext({ chrome: { runtime: { onMessage: { addListener() {} } } } });
+  vm.runInContext(await readFile(new URL('../src/page/queue.js', import.meta.url), 'utf8'), context);
   vm.runInContext(await readFile(new URL('../src/page-background.js', import.meta.url), 'utf8'), context);
   const config = { provider: 'openrouter', model: 'meta/muse-spark-1.3-contributor' };
   assert.equal(context.mlAccessError(config, 404, 'Paid model training violation (account settings)').code, 'PROVIDER_DATA_POLICY_BLOCK');

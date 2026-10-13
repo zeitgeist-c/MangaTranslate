@@ -1,7 +1,7 @@
 'use strict';
 // Shared by the popup and service worker. Never exposed to the web page.
 globalThis.MLProviders = (() => {
-  const version = 'manga-tr-v1', processingVersion = 'page-v5';
+  const version = 'manga-tr-v1', processingVersion = 'page-v6';
   const google = [
     ['gemini-3.5-flash-lite', 'Gemini 3.5 Flash Lite'],
     ['gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite'],
@@ -13,8 +13,6 @@ globalThis.MLProviders = (() => {
     ['deepseek/deepseek-v4.1-flash', 'DeepSeek V4.1 Flash'],
     ['meta/muse-spark-1.3', 'Muse Spark 1.3'],
     ['meta/muse-spark-1.3-contributor', 'Muse Spark 1.3 Contributor · veri paylaşımı'],
-    ['google/gemini-2.5-flash-lite', 'Gemini 2.5 Flash Lite'],
-    ['google/gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite'],
   ];
   const catalog = Object.freeze({ gemini: google, openrouter: router });
   function settings(raw = {}) {
@@ -61,9 +59,9 @@ REGION ORDER: ${JSON.stringify(regions.map(r => r.regionId))}`;
     }
     return expected.map(id => data.regions.find(r => r.regionId === id));
   }
-  function routerBody(model, promptText, images) {
+  function routerBody(model, promptText, images, maxTokens = 8192) {
     if (!router.some(([id]) => id === model)) throw new Error('Bilinmeyen OpenRouter modeli');
-    return { model, stream: false, max_tokens: 8192, provider: { allow_fallbacks: false }, response_format: { type: 'json_object' },
+    return { model, stream: false, max_tokens: maxTokens, provider: { allow_fallbacks: false }, response_format: { type: 'json_object' },
       messages: [{ role: 'user', content: [{ type: 'text', text: promptText }, ...images.flatMap(image => [
         { type: 'text', text: `regionId=${image.regionId || 'manual'}` },
         { type: 'image_url', image_url: { url: image.dataUrl } }

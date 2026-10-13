@@ -8,14 +8,14 @@ import { createHash } from 'node:crypto';
 const root = resolve('..'), profile = process.env.ML_TEST_PROFILE || await mkdtemp(join(tmpdir(), 'mangalens-extension-'));
 const image = await readFile(resolve('.local/chapter-174/002.webp'));
 const fixtureManifest = JSON.parse(await readFile('.local/chapter-174/manifest.json', 'utf8'));
-const fixtureFiles = process.env.FULL_CHAPTER === '1' ? fixtureManifest.pages.map(p => p.file) : ['002.webp'];
+const fixtureFiles = process.env.FULL_CHAPTER === '1' ? fixtureManifest.pages.map(p => p.file) : process.env.DUPLICATE_IMAGES === '1' ? ['002.webp', '002.webp'] : ['002.webp'];
 const fixtureImages = new Map(await Promise.all(fixtureFiles.map(async file => [file, await readFile(`.local/chapter-174/${file}`)])));
 let shapeBytes;
 const server = createServer((req, res) => {
   if (req.url === '/shape.png') { res.writeHead(200, { 'Content-Type': 'image/png' }); res.end(shapeBytes); return; }
-  if (req.url.startsWith('/image/')) { res.writeHead(200, { 'Content-Type': 'image/webp' }); res.end(fixtureImages.get(req.url.split('/').at(-1))); return; }
+  if (req.url.startsWith('/image/')) { res.writeHead(200, { 'Content-Type': 'image/webp' }); res.end(fixtureImages.get(new URL(req.url, 'http://fixture').pathname.split('/').at(-1))); return; }
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-  res.end('<!doctype html><html><head><title>MangaLens extension fixture</title><style>body{margin:20px;background:#333}img.reader{display:block;width:600px;height:auto;max-width:95vw;margin:auto}</style></head><body>' + fixtureFiles.map(file => `<img class="reader" src="/image/${file}">`).join('') + '</body></html>');
+  res.end('<!doctype html><html><head><title>MangaLens extension fixture</title><style>body{margin:20px;background:#333}img.reader{display:block;width:600px;height:auto;max-width:95vw;margin:auto}</style></head><body>' + fixtureFiles.map((file, index) => `<img class="reader" src="/image/${file}${process.env.DUPLICATE_IMAGES === '1' ? '?copy=' + index : ''}">`).join('') + '</body></html>');
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 let browser;
@@ -38,21 +38,25 @@ try {
   }
   worker.on('console', message => { logs.push(message.text()); console.log('[worker] ' + message.text().slice(0, 250)); });
   const extensionId = new URL(worker.url()).host;
-  await worker.evaluate(async detector => {
+  await worker.evaluate(async ({detector, delay}) => {
     await chrome.storage.sync.set({ translationProvider: 'openrouter', openrouterModel: 'qwen/qwen3.8-flash', enabled: true, localDetector: detector });
     await chrome.storage.local.set({ openrouterApiKey: 'synthetic-key-no-real-provider-access' });
-    globalThis.__providerCalls = [];
+    globalThis.__providerCalls = []; globalThis.__activeProviderCalls = 0; globalThis.__peakProviderCalls = 0; globalThis.__syntheticDelay = delay;
     const actualFetch = globalThis.fetch;
     globalThis.fetch = async (url, options) => {
+      if (String(url).includes('/endpoints')) return new Response(JSON.stringify({data:{endpoints:[{context_length:1048576,max_completion_tokens:32768}]}}),{headers:{'Content-Type':'application/json'}});
       if (String(url).includes('/chat/completions')) {
         const body = JSON.parse(options.body), ids = body.messages[0].content.filter(part => part.type === 'text' && part.text.startsWith('regionId=')).map(part => part.text.slice(9));
-        globalThis.__providerCalls.push({ model: body.model, ids });
+        globalThis.__activeProviderCalls++; globalThis.__peakProviderCalls = Math.max(globalThis.__peakProviderCalls, globalThis.__activeProviderCalls);
+        globalThis.__providerCalls.push({ model: body.model, ids, startedAt: Date.now(), maxTokens: body.max_tokens });
+        await new Promise(resolve=>setTimeout(resolve,globalThis.__syntheticDelay));
+        globalThis.__activeProviderCalls--;
         const regions = ids.reverse().map(regionId => ({ regionId, sourceText: 'Synthetic source', translatedText: 'BU BİR DENEME.', status: 'translated' }));
         return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ regions }) } }] }), { headers: { 'Content-Type': 'application/json' } });
       }
       return actualFetch(url, options);
     };
-  }, process.env.ML_DETECTOR || 'fast');
+  }, {detector:process.env.ML_DETECTOR || 'fast',delay:Number(process.env.PROVIDER_DELAY_MS || 0)});
   const page = await browser.newPage(); page.on('pageerror', error => logs.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}/chapter`);
   await page.waitForFunction(() => [...document.images].some(img => img.naturalHeight === 16000));
@@ -83,14 +87,17 @@ try {
   assert.ok(['done', 'review'].includes(job.pages[0].state), job.pages[0].error);
   assert.ok(job.pages.some(p => p.translated > 0), 'At least one safe region must be rendered');
   const calls = await worker.evaluate(() => globalThis.__providerCalls);
+  if (process.env.DUPLICATE_IMAGES === '1') { assert.equal(job.pages.length, 2); assert.equal(calls.length, 1); assert.equal(job.pages[0].translated, job.pages[1].translated); assert.ok(job.pages[1].translated > 0); }
   if (!process.env.ML_TEST_PROFILE) assert.ok(calls.length > 0, 'Must exercise synthetic provider adapter');
   const popup = await browser.newPage(); await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
   try { await popup.waitForFunction(() => document.querySelector('#provider-openrouter').getAttribute('aria-pressed') === 'true'); }
   catch (error) { console.log('[popup-diagnostic]', await popup.evaluate(() => ({ provider: document.querySelector('#provider-openrouter')?.outerHTML, notice: document.querySelector('#notice')?.textContent, summary: document.querySelector('#key-summary')?.textContent }))); throw error; }
   assert.equal(await popup.locator('input[type=password]').count(), 0);
-  assert.equal(await popup.locator('#model option').count(), 8);
+  assert.equal(await popup.locator('#model option').count(), 6);
   assert.match(await popup.locator('#key-summary').textContent(), /Kayıtlı/);
   const firstWallMs = performance.now() - start;
+  assert.ok(job.pages.every(p => ['done', 'review'].includes(p.state)), 'Every fixture image must complete without processing errors');
+  if (process.env.FULL_CHAPTER === '1' && Number(process.env.PROVIDER_DELAY_MS) === 15000) assert.ok(firstWallMs <= 120000, 'Delayed full chapter must meet the synthetic 120 second target');
   const alignment = [];
   for (const width of process.env.FULL_CHAPTER === '1' ? [] : [1280, 700]) {
     await page.setViewportSize({ width, height: 900 });
@@ -135,6 +142,7 @@ try {
   await waitResumed(beforeResume);
   const secondCalls = await worker.evaluate(() => globalThis.__providerCalls);
   assert.equal(secondCalls.length, calls.length, 'Resume must not retranslate already cached regions');
+  const measuredPeak = await worker.evaluate(() => globalThis.__peakProviderCalls);
   const cdp = await browser.newCDPSession(page);
   await cdp.send('ServiceWorker.enable'); await cdp.send('ServiceWorker.stopAllWorkers');
   await popup.evaluate(() => chrome.runtime.sendMessage({ type: 'ML_CONFIG' }));
@@ -152,11 +160,12 @@ try {
   await waitResumed(beforeResume);
   const restartCalls = await worker.evaluate(() => globalThis.__unexpectedCalls);
   assert.equal(restartCalls, 0, 'Service-worker restart must preserve completed translation cache');
+  const peakConcurrency = await worker.evaluate(() => globalThis.__peakProviderCalls || 0).catch(()=>0);
   const report = { date: new Date().toISOString(), extensionId, version: await worker.evaluate(() => chrome.runtime.getManifest().version), browser: await browser.browser().version(), firstWallMs,
     pages: job.pages.map(p => ({ state: p.state, regions: p.regions, translated: p.translated, issues: p.issues?.length, error: p.error, timing: p.timing, backend: p.backend })),
-    calls, alignment, shapeCheck, turkishGlyphRender: true, overflowRejected: true, resumeProviderCalls: secondCalls.length - calls.length, serviceWorkerRestartProviderCalls: restartCalls, profile, errors: logs, realLocalModels: true, syntheticTranslation: true, realProviderCalled: false,
+    calls, peakConcurrency: measuredPeak, syntheticDelayMs: Number(process.env.PROVIDER_DELAY_MS || 0), metrics: job.metrics, alignment, shapeCheck, turkishGlyphRender: true, overflowRejected: true, resumeProviderCalls: secondCalls.length - calls.length, serviceWorkerRestartProviderCalls: restartCalls, profile, errors: logs, realLocalModels: true, syntheticTranslation: true, realProviderCalled: false,
     source: 'Local reader fixture using user-supplied chapter image; not live-site or human quality acceptance.' };
-  await mkdir('reports', { recursive: true }); await writeFile(process.env.FULL_CHAPTER === '1' ? 'reports/extension-full-chapter.json' : process.env.ML_TEST_PROFILE ? 'reports/extension-resume-smoke.json' : 'reports/extension-smoke.json', JSON.stringify(report, null, 2));
+  await mkdir('reports', { recursive: true }); await writeFile(process.env.DUPLICATE_IMAGES === '1' ? 'reports/extension-duplicate-smoke.json' : process.env.FULL_CHAPTER === '1' ? 'reports/extension-full-chapter.json' : process.env.ML_TEST_PROFILE ? 'reports/extension-resume-smoke.json' : 'reports/extension-smoke.json', JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
   assert.equal(logs.length, 0, 'Extension errors must not be ignored');
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

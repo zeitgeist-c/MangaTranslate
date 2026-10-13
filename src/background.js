@@ -3,7 +3,7 @@
 
 'use strict';
 
-if (typeof importScripts === 'function') importScripts('providers.js', 'keys.js', 'page-background.js');
+if (typeof importScripts === 'function') importScripts('providers.js', 'keys.js', 'page/queue.js', 'page-background.js');
 
 const GEMINI_MODELS = Object.freeze({
   DEFAULT: 'gemini-3.5-flash-lite',

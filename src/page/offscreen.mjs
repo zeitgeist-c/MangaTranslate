@@ -2,7 +2,7 @@ import * as ort from './vendor/ort.all.bundle.min.mjs';
 import { detectImage } from './lib/rtdetr.mjs';
 import { detectPPOCR } from './lib/ppocr.mjs';
 import { fuseGroups, groupTextLines, cardLayout, interior, fitText, regionCrop } from './layout.mjs';
-import { read, write, hash } from './store.mjs';
+import { read, write, writeMany, hash } from './store.mjs';
 ort.env.wasm.wasmPaths = chrome.runtime.getURL('src/page/vendor/');
 ort.env.wasm.numThreads = 1; ort.env.wasm.proxy = false;
 const models = [
@@ -61,8 +61,8 @@ async function prepare(source, signal, progress, detector = 'fast') {
   timing.imageMs = performance.now() - started;
   try {
     const fast = !['small', 'detailed'].includes(detector), model = fast ? models[1] : detector === 'small' ? models[2] : models[0];
-    const version = fast ? 'fast-v5' : detector === 'small' ? 'd5-small' : 'd5-detailed';
-    const key = `detection-v5:${version}:${model.sha256}:${imageId}`;
+    const version = fast ? 'fast-v6' : detector === 'small' ? 'd6-small' : 'd6-detailed';
+    const key = `detection-v6:${version}:${model.sha256}:${imageId}`;
     let report = await read(key);
     timing.cached = !!report;
     if (!report) {
@@ -175,10 +175,11 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (message.command === 'render') return render(message.source, message.report, message.translations, message.minFont, controller.signal, message.style);
     if (message.command === 'read') return read(message.key);
     if (message.command === 'write') return write(message.key, message.value);
+    if (message.command === 'writeMany') return writeMany(message.entries);
     throw new Error('Bilinmeyen görüntü komutu');
   };
   // Cache persistence must not wait behind a long inference or a cancelled kernel.
-  const lightweight = message.command === 'read' || message.command === 'write';
+  const lightweight = ['read', 'write', 'writeMany'].includes(message.command);
   const task = lightweight ? execute() : serial.then(execute);
   if (!lightweight) serial = task.catch(() => {});
   task.then(value => respond({ ok: true, value })).catch(error => respond({ ok: false, error: error.message })).finally(() => { active.delete(message.requestId); clearInterval(heartbeat); });

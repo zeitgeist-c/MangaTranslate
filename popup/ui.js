@@ -10,7 +10,7 @@ globalThis.MLUI = (() => {
     if (existing) { await chrome.tabs.update(existing.id, { active: true, url }); await chrome.windows.update(existing.windowId, { focused: true }); }
     else await chrome.tabs.create({ url });
   }
-  function models(select, provider, value) { select.replaceChildren(); for (const [id, label] of MLProviders.catalog[provider]) { const option = document.createElement('option'); option.value = id; option.textContent = label; select.append(option); } select.value = value; }
+  function models(select, provider, value) { select.replaceChildren(); if (!MLProviders.catalog[provider].some(([id]) => id === value)) { const option = document.createElement('option'); option.value = ''; option.textContent = 'Model kaldırıldı — yeni model seçin'; select.append(option); } for (const [id, label] of MLProviders.catalog[provider]) { const option = document.createElement('option'); option.value = id; option.textContent = label; select.append(option); } select.value = MLProviders.catalog[provider].some(([id]) => id === value) ? value : ''; }
   const statuses = { untested: 'Kontrol edilmedi', success: 'Bağlantı doğrulandı', invalid: 'Geçersiz anahtar', rate_limited: 'İstek sınırı', error: 'Bağlantı hatası' };
   return { defaults, settings, keys, openSettings, models, statuses };
 })();

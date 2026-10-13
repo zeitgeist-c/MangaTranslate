@@ -8,3 +8,5 @@
 - ONNX Runtime Web 1.30.0: https://github.com/microsoft/onnxruntime/tree/v1.30.0 , MIT. LICENSE ve ThirdPartyNotices bu dizinde.
 
 Model dosyaları değiştirilmedi. Kendi adaptörümüz, bağlı bileşen/yerleşim uygulamamız eklendi. PaddleOCR Apache lisansının tam metni bu dizindedir. GPL/AGPL projelerden kod taşınmadı. Görseller dağıtılmaz.
+
+3.8.0: DB quad son işleme referansı PaddlePaddle/PaddleOCR ppocr/postprocess/db_postprocess.py (Apache-2.0), 13 Ekim 2026. JavaScript kontur/minimum dikdörtgen/raster ve analitik dikdörtgen unclip uygulaması bağımsız Python/OpenCV/Pyclipper fixture’larıyla sınırlı toleransta karşılaştırıldı; OpenCV bit düzeyi eşdeğerlik iddiası yok. OpenCV, Shapely ve Pyclipper yalnız izole test bağımlılıklarıdır, uzantıda dağıtılmaz.

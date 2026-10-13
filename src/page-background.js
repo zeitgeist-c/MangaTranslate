@@ -2,14 +2,47 @@
 let mlOffscreenCreating;
 const mlCalls = new Map();
 const mlLocalRequests = new Map();
-let mlRouterQueue = Promise.resolve(), mlRouterBlockedUntil = 0;
-function mlEnqueue(config, task) {
+const mlRouterQueue = new MLQueue(limit => chrome.storage?.local?.set({ mlParallelLimit: limit }).catch(() => {}));
+let mlRouterBlockedUntil = 0, mlManualOwner = 0;
+const mlRegionCalls = new Map(), mlCapabilityCalls = new Map(), mlCapabilityMemory = new Map();
+const mlQueueReady = chrome.storage?.local?.get('mlParallelLimit').then(stored => {
+  if (Number.isInteger(stored.mlParallelLimit)) mlRouterQueue.limit = Math.max(1, Math.min(8, stored.mlParallelLimit));
+}).catch(() => {});
+function mlEnqueue(config, task, owner) {
   if (config.provider !== 'openrouter') return enqueueWithRateLimit(task, { retry: false });
-  const operation = mlRouterQueue.then(() => {
-    if (Date.now() < mlRouterBlockedUntil) throw Object.assign(new Error('OpenRouter istek sınırı için bekleme sürüyor. Biraz sonra “Hatalıları yeniden dene”yi kullanın.'), { stopJob: true, code: 'PROVIDER_RATE_LIMITED' });
-    return task();
-  });
-  mlRouterQueue = operation.catch(() => {}); return operation;
+  if (owner === undefined) { owner = `manual:${++mlManualOwner}`; mlRouterQueue.begin(owner); }
+  return Promise.resolve(mlQueueReady).then(() => mlRouterQueue.enqueue(owner, timing => {
+    if (Date.now() < mlRouterBlockedUntil) throw Object.assign(new Error('OpenRouter istek sınırı için bekleme sürüyor. Biraz sonra “Hatalıları yeniden dene”yi kullanın.'), { notSent: true, stopJob: true, code: 'PROVIDER_COOLDOWN' });
+    return task(timing);
+  }));
+}
+async function mlCapabilities(config) {
+  const fallback = { maxRegions: config.provider === 'openrouter' ? 12 : 6, maxOutputTokens: 8192, contextLength: null, verified: false };
+  if (config.provider !== 'openrouter') return fallback;
+  const memory = mlCapabilityMemory.get(config.model); if (memory?.expires > Date.now()) return memory.value;
+  if (!mlCapabilityCalls.has(config.model)) mlCapabilityCalls.set(config.model, (async () => {
+    const cacheKey = `ml-model-capabilities:${config.model}`, cached = (await chrome.storage.local.get(cacheKey))[cacheKey];
+    if (cached?.expires > Date.now()) return cached.value;
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(`https://openrouter.ai/api/v1/models/${config.model}/endpoints`, { signal: controller.signal });
+      if (!response.ok) return fallback;
+      const data = await response.json(), endpoints = data.data?.endpoints;
+      if (!Array.isArray(endpoints) || !endpoints.length) return fallback;
+      const positiveMin = key => endpoints.every(e => Number.isSafeInteger(e[key]) && e[key] > 0) ? Math.min(...endpoints.map(e => e[key])) : null;
+      const contextLength = positiveMin('context_length'), completion = positiveMin('max_completion_tokens');
+      const maxOutputTokens = completion ? Math.min(16384, completion) : 8192;
+      const imageLimit = positiveMin('max_images');
+      const maxRegions = Math.max(1, Math.min(maxOutputTokens >= 16384 ? 20 : 12, Math.floor(maxOutputTokens / 680), imageLimit || 20,
+        contextLength ? Math.floor((contextLength - maxOutputTokens - 65536) / 10000) : 12));
+      const value = { maxRegions, maxOutputTokens, contextLength, verified: !!contextLength && !!completion };
+      await chrome.storage.local.set({ [cacheKey]: { expires: Date.now() + 86400000, value } }); return value;
+    } catch { return fallback; } finally { clearTimeout(timer); }
+  })());
+  const operation = mlCapabilityCalls.get(config.model);
+  try {
+    const value = await operation; mlCapabilityMemory.set(config.model, { expires: Date.now() + (value.verified ? 86400000 : 600000), value }); return value;
+  } finally { if (mlCapabilityCalls.get(config.model) === operation) mlCapabilityCalls.delete(config.model); }
 }
 async function mlOffscreen(command, payload = {}) {
   const { signal, ...data } = payload;
@@ -46,7 +79,8 @@ async function mlLocal(message, sender, command) {
 }
 async function mlConfig() {
   const [settings, local] = await Promise.all([chrome.storage.sync.get(null), chrome.storage.local.get('translationGlossary')]);
-  return MLProviders.settings({ ...settings, translationGlossary: local.translationGlossary ?? settings.translationGlossary });
+  const config = MLProviders.settings({ ...settings, translationGlossary: local.translationGlossary ?? settings.translationGlossary });
+  return { ...config, batching: await mlCapabilities(config) };
 }
 async function mlKey(provider) {
   if (typeof MLKeys !== 'undefined') return MLKeys.active(provider);
@@ -86,23 +120,30 @@ function mlRestoreJob(job) {
 async function mlProviderCall(config, prompt, images, keyOverride) {
   const key = keyOverride || await mlKey(config.provider);
   if (!key) throw new Error(`${config.provider === 'gemini' ? 'Gemini' : 'OpenRouter'} API anahtarı eksik.`);
-  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 25000);
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 60000);
+  const heartbeat = globalThis.setInterval?.(() => chrome.runtime.getContexts?.({ contextTypes: ['OFFSCREEN_DOCUMENT'] }).catch(() => {}), 10000);
   try {
     const router = config.provider === 'openrouter';
-    const body = router ? MLProviders.routerBody(config.model, prompt, images) : {
+    const body = router ? MLProviders.routerBody(config.model, prompt, images, config.maxOutputTokens || 8192) : {
       contents: [{ role: 'user', parts: [{ text: prompt }, ...images.flatMap(image => {
         const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(image.dataUrl);
         if (!match) throw new Error('Geçersiz görsel kırpması');
         return [{ text: `regionId=${image.regionId || 'manual'}` }, { inlineData: { mimeType: match[1], data: match[2] } }];
       })] }], generationConfig: { maxOutputTokens: 8192, ...(!config.model.startsWith('gemma') ? { responseMimeType: 'application/json' } : {}) }
     };
+    if (router && config.maxOutputTokens) body.stream = true;
+    if (new TextEncoder().encode(JSON.stringify(body)).length > 8 * 1024 * 1024) throw Object.assign(new Error('Grup gövdesi 8 MiB sınırını aşıyor; gönderilmedi.'), { notSent: true, stopJob: true, code: 'BATCH_TOO_LARGE' });
     const endpoint = router ? 'https://openrouter.ai/api/v1/chat/completions' : `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.model)}:generateContent`;
     const response = await fetch(endpoint, { method: 'POST', signal: controller.signal,
       headers: { 'Content-Type': 'application/json', ...(router ? { Authorization: `Bearer ${key}` } : { 'x-goog-api-key': key }) }, body: JSON.stringify(body) });
-    const data = await response.json();
+    const data = router && response.headers?.get('content-type')?.includes('text/event-stream') ? await mlReadStream(response) : await response.json();
     if (!response.ok || data.error) {
-      if (router && response.status === 429) mlRouterBlockedUntil = Date.now() + Math.min(300000, Math.max(1000, (Number(response.headers?.get('retry-after')) || 30) * 1000));
+      if (router && response.status === 429) {
+        const hint = response.headers?.get('retry-after'), seconds = Number(hint), delay = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : Date.parse(hint || '') - Date.now();
+        mlRouterBlockedUntil = Date.now() + Math.max(1000, Number.isFinite(delay) && delay > 0 ? delay : 30000);
+      }
       const detail = String(data.error?.message || 'Sağlayıcı hatası').replaceAll(key, '[anahtar]');
+      if (data.error?.metadata?.limit_source === 'openrouter_in_flight_budget') throw Object.assign(new Error('Eşzamanlı OpenRouter kredi bütçesi doldu. Devam eden isteklerin bitmesini bekleyip açıkça yeniden deneyin.'), { stopJob: true, code: 'PROVIDER_IN_FLIGHT_BUDGET', httpStatus: response.status });
       throw mlAccessError(config, response.status, detail) || new Error(`${config.provider}/${config.model}: HTTP ${response.status} — ${detail.slice(0, 240)}`);
     }
     const text = router ? data.choices?.[0]?.message?.content : data.candidates?.[0]?.content?.parts?.filter(p => !p.thought).map(p => p.text || '').join('');
@@ -111,11 +152,37 @@ async function mlProviderCall(config, prompt, images, keyOverride) {
     if (typeof text !== 'string' || !text.trim()) throw new Error('Sağlayıcı boş yanıt verdi.');
     return text;
   } catch (error) {
-    if (error.name === 'AbortError') throw new Error('Sağlayıcı 25 saniyede yanıt vermedi; ücretlendirme durumu belirsiz. Otomatik tekrar yapılmadı.');
+    if (error.name === 'AbortError') throw Object.assign(new Error('Sağlayıcı 60 saniyede yanıt vermedi; ücretlendirme durumu belirsiz. Otomatik tekrar yapılmadı.'), { stopJob: true, code: 'PROVIDER_TIMEOUT' });
+    error.message = String(error.message).replaceAll(key, '[anahtar]');
     throw error;
-  } finally { clearTimeout(timer); }
+  } finally { clearTimeout(timer); if (heartbeat) globalThis.clearInterval(heartbeat); }
+}
+async function mlReadStream(response) {
+  const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '', content = '', finish, size = 0, doneMarker = false;
+  const event = value => {
+    const data = value.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n').trim();
+    if (!data) return; if (data === '[DONE]') { doneMarker = true; return; }
+    let parsed; try { parsed = JSON.parse(data); } catch { throw new Error('Sağlayıcı akış JSON verisi geçersiz.'); }
+    if (parsed.error) throw new Error('Sağlayıcı akış hatası: ' + String(parsed.error.code || 'unknown'));
+    const choice = parsed.choices?.[0];
+    if (choice?.finish_reason === 'error') throw new Error('Sağlayıcı akışı tamamlanamadı.');
+    if (typeof choice?.delta?.content === 'string') content += choice.delta.content;
+    if (choice?.finish_reason) finish = choice.finish_reason;
+  };
+  try {
+    for (;;) {
+      const chunk = await reader.read(); if (chunk.done) break;
+      size += chunk.value.byteLength; if (size > 2 * 1024 * 1024) throw new Error('Sağlayıcı akış boyutu sınırı aşıldı.');
+      buffer += decoder.decode(chunk.value, { stream: true }); buffer = buffer.replace(/\r\n/g, '\n');
+      let boundary; while ((boundary = buffer.indexOf('\n\n')) >= 0) { event(buffer.slice(0, boundary)); buffer = buffer.slice(boundary + 2); }
+    }
+    buffer += decoder.decode(); if (buffer.trim()) event(buffer);
+    if (!doneMarker || !finish) throw new Error('Sağlayıcı akışı eksik bitti; otomatik tekrar yapılmadı.');
+    return { choices: [{ finish_reason: finish, message: { content } }] };
+  } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
 async function mlTranslate(message) {
+  if (message.jobId) return mlTranslateGroup(message);
   const { config, regions, imageId, context = [] } = message;
   const checked = MLProviders.settings({ translationProvider: config.provider, geminiModel: config.model, openrouterModel: config.model,
     contributorConsent: config.model.endsWith('-contributor') ? (await chrome.storage.sync.get('contributorConsent')).contributorConsent : false,
@@ -151,6 +218,77 @@ async function mlTranslate(message) {
   mlCalls.set(key, operation);
   try { return await operation; } finally { mlCalls.delete(key); }
 }
+async function mlDigest(value) {
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value))))].map(v => v.toString(16).padStart(2, '0')).join('');
+}
+async function mlTranslateGroup(message) {
+  const { regions, context = [], owner, retry } = message;
+  if (typeof message.jobId !== 'string' || message.jobId.length > 80) throw new Error('Geçersiz iş kimliği');
+  const checked = MLProviders.settings({ translationProvider: message.config.provider, geminiModel: message.config.model, openrouterModel: message.config.model,
+    contributorConsent: message.config.model.endsWith('-contributor') ? (await chrome.storage.sync.get('contributorConsent')).contributorConsent : false,
+    contentType: message.config.contentType, localDetector: message.config.localDetector, seriesName: message.config.series, translationInstructions: message.config.instructions, translationGlossary: message.config.glossary });
+  const caps = await mlCapabilities(checked);
+  if (!Array.isArray(regions) || !regions.length || regions.length > caps.maxRegions || new Set(regions.map(r => r.regionId)).size !== regions.length ||
+    regions.some(r => !/^[a-f0-9]{64}$/.test(r.imageId) || typeof r.regionId !== 'string' || r.regionId.length > 180 || !r.regionId.startsWith(r.imageId + ':') ||
+      typeof r.crop !== 'string' || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(r.crop) || r.crop.length > 4_000_000) ||
+    !Array.isArray(context) || JSON.stringify(context).length > 50000) throw new Error('Geçersiz toplu bölge isteği');
+  const scope = await mlDigest({ checked, context });
+  const regionKeys = regions.map(r => `translation-region-v2:${scope}:${r.regionId}`);
+  const key = `translation-group-v2:${await mlDigest({ scope, regions: regions.map(r => r.regionId) })}`;
+  if (mlCalls.has(key)) {
+    try { return await mlCalls.get(key); }
+    catch (error) {
+      if (error.notSent && !mlRouterQueue.paused.has(owner) && !mlRouterQueue.blocked) return mlTranslateGroup(message);
+      throw error;
+    }
+  }
+  const operation = (async () => {
+    // Attach to overlapping live work before reading persistent state. Regrouping
+    // after pause cannot submit an already running region a second time.
+    await Promise.all([...new Set(regionKeys.map(k => mlRegionCalls.get(k)).filter(Boolean))].map(p => p.catch(() => {})));
+    const saved = await Promise.all(regionKeys.map(k => mlOffscreen('read', { key: k })));
+    const missing = regions.filter((_, i) => saved[i]?.status !== 'done');
+    if (!missing.length) return { regions: saved.map(s => s.region), cached: true, groupId: key, timing: { queueMs: 0, providerMs: 0, regions: 0, cachedRegions: regions.length } };
+    if (!retry && saved.some(s => ['pending', 'uncertain', 'blocked'].includes(s?.status))) {
+      const refusal = saved.find(s => s?.code && s.code !== 'PROVIDER_TIMEOUT' && s.code !== 'UNCERTAIN_GROUP');
+      throw Object.assign(new Error(refusal?.error || 'Önceki grup sonucu belirsiz; otomatik tekrar yapılmadı. Hatalıları yeniden dene ile açıkça tekrar deneyebilirsiniz.'), { stopJob: true, code: refusal?.code || 'UNCERTAIN_GROUP', actionUrl: refusal?.actionUrl, httpStatus: refusal?.httpStatus });
+    }
+    let queueMs = 0, concurrency = 1, sentAt, dispatched = false;
+    const missingKeys = missing.map(r => regionKeys[regions.indexOf(r)]);
+    const prompt = MLProviders.prompt(checked, missing, context);
+    if (caps.contextLength && new TextEncoder().encode(prompt).length + missing.length * 10000 + caps.maxOutputTokens > caps.contextLength)
+      throw Object.assign(new Error('Grup, modelin doğrulanmış bağlam kapasitesi için ayrılan güvenli bütçeyi aşıyor; gönderilmedi.'), { notSent: true, stopJob: true, code: 'CONTEXT_LIMIT' });
+    try {
+      const raw = await mlEnqueue(checked, async timing => {
+        queueMs = timing?.queueMs || 0; concurrency = timing?.concurrency || 1;
+        try { await mlOffscreen('writeMany', { entries: [{ key, value: { status: 'pending', owner, startedAt: Date.now() } }, ...missingKeys.map(regionKey => ({ key: regionKey, value: { status: 'pending', groupId: key, startedAt: Date.now() } }))] }); }
+        catch { throw Object.assign(new Error('Grup kaydı yazılamadı; sağlayıcıya gönderilmedi.'), { notSent: true, stopJob: true, code: 'LOCAL_STORAGE_FAILED' }); }
+        sentAt = Date.now(); dispatched = true;
+        try {
+          const raw = await mlProviderCall({ ...checked, maxOutputTokens: caps.maxOutputTokens }, prompt, missing.map(r => ({ regionId: r.regionId, dataUrl: r.crop })));
+          return MLProviders.parse(raw, missing.map(r => r.regionId));
+        } catch (error) { error.stopJob = true; error.code ||= 'UNCERTAIN_GROUP'; throw error; }
+      }, owner);
+      const translated = raw;
+      const result = { status: 'done', groupId: key, regions: regions.map((r, i) => saved[i]?.status === 'done' ? saved[i].region : translated.find(t => t.regionId === r.regionId)),
+        timing: { queueMs, concurrency, providerMs: Date.now() - sentAt, regions: missing.length, cachedRegions: regions.length - missing.length }, completedAt: Date.now() };
+      await mlOffscreen('writeMany', { entries: [{ key, value: result }, ...translated.map(region => ({ key: regionKeys[regions.findIndex(r => r.regionId === region.regionId)], value: { status: 'done', region } }))] });
+      await incrementTranslationStats().catch(() => {}); return result;
+    } catch (error) {
+      if (dispatched) {
+        error.stopJob = true; error.code ||= 'UNCERTAIN_GROUP';
+        const value = { status: 'uncertain', groupId: key, error: error.message, code: error.code, actionUrl: error.actionUrl, httpStatus: error.httpStatus, updatedAt: Date.now() };
+        try { await mlOffscreen('writeMany', { entries: [{ key, value }, ...missingKeys.map(key => ({ key, value }))] }); } catch { /* Initial pending reservation still prevents automatic resubmission. */ }
+        mlRouterQueue.blocked = true; mlRouterQueue.blockedOwner = owner; mlRouterQueue.pump();
+      }
+      error.timing = { queueMs, concurrency, providerMs: sentAt ? Date.now() - sentAt : 0, regions: missing.length, failed: true, notSent: !dispatched }; throw error;
+    }
+  })();
+  mlCalls.set(key, operation);
+  // Reservation happens synchronously before another group can overlap it.
+  const ownedKeys = regionKeys.filter(k => !mlRegionCalls.has(k)); ownedKeys.forEach(k => mlRegionCalls.set(k, operation));
+  try { return await operation; } finally { mlCalls.delete(key); ownedKeys.forEach(k => { if (mlRegionCalls.get(k) === operation) mlRegionCalls.delete(k); }); }
+}
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (!message?.type?.startsWith('ML_') || sender.id !== chrome.runtime.id) return;
   if (message.type.startsWith('ML_KEYS_')) return;
@@ -163,10 +301,16 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   const action = async () => {
     if (message.type === 'ML_CONFIG') return mlConfig();
     if (!sender.tab?.id) throw new Error('Bu komut yalnız manga sayfasından çalıştırılabilir.');
+    if (message.type === 'ML_JOB_CONTROL') {
+      if (typeof message.jobId !== 'string' || message.jobId.length > 80) throw new Error('Geçersiz iş kimliği');
+      const owner = `${sender.tab.id}:${message.jobId}`;
+      if (message.paused) mlRouterQueue.pause(owner); else mlRouterQueue.begin(owner, message.retry === true);
+      return true;
+    }
     if (message.type === 'ML_CANCEL') { mlLocalRequests.get(`${sender.tab.id}:${message.requestId}`)?.abort(); return true; }
     if (message.type === 'ML_PREPARE') return mlLocal(message, sender, 'prepare');
     if (message.type === 'ML_RENDER') return mlLocal(message, sender, 'render');
-    if (message.type === 'ML_TRANSLATE') return mlTranslate(message);
+    if (message.type === 'ML_TRANSLATE') return mlTranslate({ ...message, owner: `${sender.tab.id}:${message.jobId || 'manual'}` });
     if (message.type === 'ML_JOB_GET' || message.type === 'ML_JOB_SAVE') {
       const url = new URL(sender.tab.url); url.hash = '';
       const key = `ml-page-job:${sender.tab.id}:${url.href}`;
@@ -177,6 +321,6 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     throw new Error('Bilinmeyen sayfa komutu.');
   };
   action().then(value => respond({ ok: true, value })).catch(error => respond({ ok: false, error: error.message,
-    ...(error.stopJob ? { stopJob: true, code: error.code, actionUrl: error.actionUrl } : {}) }));
+    timing: error.timing, notSent: error.notSent, ...(error.stopJob ? { stopJob: true, code: error.code, actionUrl: error.actionUrl } : {}) }));
   return true;
 });

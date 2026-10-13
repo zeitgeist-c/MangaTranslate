@@ -48,6 +48,8 @@ $requiredFiles = @(
     'src\page\lib\geometry.mjs',
     'src\page\lib\rtdetr.mjs',
     'src\page\lib\ppocr.mjs',
+    'src\page\lib\db.mjs',
+    'src\page\queue.js',
     'src\page\models\detector_int8.onnx',
     'src\page\models\ppocrv5_det.onnx',
     'src\page\models\detector-v4-s_int8.onnx',
@@ -71,7 +73,7 @@ $node = Get-Command 'node.exe' -ErrorAction SilentlyContinue
 if (-not $node) {
     throw 'JavaScript sözdizimi doğrulaması için Node.js bulunamadı.'
 }
-foreach ($relativePath in @('popup\popup.js', 'popup\ui.js', 'options\settings.js', 'src\keys.js', 'src\background.js', 'src\content.js', 'src\providers.js', 'src\page-background.js', 'src\page-content.js', 'src\page\offscreen.mjs', 'src\page\layout.mjs')) {
+foreach ($relativePath in @('popup\popup.js', 'popup\ui.js', 'options\settings.js', 'src\keys.js', 'src\background.js', 'src\content.js', 'src\providers.js', 'src\page-background.js', 'src\page-content.js', 'src\page\offscreen.mjs', 'src\page\layout.mjs', 'src\page\queue.js', 'src\page\lib\db.mjs', 'src\page\lib\ppocr.mjs', 'src\page\store.mjs')) {
     & $node.Source --check (Join-Path $projectRoot $relativePath)
     if ($LASTEXITCODE -ne 0) {
         throw "JavaScript sözdizimi doğrulaması başarısız: $relativePath"

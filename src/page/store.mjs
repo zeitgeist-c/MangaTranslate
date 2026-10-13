@@ -16,9 +16,13 @@ export async function read(key) {
   });
 }
 export async function write(key, value) {
+  return writeMany([{ key, value }]);
+}
+export async function writeMany(entries) {
   const db = await database();
   await new Promise((resolve, reject) => {
-    const tx = db.transaction('cache', 'readwrite'); tx.objectStore('cache').put(value, key);
+    const tx = db.transaction('cache', 'readwrite');
+    for (const { key, value } of entries) tx.objectStore('cache').put(value, key);
     tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
   });
 }

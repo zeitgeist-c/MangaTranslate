@@ -30,7 +30,13 @@ try {
   const popup = await browser.newPage(); popup.on('pageerror', error => errors.push(error.message));
   await popup.goto(base + 'popup/popup.html');
   await popup.waitForFunction(() => document.querySelector('#key-summary').textContent.includes('Kayıtlı'));
-  assert.equal(await popup.locator('input[type=password]').count(), 0); assert.equal(await popup.locator('#model option').count(), 8);
+  assert.equal(await popup.locator('input[type=password]').count(), 0); assert.equal(await popup.locator('#model option').count(), 6);
+  await worker.evaluate(() => chrome.storage.sync.set({ openrouterModel: 'google/gemini-2.5-flash-lite' }));
+  await popup.waitForFunction(() => document.querySelector('#model').value === '' && document.querySelector('#btn-full-chapter').disabled);
+  assert.match(await popup.locator('#model').textContent(), /Model kaldırıldı/);
+  assert.equal(await worker.evaluate(async () => (await chrome.storage.sync.get('openrouterModel')).openrouterModel), 'google/gemini-2.5-flash-lite');
+  await popup.locator('#model').selectOption('qwen/qwen3.8-flash');
+  await popup.waitForFunction(() => !document.querySelector('#btn-full-chapter').disabled);
   await options.getByRole('button', { name: 'Kontrol et', exact: true }).click();
   await options.waitForFunction(() => document.querySelector('#key-list').textContent.includes('Bağlantı doğrulandı'));
   await options.locator('#new-label').fill('Yedek'); await options.locator('#new-key').fill('sk-or-synthetic-second-123456789012345'); await options.locator('#add-button').click();
@@ -111,7 +117,7 @@ try {
   await options.getByRole('button', { name: 'Hakkında', exact: true }).click();
   const catalog = await options.evaluate(() => MLProviders.catalog.openrouter.map(([id]) => ({ id, architecture: { input_modalities: ['text', 'image'] } })));
   await options.route('https://openrouter.ai/api/v1/models', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: catalog }) }));
-  await options.locator('#refresh-models').click(); await options.waitForFunction(() => document.querySelector('#model-availability').textContent.startsWith('8/8'));
+  await options.locator('#refresh-models').click(); await options.waitForFunction(() => document.querySelector('#model-availability').textContent.startsWith('6/6'));
   const reader = await browser.newPage(); await reader.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<html><body>Isolated reader fixture</body></html>' }));
   await reader.goto('https://fixture.invalid/chapter');
   const tab = await worker.evaluate(async url => (await chrome.tabs.query({})).find(t => t.url === url), reader.url());

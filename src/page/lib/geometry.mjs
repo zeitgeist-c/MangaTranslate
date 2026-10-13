@@ -118,7 +118,7 @@ export function associate(detections, imageId, detectorVersion) {
     const candidates = bubbles.filter(b => intersection(text.box, b.box) / area(text.box) >= 0.9);
     const bubbleId = candidates.length === 1 ? candidates[0].id : null;
     const needsReview = candidates.length > 1 || (text.kind !== 'text_free' && !bubbleId) || text.edgeClipped === true;
-    return { regionId: `${prefix}:r${index}`, textBox: text.box, score: text.score, kind: text.kind,
+    return { regionId: `${prefix}:r${index}`, textBox: text.box, inkBox: text.inkBox, score: text.score, kind: text.kind,
       bubbleId, bubbleBox: bubbleId ? candidates[0].box : null, needsReview,
       reason: text.edgeClipped ? 'tile_boundary' : candidates.length > 1 ? 'ambiguous_bubble' :
         !bubbleId && text.kind !== 'text_free' ? 'unmatched_text' : null,
