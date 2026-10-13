@@ -5,13 +5,13 @@ import { readFile } from 'node:fs/promises';
 import { webcrypto } from 'node:crypto';
 const source = await readFile(new URL('../src/page-content.js', import.meta.url), 'utf8');
 const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
-function fixture() {
+function fixture({ blocked = false } = {}) {
   const buttons = new Map(), messages = [], pending = [], timers = new Map(); let listener, status, timerId = 0;
   const node = tag => ({ dataset: {}, style: {}, isConnected: true, textContent: '',
     append(...children) { for (const child of children) { if (child.tag === 'button') buttons.set(child.textContent, child); if (child.tag === 'p') status = child; } },
     tag, setAttribute() {}, attachShadow() { return node('shadow'); }, remove() { this.isConnected = false; } });
   const config = { processingVersion: 'page-v4', localDetector: 'standard', provider: 'openrouter', model: 'synthetic' };
-  let saved = { config, pages: [{ source: 'https://fixture/image.png', state: 'queued' }], context: [] };
+  let saved = { config, pages: [{ source: 'https://fixture/image.png', state: 'queued' }, ...(blocked ? [{ source: 'https://fixture/second.png', state: 'queued' }] : [])], context: [] };
   const image = { currentSrc: 'https://fixture/image.png', naturalWidth: 900, naturalHeight: 1000, isConnected: true };
   const context = vm.createContext({ AbortController, DOMException, structuredClone, crypto: webcrypto, URL, console,
     setTimeout(fn, ms) { timers.set(++timerId, { fn, ms }); return timerId; }, clearTimeout(id) { timers.delete(id); },
@@ -25,6 +25,7 @@ function fixture() {
         if (message.type === 'ML_JOB_SAVE') { saved = structuredClone(message.job); return Promise.resolve({ ok: true }); }
         if (message.type === 'ML_CANCEL') return Promise.resolve({ ok: true });
         if (message.type === 'ML_PREPARE') return new Promise(resolve => pending.push({ message, resolve }));
+        if (message.type === 'ML_TRANSLATE') return Promise.resolve({ ok: false, error: 'OpenRouter hesabında 18+ yaş onayı gerekiyor.', code: 'AGE_CONFIRMATION_REQUIRED', stopJob: true, actionUrl: 'https://openrouter.ai/settings/preferences' });
         if (message.type === 'ML_RENDER') return Promise.reject(new Error('fixture render must not run'));
         throw new Error(message.type);
       }
@@ -44,6 +45,17 @@ test('pause releases a pending request and a single resume click starts again', 
   f.pending[0].resolve({ ok: true, value: { width: 900, height: 1000, regions: [] } }); await flush();
   assert.equal(f.saved.pages[0].state, 'detecting', 'late completion must not change the resumed job');
   await f.click('Duraklat'); assert.equal(f.timers.size, 0);
+});
+test('account refusal stops at the first affected image and preserves the remaining queue', async () => {
+  const f = fixture({ blocked: true }); await f.start();
+  f.pending[0].resolve({ ok: true, value: { width: 900, height: 1000, imageId: 'a'.repeat(64),
+    regions: [{ regionId: 'r1', crop: 'data:image/png;base64,AAAA', bubbleId: 'b1' }] } }); await flush();
+  assert.equal(f.saved.state, 'blocked'); assert.equal(f.saved.pages[1].state, 'queued');
+  assert.equal(f.pending.length, 1); assert.match(f.text, /yaş onayı/);
+  assert.doesNotMatch(f.text, /Tarama bitti/);
+  await f.click('Devam et'); assert.equal(f.pending.length, 1, 'ordinary resume must not retry a blocked account');
+  await f.click('Hatalıları yeniden dene'); assert.equal(f.pending.length, 2);
+  assert.equal(f.saved.blocked, undefined); await f.click('Duraklat');
 });
 test('a missing local reply times out, records the error and releases the controls', async () => {
   const f = fixture(); await f.start();

@@ -4,7 +4,7 @@
   globalThis.__mlPageController = true;
   let job, running = false, paused = false, epoch = 0, panel, statusNode, original = false, boxes = false;
   const layers = new Map();
-  let controller, resumePending;
+  let controller, resumePending, actionLink;
   const pendingRequests = new Set();
   const request = (type, data = {}, signal = controller?.signal) => new Promise((resolve, reject) => {
     const requestId = crypto.randomUUID();
@@ -31,11 +31,16 @@
       return chrome.runtime.sendMessage({ type, ...data, requestId });
     }).then(response => {
       if (settled) return;
-      if (!response?.ok) finish(new Error(response?.error || 'Uzantı bağlantısı kesildi; devam düğmesiyle yeniden deneyin.'));
+      if (!response?.ok) finish(Object.assign(new Error(response?.error || 'Uzantı bağlantısı kesildi; devam düğmesiyle yeniden deneyin.'),
+        { code: response?.code, stopJob: response?.stopJob === true, actionUrl: response?.actionUrl }));
       else finish(null, response.value);
     }, error => finish(error));
   });
-  const status = text => { ensurePanel(); statusNode.textContent = text; };
+  const status = text => { ensurePanel(); statusNode.textContent = text; actionLink.hidden = true; };
+  const blockedStatus = error => {
+    status('Tarama durduruldu; kalan görseller işlenmedi.\n' + error.message);
+    actionLink.hidden = error.actionUrl !== 'https://openrouter.ai/settings/preferences';
+  };
   function ensurePanel() {
     if (panel?.isConnected) return;
     panel = document.createElement('div'); panel.dataset.mangalensUi = 'page';
@@ -45,6 +50,9 @@
     const section = document.createElement('section'), title = document.createElement('strong'); title.textContent = 'MangaLens · Tam bölüm';
     statusNode = document.createElement('p'); statusNode.setAttribute('role', 'status');
     section.append(title, statusNode);
+    actionLink = document.createElement('a'); actionLink.textContent = 'OpenRouter ayarlarını aç';
+    actionLink.href = 'https://openrouter.ai/settings/preferences'; actionLink.target = '_blank'; actionLink.rel = 'noopener noreferrer';
+    actionLink.style.cssText = 'color:#b7ccff;margin:8px 0'; actionLink.hidden = true; section.append(actionLink);
     const button = (text, action) => { const b = document.createElement('button'); b.textContent = text; b.onclick = () => Promise.resolve().then(action).catch(e => status(e.message)); section.append(b); };
     button('Duraklat', pause); button('Devam et', () => start({ resume: true })); button('Hatalıları yeniden dene', () => start({ resume: true, retry: true }));
     button('Orijinal / çeviri', () => { original = !original; synchronize(); });
@@ -146,7 +154,7 @@
   }
   async function processPage(item, token, retry) {
     status(`${job.pages.indexOf(item) + 1}/${job.pages.length} · Yerel tespit hazırlanıyor…`);
-    item.state = 'detecting'; delete item.error; await save(); alive(token);
+    item.state = 'detecting'; delete item.error; delete item.errorCode; await save(); alive(token);
     const pendingImage = elementFor(item.source);
     if (pendingImage && !pendingImage.naturalWidth) {
       const loading = pendingImage.getAttribute('loading'); pendingImage.loading = 'eager';
@@ -194,6 +202,7 @@
       if (resume && job) {
         const current = await request('ML_CONFIG');
         if (job.config.processingVersion !== current.processingVersion) throw new Error('İşleme sürümü değişti. Popup üzerinden yeni bölüm taraması başlatın; eski iş otomatik tekrar ücretlendirilmedi.');
+        if (job.blocked && !retry) { blockedStatus({ ...job.blocked, message: job.blocked.error }); return; }
       }
       if (!resume || !job) {
         const config = await request('ML_CONFIG');
@@ -201,7 +210,7 @@
         const pages = await discover(token); alive(token);
         job = { id: crypto.randomUUID(), url: location.href, config, pages, context: [], createdAt: Date.now(), state: 'running' };
       }
-      alive(token); job.state = 'running'; await save(); alive(token);
+      alive(token); delete job.blocked; job.state = 'running'; await save(); alive(token);
       for (const item of job.pages) {
         alive(token);
         if (item.state === 'error' && !retry) continue;
@@ -212,6 +221,11 @@
           alive(token);
           if (error.name === 'AbortError') throw error;
           item.state = 'error'; item.error = error.message; await save();
+          if (error.stopJob) {
+            alive(token); item.errorCode = error.code;
+            job.state = 'blocked'; job.blocked = { error: error.message, code: error.code, actionUrl: error.actionUrl };
+            await save(); alive(token); blockedStatus(error); return;
+          }
         }
       }
       alive(token); job.state = 'finished'; await save(); alive(token);

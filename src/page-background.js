@@ -44,6 +44,30 @@ async function mlKey(provider) {
   const stored = await chrome.storage.local.get(['openrouterApiKey']);
   return stored.openrouterApiKey || '';
 }
+function mlAccessError(config, status, message) {
+  let code, advice, actionUrl;
+  if (config.provider === 'openrouter' && status === 403 && /(?:18\+\s*age confirmation|age (?:confirmation|verification) (?:is )?required)/i.test(message)) {
+    code = 'AGE_CONFIRMATION_REQUIRED';
+    advice = 'Bu model için OpenRouter hesabında 18+ yaş onayı gerekiyor. OpenRouter ayarlarından uygun onayı kendiniz tamamlayın; ardından “Hatalıları yeniden dene”yi kullanın. Alternatif olarak popup’tan başka model seçip yeni tarama başlatın.';
+    actionUrl = 'https://openrouter.ai/settings/preferences';
+  } else if (status === 401) {
+    code = 'PROVIDER_AUTH_REQUIRED'; advice = 'Sağlayıcı API anahtarını kabul etmedi. Popup’taki API sekmesinden ilgili anahtarı kontrol edip “Hatalıları yeniden dene”yi kullanın.';
+  } else if (status === 402) {
+    code = 'PROVIDER_CREDIT_REQUIRED'; advice = 'Sağlayıcı kredi veya ödeme koşulu nedeniyle isteği reddetti. Hesabınızın kredi durumunu kontrol edip “Hatalıları yeniden dene”yi kullanın.';
+  } else return null;
+  return Object.assign(new Error(`${config.provider}/${config.model}: HTTP ${status} — ${advice}`), { code, stopJob: true, httpStatus: status, actionUrl });
+}
+function mlRestoreJob(job) {
+  if (!job?.config || job.blocked) return job;
+  for (const page of job.pages || []) {
+    if (!/HTTP 403/.test(page.error || '')) continue;
+    const error = mlAccessError(job.config, 403, page.error);
+    if (!error) continue;
+    job.state = 'blocked'; job.blocked = { error: error.message, code: error.code, actionUrl: error.actionUrl };
+    break;
+  }
+  return job;
+}
 async function mlProviderCall(config, prompt, images, keyOverride) {
   const key = keyOverride || await mlKey(config.provider);
   if (!key) throw new Error(`${config.provider === 'gemini' ? 'Gemini' : 'OpenRouter'} API anahtarı eksik.`);
@@ -61,7 +85,10 @@ async function mlProviderCall(config, prompt, images, keyOverride) {
     const response = await fetch(endpoint, { method: 'POST', signal: controller.signal,
       headers: { 'Content-Type': 'application/json', ...(router ? { Authorization: `Bearer ${key}` } : { 'x-goog-api-key': key }) }, body: JSON.stringify(body) });
     const data = await response.json();
-    if (!response.ok || data.error) throw new Error(`${config.provider}/${config.model}: HTTP ${response.status} — ${String(data.error?.message || 'Sağlayıcı hatası').replaceAll(key, '[anahtar]').slice(0, 240)}`);
+    if (!response.ok || data.error) {
+      const detail = String(data.error?.message || 'Sağlayıcı hatası').replaceAll(key, '[anahtar]');
+      throw mlAccessError(config, response.status, detail) || new Error(`${config.provider}/${config.model}: HTTP ${response.status} — ${detail.slice(0, 240)}`);
+    }
     const text = router ? data.choices?.[0]?.message?.content : data.candidates?.[0]?.content?.parts?.filter(p => !p.thought).map(p => p.text || '').join('');
     const finish = router ? data.choices?.[0]?.finish_reason : data.candidates?.[0]?.finishReason;
     if (['length', 'MAX_TOKENS', 'SAFETY', 'content_filter'].includes(finish)) throw new Error(`Çeviri tamamlanmadı: ${finish}`);
@@ -85,6 +112,12 @@ async function mlTranslate(message) {
   const operation = (async () => {
     const existing = await mlOffscreen('read', { key });
     if (existing?.status === 'done') return { ...existing, cached: true };
+    if (existing && !message.retry) {
+      // Recognize the known 3.5.1 cached refusal as well as new structured blocks.
+      const refusal = mlAccessError(checked, existing.httpStatus || (/HTTP 403/.test(existing.error || '') ? 403 : 0), existing.error || '');
+      if (existing.status === 'blocked') throw Object.assign(new Error(existing.error), { code: existing.code, stopJob: true, httpStatus: existing.httpStatus, actionUrl: existing.actionUrl });
+      if (refusal) throw refusal;
+    }
     if (existing && !message.retry) throw new Error('Önceki çağrı tamamlanamadı; tekrar ücret olasılığı nedeniyle durduruldu. “Hatalıları yeniden dene” ile açıkça tekrar deneyebilirsiniz.');
     await mlOffscreen('write', { key, value: { status: 'pending', startedAt: Date.now(), config: checked } });
     try {
@@ -94,7 +127,8 @@ async function mlTranslate(message) {
       await mlOffscreen('write', { key, value: result }); await incrementTranslationStats();
       return result;
     } catch (error) {
-      await mlOffscreen('write', { key, value: { status: 'uncertain', error: error.message, config: checked, updatedAt: Date.now() } });
+      await mlOffscreen('write', { key, value: { status: error.stopJob ? 'blocked' : 'uncertain', error: error.message,
+        ...(error.stopJob ? { code: error.code, httpStatus: error.httpStatus, actionUrl: error.actionUrl } : {}), config: checked, updatedAt: Date.now() } });
       throw error;
     }
   })();
@@ -119,12 +153,13 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (message.type === 'ML_JOB_GET' || message.type === 'ML_JOB_SAVE') {
       const url = new URL(sender.tab.url); url.hash = '';
       const key = `ml-page-job:${sender.tab.id}:${url.href}`;
-      if (message.type === 'ML_JOB_GET') return (await chrome.storage.local.get(key))[key] || null;
+      if (message.type === 'ML_JOB_GET') return mlRestoreJob((await chrome.storage.local.get(key))[key] || null);
       if (!message.job || JSON.stringify(message.job).length > 2_000_000) throw new Error('İş kaydı çok büyük.');
       await chrome.storage.local.set({ [key]: message.job }); return true;
     }
     throw new Error('Bilinmeyen sayfa komutu.');
   };
-  action().then(value => respond({ ok: true, value })).catch(error => respond({ ok: false, error: error.message }));
+  action().then(value => respond({ ok: true, value })).catch(error => respond({ ok: false, error: error.message,
+    ...(error.stopJob ? { stopJob: true, code: error.code, actionUrl: error.actionUrl } : {}) }));
   return true;
 });

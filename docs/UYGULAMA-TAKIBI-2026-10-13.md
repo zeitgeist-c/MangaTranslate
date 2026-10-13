@@ -48,6 +48,8 @@ Kanıtlar `evaluation/reports/` altında yereldir: extension-full-chapter.json, 
 
 ## Geri dönüşte yeni veri
 
+Sonraki düzeltme 3.5.2: OpenRouter yaş onayı/anahtar/kredi engelinde ilk hatada tarama durur, kalan kuyruk korunur. 47 otomatik kontrol ve izole Brave testleri geçti; gerçek API kullanılmadı. [Hesap erişimi düzeltmesi](HESAP-ERISIM-DUZELTMESI-3.5.2.md). Önceki sürüm kayıtları aşağıda tarihî kanıttır.
+
 13 Ekim 2026 ek düzeltme: güncel aday 3.5.1. Kullanıcının duraklat/devam kilitlenmesi giderildi; 42 otomatik kontrol ve izole Brave düğme/uzantı testleri geçti. Ayrıntı ve açık kalan kalite sınırı: [3.5.1 düzeltme kaydı](DURAKLAT-DEVAM-DUZELTMESI-3.5.1.md). Yukarıdaki 3.5.0 kanıtları önceki sürümün tarihî kaydıdır.
 
 3.1.7 checkpoint dosyalarına dokunma. Gelecekte “geri dön” istenirse önce yeni kaynak/WIP ve güncel local/sync storage yanında **bu uzantının IndexedDB verisi** de ayrı yeni kurtarma yedeğine alınmalı. Mevcut anahtar/sözlük/job/cache verileri korunmadan eski yedek canlı profile uygulanmaz. Eski DPAPI arşivinin kapsamı yeni cache'i içeriyor diye varsayılmamalı.
