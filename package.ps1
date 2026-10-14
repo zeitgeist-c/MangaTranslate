@@ -86,6 +86,13 @@ if (Test-Path -LiteralPath $packagePath) {
     throw "Önceki paket korunuyor; aynı sürümün üzerine yazılmaz: $packagePath"
 }
 
+foreach ($readmePath in @('README.md', 'README.tr.md')) {
+    $readme = Get-Content -LiteralPath (Join-Path $projectRoot $readmePath) -Raw -Encoding UTF8
+    if ($readme -notmatch [regex]::Escape($packageName)) {
+        throw "$readmePath paket adıyla eşleşmiyor: $packageName"
+    }
+}
+
 & $node.Source --test (Get-ChildItem -LiteralPath (Join-Path $projectRoot 'tests') -File | Where-Object { $_.Name -match '\.test\.(js|mjs)$' } | ForEach-Object FullName)
 if ($LASTEXITCODE -ne 0) { throw 'Sürüm testleri başarısız; paket oluşturulmadı.' }
 

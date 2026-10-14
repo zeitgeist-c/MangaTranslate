@@ -10,7 +10,6 @@ globalThis.MLProviders = (() => {
   const router = [
     ['qwen/qwen3.7-flash', 'Qwen3.7 Flash'], ['qwen/qwen3.8-flash', 'Qwen3.8 Flash'],
     ['anthropic/claude-haiku-5.5', 'Claude Haiku 5.5'],
-    ['deepseek/deepseek-v4.1-flash', 'DeepSeek V4.1 Flash'],
     ['meta/muse-spark-1.3', 'Muse Spark 1.3'],
     ['meta/muse-spark-1.3-contributor', 'Muse Spark 1.3 Contributor · veri paylaşımı'],
   ];
@@ -18,22 +17,30 @@ globalThis.MLProviders = (() => {
   // Translation needs visible JSON, not a provider's default reasoning budget.
   // Muse Spark requires reasoning; leave its working policy and Haiku unchanged.
   function routerPolicy(model = '') {
-    const disableReasoning = ['qwen/qwen3.7-flash', 'qwen/qwen3.8-flash', 'deepseek/deepseek-v4.1-flash'].includes(model);
-    const structuredRegions = ['qwen/qwen3.8-flash', 'deepseek/deepseek-v4.1-flash'].includes(model);
-    return { disableReasoning, structuredRegions, maxRegions: model.startsWith('deepseek/') ? 8 : model.startsWith('meta/') ? 20 : 12,
+    const disableReasoning = ['qwen/qwen3.7-flash', 'qwen/qwen3.8-flash'].includes(model);
+    const structuredRegions = model === 'qwen/qwen3.8-flash';
+    return { disableReasoning, structuredRegions, maxRegions: model.startsWith('meta/') ? 20 : 12,
       maxConcurrency: model.startsWith('meta/') ? 8 : disableReasoning || model.startsWith('anthropic/') ? 2 : 4,
-      timeoutMs: model.startsWith('deepseek/') ? 120000 : model.startsWith('qwen/') || model.startsWith('anthropic/') ? 90000 : 60000,
+      timeoutMs: model.startsWith('qwen/') || model.startsWith('anthropic/') ? 90000 : 60000,
       requiredParameters: ['max_tokens', 'response_format', ...(disableReasoning ? ['reasoning'] : []), ...(structuredRegions ? ['structured_outputs'] : [])] };
   }
   function settings(raw = {}) {
     const provider = raw.translationProvider === 'openrouter' ? 'openrouter' : 'gemini';
-    const model = provider === 'gemini' ? raw.geminiModel || google[0][0] : raw.openrouterModel || router[1][0];
+    const model = provider === 'gemini' ? raw.geminiModel || google[0][0] : raw.openrouterModel || 'qwen/qwen3.8-flash';
     if (!catalog[provider].some(([id]) => id === model)) throw new Error('Seçili model desteklenmiyor; ayarlardan yeniden seçin.');
     if (model.endsWith('-contributor') && raw.contributorConsent !== true) throw new Error('Contributor modeli için veri paylaşımı seçeneğini onaylayın.');
     return { provider, model, profileVersion: version, processingVersion, contentType: ['manga', 'manhwa', 'manhua'].includes(raw.contentType) ? raw.contentType : 'auto',
       localDetector: ['small', 'detailed'].includes(raw.localDetector) ? raw.localDetector : 'fast',
       series: String(raw.seriesName || '').slice(0, 200), instructions: String(raw.translationInstructions || '').slice(0, 1500),
       glossary: String(raw.translationGlossary || '').slice(0, 6000) };
+  }
+  // Removed models fall back to the provider default; callers migrate stored settings openly.
+  function migrate(raw = {}) {
+    const provider = raw.translationProvider === 'openrouter' ? 'openrouter' : 'gemini';
+    const fallback = provider === 'gemini' ? google[0][0] : 'qwen/qwen3.8-flash';
+    const key = provider === 'gemini' ? raw.geminiModel : raw.openrouterModel;
+    if (catalog[provider].some(([id]) => id === key)) return { provider, model: key, migrated: false };
+    return { provider, model: fallback, migrated: true };
   }
   function style(config) {
     return `You translate manga, manhwa and manhua dialogue into natural Turkish.
@@ -92,5 +99,5 @@ REGION ORDER: ${JSON.stringify(regions.map(r => r.regionId))}`;
         { type: 'image_url', image_url: { url: image.dataUrl } }
       ])] }] };
   }
-  return { catalog, settings, style, prompt, parse, routerBody, routerPolicy, version, processingVersion };
+  return { catalog, settings, migrate, style, prompt, parse, routerBody, routerPolicy, version, processingVersion };
 })();

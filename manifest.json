@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MangaLens TR",
-  "version": "3.8.2",
+  "version": "3.8.3",
   "description": "Manga, manhwa ve manhua sitelerindeki İngilizce konuşma balonlarını yapay zeka ile Türkçe'ye çevirir.",
   "icons": {
     "16": "assets/icon16.png",
@@ -60,5 +60,5 @@
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
   "minimum_chrome_version": "116",
-  "version_name": "3.8.2 - Kuyruk ve yanıt dayanıklılığı"
+  "version_name": "3.8.3 - Zaman aşımı dayanıklılığı ve model göçü"
 }

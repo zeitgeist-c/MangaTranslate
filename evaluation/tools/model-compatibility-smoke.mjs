@@ -15,8 +15,8 @@ try {
     globalThis.__modelCalls=[];
     globalThis.fetch=async(url,options)=>{
       if(String(url)!=='https://openrouter.ai/api/v1/chat/completions')throw new Error('External network forbidden');
-      const body=JSON.parse(options.body),requiresOff=body.model.startsWith('qwen/')||body.model.startsWith('deepseek/');
-      const schemaExpected=body.stream&&['qwen/qwen3.8-flash','deepseek/deepseek-v4.1-flash'].includes(body.model);
+      const body=JSON.parse(options.body),requiresOff=body.model.startsWith('qwen/');
+      const schemaExpected=body.stream&&body.model==='qwen/qwen3.8-flash';
       if(body.response_format.type!==(schemaExpected?'json_schema':'json_object'))throw new Error('Incorrect model output contract');
       if(body.provider.require_parameters!==true||body.provider.allow_fallbacks!==false)throw new Error('Routing policy missing');
       if(requiresOff&&body.reasoning?.enabled!==false)return new Response(JSON.stringify({error:{message:'thinking/JSON incompatible'}}),{status:400});
@@ -29,7 +29,7 @@ try {
     };
   });
   const popup=await browser.newPage();await popup.goto(`chrome-extension://${new URL(worker.url()).host}/popup/popup.html`);
-  await popup.waitForFunction(()=>document.querySelector('#model').options.length===6);
+  await popup.waitForFunction(()=>document.querySelector('#model').options.length===5);
   const models=await worker.evaluate(()=>MLProviders.catalog.openrouter.map(([id])=>id));
   for(const model of models){
     await popup.locator('#model').selectOption(model);
@@ -47,7 +47,7 @@ try {
     },model);
     assert.deepEqual(result,[['a:r1','b:r2'],['a:r1','b:r2']]);
   }
-  const calls=await worker.evaluate(()=>__modelCalls);assert.equal(calls.length,12);
+  const calls=await worker.evaluate(()=>__modelCalls);assert.equal(calls.length,10);
   const result={version:await worker.evaluate(()=>chrome.runtime.getManifest().version),models,calls,uiSelectionPersists:true,shuffledRepliesPreserveIdentity:true,realProviderCalls:0};
   await mkdir('reports',{recursive:true});await writeFile(`reports/model-compatibility-${result.version}.json`,JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }finally{await browser.close();await rm(profile,{recursive:true,force:true});}

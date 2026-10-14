@@ -6,6 +6,18 @@ const mlRouterQueue = new MLQueue(limit => chrome.storage?.local?.set({ mlParall
 let mlManualOwner = 0;
 const mlCooldowns = new Map(); let mlCooldownWrites = Promise.resolve();
 const mlRegionCalls = new Map(), mlCapabilityCalls = new Map(), mlCapabilityMemory = new Map();
+// A timed-out model keeps smaller groups for a while; a finished group clears it.
+const mlTimeoutShrink = new Map(), ML_TIMEOUT_SHRINK_MS = 30 * 60 * 1000, ML_TIMEOUT_SHRINK_MIN = 2;
+function mlNoteTimeout(model, attempted) {
+  const prev = mlTimeoutShrink.get(model), cap = Math.max(ML_TIMEOUT_SHRINK_MIN, Math.floor((attempted || 0) / 2));
+  mlTimeoutShrink.set(model, { regions: Math.min(prev && prev.until > Date.now() ? prev.regions : Infinity, cap), until: Date.now() + ML_TIMEOUT_SHRINK_MS });
+}
+function mlApplyShrink(model, regions) {
+  const shrink = mlTimeoutShrink.get(model);
+  if (!shrink) return regions;
+  if (shrink.until <= Date.now()) { mlTimeoutShrink.delete(model); return regions; }
+  return Math.min(regions, shrink.regions);
+}
 const mlQueueReady = chrome.storage?.local?.get(['mlParallelLimit', 'mlRouterCooldowns']).then(stored => {
   if (Number.isInteger(stored.mlParallelLimit)) mlRouterQueue.limit = Math.max(1, Math.min(8, stored.mlParallelLimit));
   for (const [scope, value] of Object.entries(stored.mlRouterCooldowns || {})) {
@@ -45,7 +57,7 @@ function mlEnqueue(config, task, owner) {
 async function mlCapabilities(config) {
   const fallback = { maxRegions: config.provider === 'openrouter' ? 12 : 6, maxOutputTokens: 8192, contextLength: null, verified: false };
   if (config.provider !== 'openrouter') return fallback;
-  const memory = mlCapabilityMemory.get(config.model); if (memory?.expires > Date.now()) return memory.value;
+  const memory = mlCapabilityMemory.get(config.model); if (memory?.expires > Date.now()) return { ...memory.value, maxRegions: mlApplyShrink(config.model, memory.value.maxRegions) };
   if (!mlCapabilityCalls.has(config.model)) mlCapabilityCalls.set(config.model, (async () => {
     const cacheKey = `ml-model-capabilities:v3:${config.model}`, cached = (await chrome.storage.local.get(cacheKey))[cacheKey];
     if (cached?.expires > Date.now()) return cached.value;
@@ -73,7 +85,8 @@ async function mlCapabilities(config) {
   try {
     const raw = await operation, policy = MLProviders.routerPolicy(config.model);
     const value = {...raw, maxRegions:Math.min(raw.maxRegions,policy.maxRegions), maxPending:Math.min(8,policy.maxConcurrency*2)};
-    mlCapabilityMemory.set(config.model, { expires: Date.now() + (value.verified ? 86400000 : 600000), value }); return value;
+    mlCapabilityMemory.set(config.model, { expires: Date.now() + (value.verified ? 86400000 : 600000), value });
+    return { ...value, maxRegions: mlApplyShrink(config.model, value.maxRegions) };
   } finally { if (mlCapabilityCalls.get(config.model) === operation) mlCapabilityCalls.delete(config.model); }
 }
 async function mlOffscreen(command, payload = {}) {
@@ -157,7 +170,14 @@ async function mlProviderCall(config, prompt, images, keyOverride) {
   const key = keyOverride || await mlKey(config.provider);
   if (!key) throw new Error(`${config.provider === 'gemini' ? 'Gemini' : 'OpenRouter'} API anahtarı eksik.`);
   const timeoutMs = config.provider === 'openrouter' ? MLProviders.routerPolicy(config.model).timeoutMs : 60000;
-  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeoutMs);
+  const streaming = config.provider === 'openrouter' && Boolean(config.maxOutputTokens);
+  const controller = new AbortController();
+  let timer = 0, idleTimer = 0, absoluteTimer = 0, idleFired = false, activity;
+  if (streaming) {
+    const armIdle = () => { clearTimeout(idleTimer); idleTimer = setTimeout(() => { idleFired = true; controller.abort(); }, timeoutMs); };
+    armIdle(); activity = armIdle;
+    absoluteTimer = setTimeout(() => controller.abort(), timeoutMs * 2);
+  } else timer = setTimeout(() => controller.abort(), timeoutMs);
   const heartbeat = globalThis.setInterval?.(() => chrome.runtime.getContexts?.({ contextTypes: ['OFFSCREEN_DOCUMENT'] }).catch(() => {}), 10000);
   let response;
   try {
@@ -174,7 +194,7 @@ async function mlProviderCall(config, prompt, images, keyOverride) {
     const endpoint = router ? 'https://openrouter.ai/api/v1/chat/completions' : `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.model)}:generateContent`;
     response = await fetch(endpoint, { method: 'POST', signal: controller.signal,
       headers: { 'Content-Type': 'application/json', ...(router ? { Authorization: `Bearer ${key}` } : { 'x-goog-api-key': key }) }, body: JSON.stringify(body) });
-    const data = router && response.headers?.get('content-type')?.includes('text/event-stream') ? await mlReadStream(response) : await response.json();
+    const data = router && response.headers?.get('content-type')?.includes('text/event-stream') ? await mlReadStream(response, activity) : await response.json();
     if (!response.ok || data.error) {
       const cooldown = router && response.status === 429 ? await mlRememberCooldown(config,response,data) : null;
       const detail = String(data.error?.message || 'Sağlayıcı hatası').replaceAll(key, '[anahtar]');
@@ -190,7 +210,9 @@ async function mlProviderCall(config, prompt, images, keyOverride) {
     if (typeof text !== 'string' || !text.trim()) throw new Error('Sağlayıcı boş yanıt verdi.');
     return text;
   } catch (error) {
-    if (error.name === 'AbortError') throw Object.assign(new Error(`${config.provider}/${config.model}: Sağlayıcı ${timeoutMs/1000} saniyede yanıt vermedi; ücretlendirme durumu belirsiz. Otomatik tekrar yapılmadı.`), { stopJob: true, code: 'PROVIDER_TIMEOUT' });
+    if (error.name === 'AbortError') { mlNoteTimeout(config.model, images.length);
+      const reason = idleFired ? `yanıt akışı ${timeoutMs/1000} saniye ilerlemedi` : `${timeoutMs/1000} saniyede yanıt vermedi`;
+      throw Object.assign(new Error(`${config.provider}/${config.model}: Sağlayıcı ${reason}; ücretlendirme durumu belirsiz. Otomatik tekrar yapılmadı. Sonraki gruplar bu modelde geçici küçültüldü.`), { stopJob: true, code: 'PROVIDER_TIMEOUT' }); }
     error.message = String(error.message).replaceAll(key, '[anahtar]').slice(0, 1000);
     if (error.httpStatus && !error.code) {
       const access=mlAccessError(config,error.httpStatus,error.message);
@@ -201,9 +223,9 @@ async function mlProviderCall(config, prompt, images, keyOverride) {
       throw access||error;
     }
     throw error;
-  } finally { clearTimeout(timer); if (heartbeat) globalThis.clearInterval(heartbeat); }
+  } finally { clearTimeout(timer); clearTimeout(idleTimer); clearTimeout(absoluteTimer); if (heartbeat) globalThis.clearInterval(heartbeat); }
 }
-async function mlReadStream(response) {
+async function mlReadStream(response, onActivity) {
   const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '', content = '', finish, size = 0, doneMarker = false;
   const event = value => {
     const data = value.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n').trim();
@@ -222,7 +244,7 @@ async function mlReadStream(response) {
   };
   try {
     for (;;) {
-      const chunk = await reader.read(); if (chunk.done) break;
+      const chunk = await reader.read(); if (chunk.done) break; onActivity?.();
       size += chunk.value.byteLength; if (size > 2 * 1024 * 1024) throw new Error('Sağlayıcı akış boyutu sınırı aşıldı.');
       buffer += decoder.decode(chunk.value, { stream: true }); buffer = buffer.replace(/\r\n/g, '\n');
       let boundary; while ((boundary = buffer.indexOf('\n\n')) >= 0) { event(buffer.slice(0, boundary)); buffer = buffer.slice(boundary + 2); }
@@ -321,6 +343,7 @@ async function mlTranslateGroup(message) {
         } catch (error) { error.stopJob = true; error.code ||= 'UNCERTAIN_GROUP'; throw error; }
       }, owner);
       const translated = raw;
+      mlTimeoutShrink.delete(checked.model);
       const result = { status: 'done', groupId: key, regions: regions.map((r, i) => saved[i]?.status === 'done' ? saved[i].region : translated.find(t => t.regionId === r.regionId)),
         timing: { queueMs, concurrency, providerMs: Date.now() - sentAt, regions: missing.length, cachedRegions: regions.length - missing.length }, completedAt: Date.now() };
       await mlOffscreen('writeMany', { entries: [{ key, value: result }, ...translated.map(region => ({ key: regionKeys[regions.findIndex(r => r.regionId === region.regionId)], value: { status: 'done', region } }))] });
