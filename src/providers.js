@@ -24,12 +24,16 @@ globalThis.MLProviders = (() => {
       timeoutMs: model.startsWith('qwen/') || model.startsWith('anthropic/') ? 90000 : 60000,
       requiredParameters: ['max_tokens', 'response_format', ...(disableReasoning ? ['reasoning'] : []), ...(structuredRegions ? ['structured_outputs'] : [])] };
   }
+  function nextGeminiModel(model = '') {
+    const ids = google.map(([id]) => id), at = ids.indexOf(model);
+    return at >= 0 && at + 1 < ids.length ? ids[at + 1] : null;
+  }
   function settings(raw = {}) {
     const provider = raw.translationProvider === 'openrouter' ? 'openrouter' : 'gemini';
     const model = provider === 'gemini' ? raw.geminiModel || google[0][0] : raw.openrouterModel || 'qwen/qwen3.8-flash';
     if (!catalog[provider].some(([id]) => id === model)) throw new Error('Seçili model desteklenmiyor; ayarlardan yeniden seçin.');
     if (model.endsWith('-contributor') && raw.contributorConsent !== true) throw new Error('Contributor modeli için veri paylaşımı seçeneğini onaylayın.');
-    return { provider, model, profileVersion: version, processingVersion, contentType: ['manga', 'manhwa', 'manhua'].includes(raw.contentType) ? raw.contentType : 'auto',
+    return { provider, model, profileVersion: version, processingVersion, geminiFallback: raw.geminiFallback === true, contentType: ['manga', 'manhwa', 'manhua'].includes(raw.contentType) ? raw.contentType : 'auto',
       localDetector: ['small', 'detailed'].includes(raw.localDetector) ? raw.localDetector : 'fast',
       series: String(raw.seriesName || '').slice(0, 200), instructions: String(raw.translationInstructions || '').slice(0, 1500),
       glossary: String(raw.translationGlossary || '').slice(0, 6000) };
@@ -99,5 +103,5 @@ REGION ORDER: ${JSON.stringify(regions.map(r => r.regionId))}`;
         { type: 'image_url', image_url: { url: image.dataUrl } }
       ])] }] };
   }
-  return { catalog, settings, migrate, style, prompt, parse, routerBody, routerPolicy, version, processingVersion };
+  return { catalog, settings, migrate, nextGeminiModel, style, prompt, parse, routerBody, routerPolicy, version, processingVersion };
 })();

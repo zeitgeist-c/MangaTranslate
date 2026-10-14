@@ -1,15 +1,15 @@
 'use strict';
-const $ = id => document.getElementById(id), prefs = ['content-type', 'local-detector', 'font-size', 'series-name', 'translation-instructions', 'translation-glossary', 'contributor-consent'];
+const $ = id => document.getElementById(id), prefs = ['content-type', 'local-detector', 'font-size', 'series-name', 'translation-instructions', 'translation-glossary', 'contributor-consent', 'gemini-fallback'];
 let provider = 'gemini', section = 'keys', dirty = false, listing = 0, formSaving = false, adding = false;
 const checking = new Set();
 function notice(text) { $('notice').textContent = text; $('notice').hidden = !text; }
 function markDirty(value) { dirty = value; $('dirty-status').textContent = dirty ? 'Kaydedilmemiş değişiklikler' : 'Değişiklik yok'; }
 function preferenceValues() { return { contentType: $('content-type').value, localDetector: $('local-detector').value, translationFontSize: Number($('font-size').value),
-  seriesName: $('series-name').value.trim(), translationInstructions: $('translation-instructions').value, translationGlossary: $('translation-glossary').value, contributorConsent: $('contributor-consent').checked }; }
+  seriesName: $('series-name').value.trim(), translationInstructions: $('translation-instructions').value, translationGlossary: $('translation-glossary').value, contributorConsent: $('contributor-consent').checked, geminiFallback: $('gemini-fallback').checked }; }
 async function loadPreferences() {
   if (dirty || formSaving) return; const s = await MLUI.settings(); if (dirty || formSaving) return;
   for (const [id, value] of [['content-type', s.contentType], ['local-detector', s.localDetector], ['font-size', s.translationFontSize], ['series-name', s.seriesName], ['translation-instructions', s.translationInstructions], ['translation-glossary', s.translationGlossary]]) $(id).value = value;
-  $('contributor-consent').checked = s.contributorConsent;
+  $('contributor-consent').checked = s.contributorConsent; $('gemini-fallback').checked = s.geminiFallback === true;
 }
 async function renderKeys() {
   const token = ++listing, currentProvider = provider, list = await MLUI.keys(currentProvider);
