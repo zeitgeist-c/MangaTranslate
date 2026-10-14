@@ -137,11 +137,14 @@
     ]).filter(Boolean).join('\n') || 'Kontrol gerektiren alan yok.'); }, tools);
     button('Tanılama özeti', async () => {
       const groups = job?.metrics?.groups || [], summary = {
-        model: job?.config?.model, provider: job?.config?.provider, providerCalls: job?.providerCalls || 0, elapsedMs: (job?.elapsedMs || 0) + (segmentClock ? performance.now() - segmentClock : 0),
+        model: job?.config?.model, provider: job?.config?.provider, providerCalls: job?.providerCalls || 0,
+        issueReasons: {}, failedGroups: {}, elapsedMs: (job?.elapsedMs || 0) + (segmentClock ? performance.now() - segmentClock : 0),
         images: job?.pages?.length || 0, cards: job?.pages?.reduce((n,p)=>n+(p.translated||0),0) || 0,
         errors: (job?.pages || []).map((p,index)=>p.error ? {image:index+1,message:p.error} : null).filter(Boolean),
         groups: groups.map(g=>({groupId:g.groupId,regions:g.regions || g.regionCount,queueMs:g.queueMs,providerMs:g.providerMs,wallMs:g.wallMs,concurrency:g.concurrency,cached:g.cached,failed:g.failed,code:g.code}))
       };
+      for (const p of job?.pages || []) for (const issue of p.issues || []) summary.issueReasons[issue.reason || 'bilinmiyor'] = (summary.issueReasons[issue.reason || 'bilinmiyor'] || 0) + 1;
+      for (const g of groups) if (g.failed) summary.failedGroups[g.code || 'bilinmiyor'] = (summary.failedGroups[g.code || 'bilinmiyor'] || 0) + 1;
       const text = JSON.stringify(summary, null, 2); status(text);
       try { await navigator.clipboard.writeText(text); } catch { /* Summary remains selectable in the panel. */ }
     }, tools);

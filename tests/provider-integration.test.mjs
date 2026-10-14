@@ -69,6 +69,7 @@ test('all five router adapters preserve exact chosen model and keep Google crede
 });
 test('gemini single key is paced to 12 sends per minute window', async () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext('mlGeminiGapMs = 5', context);
   const gemini = { provider: 'gemini', model: 'gemini-3.5-flash-lite' };
   for (let i = 0; i < 12; i++) assert.equal(await context.mlProviderCall(gemini, 'Hi', []), 'OK');
   await assert.rejects(context.mlProviderCall(gemini, 'Hi', []),
@@ -76,6 +77,7 @@ test('gemini single key is paced to 12 sends per minute window', async () => {
 });
 test('gemini budget rotates across saved keys before waiting', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext('mlGeminiGapMs = 5', context);
   context.MLKeys = { active: async () => 'AAA', all: async () => [{ id: 'k1', key: 'AAA' }, { id: 'k2', key: 'BBB' }] };
   const gemini = { provider: 'gemini', model: 'gemini-3.5-flash-lite' };
   for (let i = 0; i < 24; i++) await context.mlProviderCall(gemini, 'Hi', []);
@@ -87,11 +89,13 @@ test('gemini budget rotates across saved keys before waiting', async () => {
 });
 test('gemini budget frees slots older than one minute', async () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext('mlGeminiGapMs = 5', context);
   vm.runInContext(`mlGeminiBudget.set('google-private-key', Array(12).fill(${Date.now() - 61000}))`, context);
   assert.equal(await context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []), 'OK');
 });
 test('explicit key override skips gemini budget accounting', async () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext('mlGeminiGapMs = 5', context);
   const gemini = { provider: 'gemini', model: 'gemini-3.5-flash-lite' };
   for (let i = 0; i < 13; i++) assert.equal(await context.mlProviderCall(gemini, 'Hi', [], 'override-key'), 'OK');
 });
@@ -175,6 +179,42 @@ test('strict translation jobs never automatically retry potentially billed failu
   await assert.rejects(context.enqueueWithRateLimit(async () => { attempts++; throw new Error('429 timeout'); }, { retry: false }), /429/);
   assert.equal(attempts, 1);
   assert.equal(vm.runInContext('requestQueue.length', context), 0);
+});
+test('same-key gemini sends serialize while different keys overlap', async () => {
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  const order = [];
+  const same1 = context.mlWithGeminiKeySlot('k1', 40, async () => { order.push('a-start'); await new Promise(r => setTimeout(r, 10)); order.push('a-end'); return 'a'; });
+  const same2 = context.mlWithGeminiKeySlot('k1', 40, async () => { order.push('b'); return 'b'; });
+  const other = context.mlWithGeminiKeySlot('k2', 40, async () => { order.push('c'); return 'c'; });
+  assert.deepEqual(await Promise.all([same1, same2, other]), ['a', 'b', 'c']);
+  assert.ok(order.indexOf('a-end') < order.indexOf('b'), 'same key must serialize');
+  assert.equal(order.length, 4);
+});
+test('gemini queue stays serial by default and overlaps across lanes', async () => {
+  const background = await readFile(new URL('../src/background.js', import.meta.url), 'utf8');
+  const mk = async () => {
+    const { context } = fixture();
+    context.chrome.runtime.onInstalled = context.chrome.runtime.onStartup = { addListener() {} };
+    context.chrome.alarms = { onAlarm: { addListener() {} } };
+    context.chrome.storage.session = { get: async () => ({}), set: async () => {} };
+    context.console = { warn() {} };
+    vm.runInContext(background, context); return context;
+  };
+  const flush = async () => { for (let i = 0; i < 50; i++) await new Promise(r => setImmediate(r)); };
+  const hold = releases => label => () => new Promise(r => releases.push(() => r(label)));
+  { const context = await mk(), releases = [];
+    const p1 = context.enqueueWithRateLimit(hold(releases)('one'), { retry: false });
+    const p2 = context.enqueueWithRateLimit(hold(releases)('two'), { retry: false });
+    await flush(); assert.equal(releases.length, 1);
+    releases[0](); assert.equal(await p1, 'one'); await flush(); assert.equal(releases.length, 2);
+    releases[1](); assert.equal(await p2, 'two'); }
+  { const context = await mk();
+    vm.runInContext('mlGeminiLanes = 2', context);
+    const releases = [];
+    const p1 = context.enqueueWithRateLimit(hold(releases)('one'), { retry: false });
+    const p2 = context.enqueueWithRateLimit(hold(releases)('two'), { retry: false });
+    await flush(); assert.equal(releases.length, 2);
+    releases[0](); releases[1](); assert.deepEqual(await Promise.all([p1, p2]), ['one', 'two']); }
 });
 
 test('resuming while a provider reply is pending reuses the same operation and caches its result', async () => {

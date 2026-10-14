@@ -1,6 +1,6 @@
 # MangaLens TR Gizlilik Politikası
 
-Tarih: 14 Ekim 2026 — sürüm 3.8.4 için taslak
+Tarih: 14 Ekim 2026 — sürüm 3.8.5 için taslak
 
 İletişim: zeitgeist.geeker@gmail.com
 
