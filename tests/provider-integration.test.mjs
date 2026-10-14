@@ -157,10 +157,72 @@ test('reasoning-only output hitting the token limit is not accepted as translati
 
 test('stream messages redact the complete credential before applying length limits', async () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
-  context.fetch = async () => new Response('data: '+JSON.stringify({error:{code:502,message:'x'.repeat(470)+'router-private-key'+'y'.repeat(1200)}})+'\n\n',
-    {headers:{'Content-Type':'text/event-stream'}});
+  vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}', context);
+  let calls = 0;
+  context.fetch = async () => { calls++; return new Response('data: '+JSON.stringify({error:{code:502,message:'x'.repeat(470)+'router-private-key'+'y'.repeat(1200)}})+'\n\n',
+    {headers:{'Content-Type':'text/event-stream'}}); };
   await assert.rejects(context.mlProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash',maxOutputTokens:16384},'',[]),
-    e=>e.message.includes('[anahtar]')&&!e.message.includes('router-')&&e.message.length<=1000);
+    e=>e.message.includes('[anahtar]')&&!e.message.includes('router-')&&e.message.length<=1012); // 1000 cap + ' (3 deneme)' suffix
+  assert.equal(calls, 3);
+});
+test('overload halves model lane concurrency like quota failures',async()=>{
+  const f=fixture(); scripts.forEach(source => vm.runInContext(source, f.context));
+  f.context.chrome.storage.local.set = async () => {};
+  await assert.rejects(f.context.mlEnqueue({provider:'openrouter',model:'qwen/qwen3.8-flash'},
+    async()=>{ throw Object.assign(new Error('overload'),{stopJob:true,code:'PROVIDER_OVERLOADED'}); },'owner'),/overload/);
+  assert.equal(vm.runInContext('mlRouterQueue.limit',f.context),2);
+});
+test('transient provider overload is retried then served',async()=>{
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
+  let calls = 0;
+  context.fetch = async () => (++calls < 3)
+    ? { ok: false, status: 503, json: async () => ({ error: { message: 'high demand' } }) }
+    : { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'OK' }] }, finishReason: 'STOP' }] }) };
+  assert.equal(await context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []), 'OK');
+  assert.equal(calls, 3);
+});
+test('persistent overload stops with a countdown after three attempts',async()=>{
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
+  let calls = 0;
+  context.fetch = async () => { calls++; return { ok: false, status: 503, json: async () => ({ error: { message: 'high demand' } }) }; };
+  await assert.rejects(context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []),
+    e => e.code === 'PROVIDER_OVERLOADED' && e.retryAt > Date.now() && e.message.includes('3 deneme'));
+  assert.equal(calls, 3);
+});
+test('unavailable statuses map distinctly; refusals never retry',async()=>{
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
+  let calls = 0;
+  context.fetch = async () => { calls++; return { ok: false, status: 500, json: async () => ({ error: { message: 'boom' } }) }; };
+  await assert.rejects(context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []), e => e.code === 'PROVIDER_UNAVAILABLE');
+  assert.equal(calls, 3);
+  context.fetch = async () => { calls++; return { ok: false, status: 400, json: async () => ({ error: { message: 'bad request' } }) }; };
+  await assert.rejects(context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []));
+  assert.equal(calls, 4);
+});
+test('overload switches an opted-in gemini job to the next model',async()=>{
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
+  context.fetch = async () => ({ ok: false, status: 503, json: async () => ({ error: { message: 'high demand' } }) });
+  await assert.rejects(context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite', geminiFallback: true }, 'Hi', []),
+    e => e.code === 'GEMINI_MODEL_FALLBACK' && e.nextModel === 'gemini-3.1-flash-lite' && e.retryAt > Date.now());
+  await assert.rejects(context.mlProviderCall({ provider: 'gemini', model: 'gemma-4-26b-a4b-it', geminiFallback: true }, 'Hi', []),
+    e => e.code === 'PROVIDER_OVERLOADED');
+  await assert.rejects(context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []),
+    e => e.code === 'PROVIDER_OVERLOADED');
+});
+test('gemini overload halves parallel lanes until the cut expires',async()=>{
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
+  context.MLKeys = { active: async () => 'A', all: async () => ['A', 'B', 'C', 'D'].map((key, i) => ({ id: 'k' + i, key })) };
+  let calls = 0;
+  context.fetch = async () => (++calls === 1)
+    ? { ok: false, status: 503, json: async () => ({ error: { message: 'high demand' } }) }
+    : { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'OK' }] }, finishReason: 'STOP' }] }) };
+  assert.equal(await context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []), 'OK');
+  assert.equal(vm.runInContext('mlGeminiLanes', context), 2);
 });
 test('provider error never invokes another model and redacts echoed credentials', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));

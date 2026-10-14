@@ -21,6 +21,14 @@ test('removed models migrate openly to the provider default', () => {
   assert.deepEqual(moved({}), ['gemini', 'gemini-3.5-flash-lite', true]);
   assert.equal(providers.migrate({ translationProvider: 'gemini', geminiModel: 'gemma-4-26b-a4b-it' }).migrated, false);
 });
+test('gemini fallback chain follows catalog order and stays opt-in', () => {
+  assert.equal(providers.nextGeminiModel('gemini-3.5-flash-lite'), 'gemini-3.1-flash-lite');
+  assert.equal(providers.nextGeminiModel('gemini-3.1-flash-lite'), 'gemma-4-26b-a4b-it');
+  assert.equal(providers.nextGeminiModel('gemma-4-26b-a4b-it'), null);
+  assert.equal(providers.nextGeminiModel('unknown'), null);
+  assert.equal(providers.settings({}).geminiFallback, false);
+  assert.equal(providers.settings({ translationProvider: 'gemini', geminiFallback: true }).geminiFallback, true);
+});
 test('translation association uses identity even with shuffled replies; missing/duplicate IDs fail', () => {
   const values = [{ regionId: 'b', sourceText: 'English', status: 'translated', translatedText: 'Türkçe' }, { regionId: 'a', sourceText: '', status: 'unreadable', translatedText: '' }];
   assert.deepEqual(Array.from(providers.parse(JSON.stringify({ regions: values }), ['a', 'b']), r => r.regionId), ['a', 'b']);

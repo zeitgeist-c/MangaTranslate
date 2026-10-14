@@ -174,7 +174,8 @@ test('Muse models keep a bounded 60 second deadline',async()=>{
 });
 
 test('provider-origin 429 is model-scoped, survives restart, and blocks only unsent matching work',async()=>{
-  const f=fixture();f.context.mlKey=async()=> 'synthetic';f.context.fetch=async()=>new Response(JSON.stringify({error:{message:'provider quota',metadata:{provider_name:'Anthropic'}}}),{status:429,headers:{'Retry-After':'60','Content-Type':'application/json'}});
+  const f=fixture();f.context.mlKey=async()=> 'synthetic';
+  vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}', f.context);f.context.fetch=async()=>new Response(JSON.stringify({error:{message:'provider quota',metadata:{provider_name:'Anthropic'}}}),{status:429,headers:{'Retry-After':'60','Content-Type':'application/json'}});
   await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'anthropic/claude-haiku-5.5'},'',[]),e=>e.code==='PROVIDER_RATE_LIMITED'&&e.cooldownScope==='model'&&e.retryAt>Date.now());
   let sent=0;await assert.rejects(f.context.mlEnqueue({provider:'openrouter',model:'anthropic/claude-haiku-5.5'},async()=>++sent),e=>e.notSent&&e.code==='PROVIDER_COOLDOWN');
   assert.equal(await f.context.mlEnqueue({provider:'openrouter',model:'meta/muse-spark-1.3'},async()=>++sent),1);
@@ -184,7 +185,8 @@ test('provider-origin 429 is model-scoped, survives restart, and blocks only uns
 });
 
 test('unknown 429 remains account-wide and clearly identifies the source instead of blaming the next model',async()=>{
-  const f=fixture();f.context.mlKey=async()=> 'synthetic';f.context.fetch=async()=>new Response(JSON.stringify({error:{message:'account quota'}}),{status:429,headers:{'Retry-After':'30','Content-Type':'application/json'}});
+  const f=fixture();f.context.mlKey=async()=> 'synthetic';
+  vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}', f.context);f.context.fetch=async()=>new Response(JSON.stringify({error:{message:'account quota'}}),{status:429,headers:{'Retry-After':'30','Content-Type':'application/json'}});
   await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'anthropic/claude-haiku-5.5'},'',[]),e=>e.cooldownScope==='account');
   let sent=0;await assert.rejects(f.context.mlEnqueue({provider:'openrouter',model:'meta/muse-spark-1.3'},async()=>++sent),e=>e.notSent&&e.message.includes('claude-haiku-5.5')&&e.message.includes('henüz gönderilmedi'));
   assert.equal(sent,0);
@@ -192,6 +194,7 @@ test('unknown 429 remains account-wide and clearly identifies the source instead
 
 test('SSE 429 also honors Retry-After and records a model-scoped cooldown',async()=>{
   const f=fixture();f.context.mlKey=async()=> 'synthetic';
+  vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}', f.context);
   f.context.fetch=async()=>new Response('data: '+JSON.stringify({error:{code:429,message:'provider quota',metadata:{provider_name:'Alibaba'}}})+'\n\n',
     {headers:{'Retry-After':'45','Content-Type':'text/event-stream'}});
   await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash',maxOutputTokens:16384},'',[]),e=>e.code==='PROVIDER_RATE_LIMITED'&&e.retryAt>Date.now()+40000);

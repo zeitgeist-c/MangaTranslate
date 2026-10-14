@@ -88,12 +88,16 @@
     actionLink.hidden = !allowed.includes(error.actionUrl); if (!actionLink.hidden) actionLink.href = error.actionUrl;
     if (error.retryAt > Date.now()) {
       const base=statusNode.textContent;
-      const auto = error.code === 'GEMINI_BUDGET_EXHAUSTED';
+      const auto = ['GEMINI_BUDGET_EXHAUSTED', 'GEMINI_MODEL_FALLBACK', 'PROVIDER_OVERLOADED', 'PROVIDER_UNAVAILABLE', 'PROVIDER_RATE_LIMITED'].includes(error.code);
       const tick=()=>{ const seconds=Math.max(0,Math.ceil((error.retryAt-Date.now())/1000));
         statusNode.textContent=base+'\n'+(seconds ? `Yeniden deneme için kalan süre: ${seconds} sn.` : auto ? 'Süre doldu; otomatik devam ediliyor…' : 'Bekleme doldu; otomatik istek gönderilmedi.'); controls();
         if (!seconds && blockedTimer) { globalThis.clearInterval?.(blockedTimer); blockedTimer=null; }
       }; tick(); blockedTimer=globalThis.setInterval?.(tick,1000);
-      if (auto) { const token = epoch; logEvent('Limit bekleniyor; süre bitince otomatik devam edecek.'); setTimeout(() => { if (token === epoch && !paused && job?.state === 'blocked') start({ resume: true, retry: true }).catch(() => {}); }, Math.min(error.retryAt - Date.now(), 300000)); }
+      if (auto) { const token = epoch; logEvent('Limit bekleniyor; süre bitince otomatik devam edecek.');
+        if (error.code === 'GEMINI_MODEL_FALLBACK' && error.nextModel && job) {
+          job.config.model = error.nextModel; logEvent(`Model geçişi: ${error.nextModel} ile devam ediliyor.`); save().catch(() => {});
+        }
+        setTimeout(() => { if (token === epoch && !paused && job?.state === 'blocked') start({ resume: true, retry: true }).catch(() => {}); }, Math.min(error.retryAt - Date.now(), 300000)); }
     }
   };
   function ensurePanel() {

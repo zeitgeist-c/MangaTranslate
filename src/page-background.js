@@ -29,8 +29,8 @@ async function mlPickGeminiKey() {
   if (typeof MLKeys !== 'undefined' && typeof MLKeys.all === 'function') keys = await MLKeys.all('gemini');
   else { const single = await mlKey('gemini'); if (single) keys = [{ id: single, key: single }]; }
   if (!keys.length) throw new Error('Gemini API anahtarı eksik.');
-  globalThis.mlGeminiLanes = Math.max(1, Math.min(4, keys.length));
-  const now = Date.now();
+  const now = Date.now(), base = Math.max(1, Math.min(4, keys.length));
+  if (!(globalThis.mlLaneCutUntil > now)) globalThis.mlGeminiLanes = base;
   let earliest = Infinity;
   for (const k of keys) {
     const uses = mlPruneGeminiBudget(k.id, now);
@@ -202,7 +202,44 @@ function mlRestoreJob(job) {
   }
   return job;
 }
+const mlRetryableStatus = new Set([408, 429, 500, 502, 503, 504]);
+function mlCutGeminiLanes() {
+  const lanes = globalThis.mlGeminiLanes || 1;
+  if (lanes > 1) { globalThis.mlGeminiLanes = Math.max(1, Math.floor(lanes / 2)); globalThis.mlLaneCutUntil = Date.now() + 5 * 60 * 1000; }
+}
+function mlMarkRetryable(config, error, status) {
+  error.retryableStatus = true; error.httpStatus = error.httpStatus || status;
+  if (!error.code) error.code = status === 503 ? 'PROVIDER_OVERLOADED' : status === 429 ? 'PROVIDER_RATE_LIMITED' : 'PROVIDER_UNAVAILABLE';
+  if (status === 503 && config.provider === 'gemini') mlCutGeminiLanes();
+}
 async function mlProviderCall(config, prompt, images, keyOverride) {
+  const heartbeat = globalThis.setInterval?.(() => chrome.runtime.getContexts?.({ contextTypes: ['OFFSCREEN_DOCUMENT'] }).catch(() => {}), 10000);
+  try {
+    const tuning = globalThis.mlRetryTuning || {};
+    const delays = Array.isArray(tuning.delays) ? tuning.delays : [15000, 30000];
+    const maxWait = Number.isFinite(tuning.maxWait) ? tuning.maxWait : 120000;
+    let error;
+    for (let attempt = 0; ; attempt++) {
+      try { return await mlProviderAttempt(config, prompt, images, keyOverride); }
+      catch (e) {
+        error = e; error.attempts = attempt + 1;
+        if (!e.retryableStatus || attempt >= delays.length) break;
+        let wait = delays[attempt];
+        if (e.cooldownUntil > Date.now()) wait = Math.min(Math.max(wait, e.cooldownUntil - Date.now() + 1000), maxWait);
+        await new Promise(resolve => setTimeout(resolve, wait));
+      }
+    }
+    if (config.provider === 'gemini' && config.geminiFallback && error.retryableStatus) {
+      const next = MLProviders.nextGeminiModel(config.model);
+      if (next) throw Object.assign(new Error(`${config.model} yanıt vermiyor; ${next} ile devam edilecek.`),
+        { stopJob: true, code: 'GEMINI_MODEL_FALLBACK', nextModel: next, retryAt: Date.now() + 5000 });
+    }
+    if (error.retryableStatus && !error.retryAt) error.retryAt = Date.now() + 60000;
+    if (error.attempts > 1) error.message = `${error.message} (${error.attempts} deneme)`;
+    throw error;
+  } finally { if (heartbeat) globalThis.clearInterval(heartbeat); }
+}
+async function mlProviderAttempt(config, prompt, images, keyOverride) {
   let key = keyOverride, geminiKeyId;
   if (!key && config.provider === 'gemini') {
     const picked = await mlPickGeminiKey();
@@ -219,7 +256,6 @@ async function mlProviderCall(config, prompt, images, keyOverride) {
     armIdle(); activity = armIdle;
     absoluteTimer = setTimeout(() => controller.abort(), timeoutMs * 2);
   } else timer = setTimeout(() => controller.abort(), timeoutMs);
-  const heartbeat = globalThis.setInterval?.(() => chrome.runtime.getContexts?.({ contextTypes: ['OFFSCREEN_DOCUMENT'] }).catch(() => {}), 10000);
   let response;
   try {
     const router = config.provider === 'openrouter';
@@ -237,14 +273,22 @@ async function mlProviderCall(config, prompt, images, keyOverride) {
     const send = () => fetch(endpoint, { method: 'POST', signal: controller.signal,
       headers: { 'Content-Type': 'application/json', ...(router ? { Authorization: `Bearer ${key}` } : { 'x-goog-api-key': key }) }, body: JSON.stringify(body) });
     response = geminiKeyId ? await mlWithGeminiKeySlot(geminiKeyId, Number.isFinite(globalThis.mlGeminiGapMs) ? globalThis.mlGeminiGapMs : 2500, send) : await send();
-    const data = router && response.headers?.get('content-type')?.includes('text/event-stream') ? await mlReadStream(response, activity) : await response.json();
+    let data;
+    try {
+      data = router && response.headers?.get('content-type')?.includes('text/event-stream') ? await mlReadStream(response, activity) : await response.json();
+    } catch (error) {
+      if (error.httpStatus && mlRetryableStatus.has(error.httpStatus)) mlMarkRetryable(config, error, error.httpStatus);
+      throw error;
+    }
     if (!response.ok || data.error) {
       const cooldown = router && response.status === 429 ? await mlRememberCooldown(config,response,data) : null;
       const detail = String(data.error?.message || 'Sağlayıcı hatası').replaceAll(key, '[anahtar]');
       if (data.error?.metadata?.limit_source === 'openrouter_in_flight_budget') throw Object.assign(new Error('Eşzamanlı OpenRouter kredi bütçesi doldu. Devam eden isteklerin bitmesini bekleyip açıkça yeniden deneyin.'), { stopJob: true, code: 'PROVIDER_IN_FLIGHT_BUDGET', httpStatus: response.status });
       const access = mlAccessError(config, response.status, detail);
-      if (access && cooldown) { access.retryAt=cooldown.until; access.cooldownScope=cooldown.scope; }
-      throw access || new Error(`${config.provider}/${config.model}: HTTP ${response.status} — ${detail.slice(0, 240)}`);
+      if (access && cooldown) { access.retryAt=cooldown.until; access.cooldownScope=cooldown.scope; access.cooldownUntil=cooldown.until; }
+      const failure = access || new Error(`${config.provider}/${config.model}: HTTP ${response.status} — ${detail.slice(0, 240)}`);
+      if (mlRetryableStatus.has(response.status)) mlMarkRetryable(config, failure, response.status);
+      throw failure;
     }
     const text = router ? data.choices?.[0]?.message?.content : data.candidates?.[0]?.content?.parts?.filter(p => !p.thought).map(p => p.text || '').join('');
     const finish = router ? data.choices?.[0]?.finish_reason : data.candidates?.[0]?.finishReason;
@@ -265,8 +309,12 @@ async function mlProviderCall(config, prompt, images, keyOverride) {
       }
       throw access||error;
     }
+    if (error.httpStatus === 429 && config.provider === 'openrouter' && !error.retryAt) {
+      const cooldown=await mlRememberCooldown(config,response,{error:error.providerError||{}});
+      error.retryAt=cooldown.until; error.cooldownScope=cooldown.scope;
+    }
     throw error;
-  } finally { clearTimeout(timer); clearTimeout(idleTimer); clearTimeout(absoluteTimer); if (heartbeat) globalThis.clearInterval(heartbeat); }
+  } finally { clearTimeout(timer); clearTimeout(idleTimer); clearTimeout(absoluteTimer); }
 }
 async function mlReadStream(response, onActivity) {
   const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '', content = '', finish, size = 0, doneMarker = false;
@@ -301,6 +349,7 @@ async function mlTranslate(message) {
   if (message.jobId) return mlTranslateGroup(message);
   const { config, regions, imageId, context = [] } = message;
   const checked = MLProviders.settings({ translationProvider: config.provider, geminiModel: config.model, openrouterModel: config.model,
+    geminiFallback: config.geminiFallback,
     contributorConsent: config.model.endsWith('-contributor') ? (await chrome.storage.sync.get('contributorConsent')).contributorConsent : false,
     contentType: config.contentType, localDetector: config.localDetector, seriesName: config.series, translationInstructions: config.instructions, translationGlossary: config.glossary });
   if (!/^[a-f0-9]{64}$/.test(imageId) || !Array.isArray(regions) || !regions.length || regions.length > 6 ||
@@ -341,6 +390,7 @@ async function mlTranslateGroup(message) {
   const { regions, context = [], owner, retry } = message;
   if (typeof message.jobId !== 'string' || message.jobId.length > 80) throw new Error('Geçersiz iş kimliği');
   const checked = MLProviders.settings({ translationProvider: message.config.provider, geminiModel: message.config.model, openrouterModel: message.config.model,
+    geminiFallback: message.config.geminiFallback,
     contributorConsent: message.config.model.endsWith('-contributor') ? (await chrome.storage.sync.get('contributorConsent')).contributorConsent : false,
     contentType: message.config.contentType, localDetector: message.config.localDetector, seriesName: message.config.series, translationInstructions: message.config.instructions, translationGlossary: message.config.glossary });
   const caps = await mlCapabilities(checked);

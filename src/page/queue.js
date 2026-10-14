@@ -35,7 +35,7 @@ globalThis.MLQueue = class {
         this.streak = 0;
         if (error.stopJob) {
           this.blockedOwners.add(entry.owner);
-          if (['PROVIDER_RATE_LIMITED', 'PROVIDER_IN_FLIGHT_BUDGET'].includes(error.code)) { this.limit = Math.max(1, Math.floor(this.limit / 2)); this.onLimit(this.limit); }
+          if (['PROVIDER_RATE_LIMITED', 'PROVIDER_IN_FLIGHT_BUDGET', 'PROVIDER_OVERLOADED', 'PROVIDER_UNAVAILABLE'].includes(error.code)) { this.limit = Math.max(1, Math.floor(this.limit / 2)); this.onLimit(this.limit); }
         }
         entry.reject(error);
       }).finally(() => { this.active--; this.lanes.set(entry.lane, (this.lanes.get(entry.lane) || 1) - 1); this.pump(); });
