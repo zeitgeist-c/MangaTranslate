@@ -18,6 +18,28 @@ function mlApplyShrink(model, regions) {
   if (shrink.until <= Date.now()) { mlTimeoutShrink.delete(model); return regions; }
   return Math.min(regions, shrink.regions);
 }
+// Gemini per-key sliding budget: 12 sends per 60 s window (+5 s margin), rotated across all saved keys.
+const mlGeminiBudget = new Map(), ML_GEMINI_RPM = 12, ML_GEMINI_WINDOW_MS = 60000, ML_GEMINI_MARGIN_MS = 5000;
+function mlPruneGeminiBudget(id, now = Date.now()) {
+  const uses = (mlGeminiBudget.get(id) || []).filter(t => t > now - ML_GEMINI_WINDOW_MS);
+  mlGeminiBudget.set(id, uses); return uses;
+}
+async function mlPickGeminiKey() {
+  let keys = [];
+  if (typeof MLKeys !== 'undefined' && typeof MLKeys.all === 'function') keys = await MLKeys.all('gemini');
+  else { const single = await mlKey('gemini'); if (single) keys = [{ id: single, key: single }]; }
+  if (!keys.length) throw new Error('Gemini API anahtarı eksik.');
+  const now = Date.now();
+  let earliest = Infinity;
+  for (const k of keys) {
+    const uses = mlPruneGeminiBudget(k.id, now);
+    if (uses.length < ML_GEMINI_RPM) return k;
+    earliest = Math.min(earliest, uses[0] + ML_GEMINI_WINDOW_MS + ML_GEMINI_MARGIN_MS);
+  }
+  throw Object.assign(new Error(`Gemini istek limiti doldu (12/dk, ${keys.length} anahtar). Pencere bitiminde otomatik devam edilecek.`),
+    { notSent: true, stopJob: true, code: 'GEMINI_BUDGET_EXHAUSTED', retryAt: earliest });
+}
+function mlReserveGeminiKey(id) { mlPruneGeminiBudget(id).push(Date.now()); }
 const mlQueueReady = chrome.storage?.local?.get(['mlParallelLimit', 'mlRouterCooldowns']).then(stored => {
   if (Number.isInteger(stored.mlParallelLimit)) mlRouterQueue.limit = Math.max(1, Math.min(8, stored.mlParallelLimit));
   for (const [scope, value] of Object.entries(stored.mlRouterCooldowns || {})) {
@@ -167,7 +189,12 @@ function mlRestoreJob(job) {
   return job;
 }
 async function mlProviderCall(config, prompt, images, keyOverride) {
-  const key = keyOverride || await mlKey(config.provider);
+  let key = keyOverride, geminiKeyId;
+  if (!key && config.provider === 'gemini') {
+    const picked = await mlPickGeminiKey();
+    key = picked.key; geminiKeyId = picked.id;
+  }
+  if (!key) key = await mlKey(config.provider);
   if (!key) throw new Error(`${config.provider === 'gemini' ? 'Gemini' : 'OpenRouter'} API anahtarı eksik.`);
   const timeoutMs = config.provider === 'openrouter' ? MLProviders.routerPolicy(config.model).timeoutMs : 60000;
   const streaming = config.provider === 'openrouter' && Boolean(config.maxOutputTokens);
@@ -191,6 +218,7 @@ async function mlProviderCall(config, prompt, images, keyOverride) {
     };
     if (router && config.maxOutputTokens) body.stream = true;
     if (new TextEncoder().encode(JSON.stringify(body)).length > 8 * 1024 * 1024) throw Object.assign(new Error('Grup gövdesi 8 MiB sınırını aşıyor; gönderilmedi.'), { notSent: true, stopJob: true, code: 'BATCH_TOO_LARGE' });
+    if (geminiKeyId) mlReserveGeminiKey(geminiKeyId);
     const endpoint = router ? 'https://openrouter.ai/api/v1/chat/completions' : `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.model)}:generateContent`;
     response = await fetch(endpoint, { method: 'POST', signal: controller.signal,
       headers: { 'Content-Type': 'application/json', ...(router ? { Authorization: `Bearer ${key}` } : { 'x-goog-api-key': key }) }, body: JSON.stringify(body) });

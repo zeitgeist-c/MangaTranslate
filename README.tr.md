@@ -1,4 +1,6 @@
-# MangaLens TR 3.8.3 — zaman aşımı dayanıklılığı ve model göçü
+# MangaLens TR 3.8.4 — Gemini dönüşümü ve canlı panel
+
+3.8.4: Gemini tarafında her anahtar dakikada en fazla 12 istek kullanır, kayıtlı anahtarlar arasında dönüşümlü gidilir; tüm anahtarlar dolarsa pencere bitiminde otomatik devam edilir. Sayfa paneli yenilendi: Tarama/Çeviri/Yerleşim hapları, ilerleme çubuğu, sağlayıcı isteği sayacı ve saatli canlı akış. Önbellek ve gönderilmeyenler sayılmaz.
 
 3.8.3: DeepSeek V4.1 Flash OpenRouter listesinden çıkarıldı (5 model kaldı); kayıtlı modeli kaldırılana denk gelen kullanıcıya varsayılan model otomatik seçilip bilgi verilir. Zaman aşımı alan modelde sonraki gruplar geçici küçültülür, başarılı grup eski boyuta döndürür. Akan yanıtlarda parça geldikçe sıfırlanan sessizlik bekçisi ve iki katı mutlak tavan kullanılır; duran akış ayrı mesajla bildirilir. Otomatik ücretli tekrar yine yok.
 
@@ -14,7 +16,7 @@ Brave/Chromium Manifest V3 uzantısı. İngilizce manga/manhwa/manhua yazıları
 
 ## Kullanım
 
-1. `MangaLensTR-3.8.3.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle. Açık eski ayarlar pencerelerini de yenile. 3.7.0 ve daha eski işlere Devam et yerine popup’tan yeni bölüm taraması başlat; bölge gruplama sürümü değişti.
+1. `MangaLensTR-3.8.4.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle. Açık eski ayarlar pencerelerini de yenile. 3.7.0 ve daha eski işlere Devam et yerine popup’tan yeni bölüm taraması başlat; bölge gruplama sürümü değişti.
 
    Güncellemede aynı yüklenmiş klasörü kullan: farklı klasörden ikinci bir uzantı eklemek ayrı uzantı kimliği oluşturabilir ve kayıtlı anahtarlarını yeni kimlikte göstermeyebilir. Mevcut uzantıyı kaldırmadan klasörünü güncelle ve **Yeniden yükle** kullan.
 2. Popup'taki dişliyle **Ayarlar → API Anahtarları** aç. Gemini/OpenRouter için etiketli birden fazla anahtar ekleyebilirsin; **Aktif yap** ile seç. Eski Google listesi korunur, eski tek OpenRouter anahtarı otomatik aktarılır. Ana popup yalnız aktif anahtar etiketini gösterir.
@@ -40,7 +42,7 @@ OpenRouter: Qwen3.7/3.8 Flash, Claude Haiku5.5, Muse Spark1.3 ve Contributor. Op
 
 Çeviri modeli koordinat üretmez: yerel kaynak-piksel kutuları ve sabit bölge kimlikleri kullanılır. Model yalnız kimlikli kırpmayı okur/çevirir. Çeviriler özgün görsel dosyası değiştirilmeden yazının üzerinde okunaklı koyu kartlarla gösterilir; zemin taklit edilmez. Sığmayan/çakışan kartlar ve çok küçük veya kesilmiş adaylar kontrol listesinde korunur. Süre özeti tarama, çeviri bekleme ve kart çizimini ayrı gösterir. Japonca/dikey yazı doğrulanmadı.
 
-OpenRouter grupları uzantı genelinde ortak 4→6→8 paralel kuyrukla, Google’a ait sabit 2,5 saniyelik beklemeye girmeden yapılır; Google’ın kota aralığı korunur. 429/eşzamanlı kredi bütçesi engelinde yeni gönderimler durur ve sağlayıcının bekleme süresi gözetilir; otomatik ücretli tekrar yapılmaz. Veri politikası kaynaklı bilinen 404 hataları da taramayı durdurur. Zemin için ek bir AI çağrısı yoktur; daha fazla metin çevirmek sağlayıcı kullanımını artırabilir. Gerçek çeviri süresini seçtiğin model belirler. [Ölçüm ve sınırlar](docs/TOPLU-CEVIRI-3.8.0.md).
+OpenRouter grupları uzantı genelinde ortak 4→6→8 paralel kuyrukla, Google’a ait sabit 2,5 saniyelik beklemeye girmeden yapılır; Google’ın kota aralığı korunur. Gemini tarafında her anahtar dakikada en fazla 12 istek kullanır ve kayıtlı anahtarlar arasında dönüşümlü gidilir; tüm anahtarlar dolarsa pencere bitimine kadar beklenip otomatik devam edilir. Sayfa başına istek sayısı sayaçta ve tanılama özetinde görünür. 429/eşzamanlı kredi bütçesi engelinde yeni gönderimler durur ve sağlayıcının bekleme süresi gözetilir; otomatik ücretli tekrar yapılmaz. Veri politikası kaynaklı bilinen 404 hataları da taramayı durdurur. Zemin için ek bir AI çağrısı yoktur; daha fazla metin çevirmek sağlayıcı kullanımını artırabilir. Gerçek çeviri süresini seçtiğin model belirler. [Ölçüm ve sınırlar](docs/TOPLU-CEVIRI-3.8.0.md).
 
 ## Veri ve geri dönüş
 
