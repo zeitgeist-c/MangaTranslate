@@ -31,7 +31,6 @@ const BACKOFF_MAX_MS = 120000;        // maksimum backoff
 const requestQueue = [];
 let lastFinishTime = 0;
 let intervalMs = MIN_INTERVAL_MS;
-let activeRequest = false;
 
 // v3: SW state persistence — lastFinishTime storage.session'da saklanir
 const RATE_STATE_KEY = 'ml_rate_state';
@@ -96,7 +95,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'GET_QUEUE_STATE') {
     sendResponse({
       queueDepth: requestQueue.length,
-      activeRequest,
+      activeRequest: activeRequests > 0,
       intervalMs: Math.max(MIN_INTERVAL_MS, intervalMs),
     });
     return false;
@@ -601,53 +600,42 @@ function enqueueWithRateLimit(fn, options = {}) {
   });
 }
 
+let activeRequests = 0;
 async function processRateLimitedQueue() {
-  if (activeRequest || requestQueue.length === 0) return;
-
-  const item = requestQueue.shift();
-  activeRequest = true;
-
-  try {
-    // onceki istek BITTIKTEN sonra gecerli aralik kadar gecmis mi? (v3.1.4: aralik adaptif)
-    const now = Date.now();
-    const elapsed = now - lastFinishTime;
-    const spacing = Math.max(MIN_INTERVAL_MS, intervalMs);
-    if (lastFinishTime > 0 && elapsed < spacing) {
-      const wait = spacing - elapsed;
-      await new Promise(r => setTimeout(r, wait));
-    }
-
-    try {
-      const result = await item.fn();
-      saveRateState(Date.now(), nextIntervalAfterSuccess(intervalMs));
-      item.resolve(result);
-    } catch (e) {
-      // 429 veya timeout → backoff ile retry
-      // Retry edilebilir mi? status'e bak (mesaj dili degisebilir, regex tek basina yetmez).
-      const errText = String((e && e.message) || '');
-      const errStatus = e && e.status;
-      if (errStatus === 'rate_limited' || /429|rate[\s_-]?limit|kota/i.test(errText)) {
-        const raised = nextIntervalAfterRateLimit(intervalMs);
-        console.warn('[MangaLens-bg] rate limit -> aralik', intervalMs, '->', raised, 'ms');
-        intervalMs = raised;
+  const lanes = Math.max(1, globalThis.mlGeminiLanes || 1);
+  while (activeRequests < lanes && requestQueue.length > 0) {
+    const item = requestQueue.shift(); activeRequests++;
+    (async () => {
+      try {
+        const result = await item.fn();
+        saveRateState(Date.now(), nextIntervalAfterSuccess(intervalMs));
+        item.resolve(result);
+      } catch (e) {
+        // 429 veya timeout → backoff ile retry
+        // Retry edilebilir mi? status'e bak (mesaj dili degisebilir, regex tek basina yetmez).
+        const errText = String((e && e.message) || '');
+        const errStatus = e && e.status;
+        if (errStatus === 'rate_limited' || /429|rate[\s_-]?limit|kota/i.test(errText)) {
+          const raised = nextIntervalAfterRateLimit(intervalMs);
+          console.warn('[MangaLens-bg] rate limit -> aralik', intervalMs, '->', raised, 'ms');
+          intervalMs = raised;
+        }
+        const isRetryable = errStatus === 'rate_limited' || errStatus === 'timeout' ||
+          /429|timeout|rate[\s_-]?limit|kota|zaman as/i.test(errText);
+        if (isRetryable && item.allowRetry !== false && item.retries < 3) {
+          const backoff = Math.min(BACKOFF_INITIAL_MS * Math.pow(2, item.retries), BACKOFF_MAX_MS);
+          console.warn('[MangaLens-bg] retryable hata:', e.message, '-> backoff:', backoff, 'ms');
+          saveRateState(Date.now() + backoff, intervalMs);  // backoff kadar bekleme zorla
+          requestQueue.unshift({ ...item, retries: item.retries + 1 });
+        } else {
+          saveRateState(Date.now(), intervalMs);
+          item.reject(e);
+        }
+      } finally {
+        activeRequests--;
+        processRateLimitedQueue();
       }
-      const isRetryable = errStatus === 'rate_limited' || errStatus === 'timeout' ||
-        /429|timeout|rate[\s_-]?limit|kota|zaman as/i.test(errText);
-      if (isRetryable && item.allowRetry !== false && item.retries < 3) {
-        const backoff = Math.min(BACKOFF_INITIAL_MS * Math.pow(2, item.retries), BACKOFF_MAX_MS);
-        console.warn('[MangaLens-bg] retryable hata:', e.message, '-> backoff:', backoff, 'ms');
-        saveRateState(Date.now() + backoff, intervalMs);  // backoff kadar bekleme zorla
-        requestQueue.unshift({ ...item, retries: item.retries + 1 });
-      } else {
-        saveRateState(Date.now(), intervalMs);
-        item.reject(e);
-      }
-    }
-  } finally {
-    activeRequest = false;
-    if (requestQueue.length > 0) {
-      processRateLimitedQueue();
-    }
+    })();
   }
 }
 

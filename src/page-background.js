@@ -29,6 +29,7 @@ async function mlPickGeminiKey() {
   if (typeof MLKeys !== 'undefined' && typeof MLKeys.all === 'function') keys = await MLKeys.all('gemini');
   else { const single = await mlKey('gemini'); if (single) keys = [{ id: single, key: single }]; }
   if (!keys.length) throw new Error('Gemini API anahtarı eksik.');
+  globalThis.mlGeminiLanes = Math.max(1, Math.min(4, keys.length));
   const now = Date.now();
   let earliest = Infinity;
   for (const k of keys) {
@@ -40,6 +41,19 @@ async function mlPickGeminiKey() {
     { notSent: true, stopJob: true, code: 'GEMINI_BUDGET_EXHAUSTED', retryAt: earliest });
 }
 function mlReserveGeminiKey(id) { mlPruneGeminiBudget(id).push(Date.now()); }
+const mlGeminiKeyLocks = new Map(), mlGeminiLastSend = new Map();
+async function mlWithGeminiKeySlot(id, gapMs, task) {
+  const prev = mlGeminiKeyLocks.get(id) || Promise.resolve();
+  let release; const current = new Promise(resolve => { release = resolve; });
+  mlGeminiKeyLocks.set(id, current);
+  await prev;
+  try {
+    const wait = Math.max(0, gapMs - (Date.now() - (mlGeminiLastSend.get(id) || 0)));
+    if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+    mlGeminiLastSend.set(id, Date.now());
+    return await task();
+  } finally { release(); }
+}
 const mlQueueReady = chrome.storage?.local?.get(['mlParallelLimit', 'mlRouterCooldowns']).then(stored => {
   if (Number.isInteger(stored.mlParallelLimit)) mlRouterQueue.limit = Math.max(1, Math.min(8, stored.mlParallelLimit));
   for (const [scope, value] of Object.entries(stored.mlRouterCooldowns || {})) {
@@ -220,8 +234,9 @@ async function mlProviderCall(config, prompt, images, keyOverride) {
     if (new TextEncoder().encode(JSON.stringify(body)).length > 8 * 1024 * 1024) throw Object.assign(new Error('Grup gövdesi 8 MiB sınırını aşıyor; gönderilmedi.'), { notSent: true, stopJob: true, code: 'BATCH_TOO_LARGE' });
     if (geminiKeyId) mlReserveGeminiKey(geminiKeyId);
     const endpoint = router ? 'https://openrouter.ai/api/v1/chat/completions' : `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.model)}:generateContent`;
-    response = await fetch(endpoint, { method: 'POST', signal: controller.signal,
+    const send = () => fetch(endpoint, { method: 'POST', signal: controller.signal,
       headers: { 'Content-Type': 'application/json', ...(router ? { Authorization: `Bearer ${key}` } : { 'x-goog-api-key': key }) }, body: JSON.stringify(body) });
+    response = geminiKeyId ? await mlWithGeminiKeySlot(geminiKeyId, Number.isFinite(globalThis.mlGeminiGapMs) ? globalThis.mlGeminiGapMs : 2500, send) : await send();
     const data = router && response.headers?.get('content-type')?.includes('text/event-stream') ? await mlReadStream(response, activity) : await response.json();
     if (!response.ok || data.error) {
       const cooldown = router && response.status === 429 ? await mlRememberCooldown(config,response,data) : null;
