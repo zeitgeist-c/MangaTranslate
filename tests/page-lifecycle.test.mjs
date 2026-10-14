@@ -8,6 +8,8 @@ const flush = async () => { for (let i = 0; i < 200; i++) await Promise.resolve(
 function fixture({ blocked = false, oldVersion } = {}) {
   const buttons = new Map(), messages = [], pending = [], timers = new Map(); let listener, status, timerId = 0;
   const node = tag => ({ dataset: {}, style: {}, isConnected: true, textContent: '',
+    classList: { toggle() {}, add() {}, remove() {}, contains: () => false },
+    replaceChildren() {},
     append(...children) { for (const child of children) { if (child.tag === 'button') buttons.set(child.textContent, child); if (child.tag === 'p') status = child; } },
     tag, setAttribute() {}, attachShadow() { return node('shadow'); }, remove() { this.isConnected = false; } });
   const config = { processingVersion: 'page-v6', localDetector: 'fast', provider: 'openrouter', model: 'synthetic', batching: { maxRegions: 1 } };
@@ -15,7 +17,7 @@ function fixture({ blocked = false, oldVersion } = {}) {
   const image = { currentSrc: 'https://fixture/image.png', naturalWidth: 900, naturalHeight: 1000, isConnected: true };
   const context = vm.createContext({ AbortController, DOMException, structuredClone, crypto: webcrypto, URL, console, performance, TextEncoder,
     setTimeout(fn, ms) { timers.set(++timerId, { fn, ms }); return timerId; }, clearTimeout(id) { timers.delete(id); },
-    document: { createElement: node, images: [image], documentElement: node('html') },
+    document: { createElement: node, createTextNode: text => ({ tag: '#text', textContent: text }), images: [image], documentElement: node('html') },
     window: { addEventListener() {} }, MutationObserver: class { observe() {} }, ResizeObserver: class { observe() {} },
     chrome: { storage: { sync: { get: async () => ({ enabled: true }) } }, runtime: {
       onMessage: { addListener(fn) { listener = fn; } }, sendMessage(message) {

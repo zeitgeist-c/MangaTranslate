@@ -67,11 +67,13 @@ globalThis.MLKeys = (() => {
     });
   }
   const active = provider => queue(async () => { const { list, activeId } = await load(provider); return list.find(k => k.id === activeId)?.key || ''; });
+  // Service-worker-only rotation source. Never sent to popup/options; UI keeps using safe().
+  const all = provider => queue(async () => (await load(provider)).list.map(k => ({ id: k.id, key: k.key })));
   chrome.runtime.onMessage.addListener((m, sender, respond) => {
     if (!m?.type?.startsWith('ML_KEYS_')) return;
     const allowed = ['popup/popup.html', 'options/settings.html'].map(path => chrome.runtime.getURL(path));
     if (sender.id !== chrome.runtime.id || !allowed.includes(sender.url?.split(/[?#]/)[0])) { respond({ ok: false, error: 'Anahtar yönetimi yalnız uzantı ayarlarından kullanılabilir.' }); return; }
     action(m).then(value => respond({ ok: true, value })).catch(error => respond({ ok: false, error: error.message })); return true;
   });
-  return { active, action };
+  return { active, all, action };
 })();

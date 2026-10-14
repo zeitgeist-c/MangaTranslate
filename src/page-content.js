@@ -5,6 +5,22 @@
   let job, running = false, paused = false, epoch = 0, panel, statusNode, original = false, boxes = false;
   const layers = new Map();
   let controller, resumePending, actionLink, pauseButton, resumeButton, retryButton, counterNode, panelCollapsed = false;
+  let stageNodes = [], barFill, metaNode, logNode;
+  const eventLog = [];
+  function logEvent(text) {
+    eventLog.unshift({ at: Date.now(), text });
+    if (eventLog.length > 30) eventLog.length = 30;
+    if (logNode) {
+      logNode.replaceChildren();
+      for (const entry of eventLog.slice(0, 8)) {
+        const line = document.createElement('div');
+        const time = document.createElement('time');
+        time.textContent = new Date(entry.at).toLocaleTimeString('tr-TR', { hour12: false }) + ' ';
+        line.append(time, document.createTextNode(entry.text));
+        logNode.append(line);
+      }
+    }
+  }
   const pendingRequests = new Set();
   let saveChain = Promise.resolve(), segmentClock = 0, blockedTimer;
   const request = (type, data = {}, signal = controller?.signal) => new Promise((resolve, reject) => {
@@ -47,7 +63,23 @@
     retryButton.disabled = Number(job?.blocked?.retryAt || 0) > Date.now();
     const phase = job?.state === 'paused' ? 'Duraklatıldı' : blocked ? 'İşlem gerekli' : finished ? 'Bitti' :
       ({ detecting: 'Tespit', translating: 'Çeviri', rendering: 'Yerleşim' })[(job?.pages || []).find(p => ['detecting', 'translating', 'rendering'].includes(p.state))?.state] || 'Çalışıyor';
-    counterNode.textContent = job ? `${phase} · ${job.pages.filter(p => ['done', 'review', 'error'].includes(p.state)).length}/${job.pages.length}` : 'Hazırlanıyor';
+    counterNode.textContent = job ? `${phase} · ${job.pages.filter(p => ['done', 'review', 'error'].includes(p.state)).length}/${job.pages.length} · ${job.providerCalls || 0} istek` : 'Hazırlanıyor';
+    renderStages();
+  }
+  function renderStages() {
+    if (!stageNodes.length) return;
+    const pages = job?.pages || [], total = pages.length;
+    const values = [pages.filter(p => p.imageId).length,
+      pages.filter(p => (p.translated || 0) > 0 || ['done', 'review'].includes(p.state)).length,
+      pages.filter(p => ['done', 'review'].includes(p.state)).length];
+    const activeIndex = !total ? -1 : values[0] < total ? 0 : values[1] < total ? 1 : values[2] < total ? 2 : -1;
+    stageNodes.forEach((s, i) => {
+      s.count.textContent = total ? `${values[i]}/${total}` : '–';
+      s.pill.classList.toggle('done', total > 0 && values[i] >= total);
+      s.pill.classList.toggle('active', i === activeIndex && running);
+    });
+    if (barFill) barFill.style.width = total ? Math.round(100 * values[2] / total) + '%' : '0%';
+    if (metaNode) metaNode.textContent = job?.config ? `${job.config.provider} / ${job.config.model} · ${job.providerCalls || 0} istek` : '';
   }
   const status = text => { if (blockedTimer) { globalThis.clearInterval?.(blockedTimer); blockedTimer=null; } ensurePanel(); statusNode.textContent = text; actionLink.hidden = true; controls(); };
   const blockedStatus = error => {
@@ -56,10 +88,12 @@
     actionLink.hidden = !allowed.includes(error.actionUrl); if (!actionLink.hidden) actionLink.href = error.actionUrl;
     if (error.retryAt > Date.now()) {
       const base=statusNode.textContent;
+      const auto = error.code === 'GEMINI_BUDGET_EXHAUSTED';
       const tick=()=>{ const seconds=Math.max(0,Math.ceil((error.retryAt-Date.now())/1000));
-        statusNode.textContent=base+'\n'+(seconds ? `Yeniden deneme için kalan süre: ${seconds} sn.` : 'Bekleme doldu; otomatik istek gönderilmedi.'); controls();
+        statusNode.textContent=base+'\n'+(seconds ? `Yeniden deneme için kalan süre: ${seconds} sn.` : auto ? 'Süre doldu; otomatik devam ediliyor…' : 'Bekleme doldu; otomatik istek gönderilmedi.'); controls();
         if (!seconds && blockedTimer) { globalThis.clearInterval?.(blockedTimer); blockedTimer=null; }
       }; tick(); blockedTimer=globalThis.setInterval?.(tick,1000);
+      if (auto) { const token = epoch; logEvent('Limit bekleniyor; süre bitince otomatik devam edecek.'); setTimeout(() => { if (token === epoch && !paused && job?.state === 'blocked') start({ resume: true, retry: true }).catch(() => {}); }, Math.min(error.retryAt - Date.now(), 300000)); }
     }
   };
   function ensurePanel() {
@@ -68,18 +102,30 @@
     panel = document.createElement('div'); panel.dataset.mangalensUi = 'page';
     panel.style.cssText = 'position:fixed!important;left:12px!important;top:12px!important;z-index:2147483646!important;width:340px!important;max-width:calc(100vw - 24px)!important';
     const shadow = panel.attachShadow({ mode: 'closed' }), style = document.createElement('style');
-    style.textContent = ':host{all:initial}[hidden]{display:none!important}section{font:13px/1.5 system-ui,Arial;color:#eef2fa;background:#191d26;border:1px solid #38455e;border-radius:12px;padding:12px;box-shadow:0 6px 24px #0007}header{display:flex;align-items:center;gap:8px}header strong{font-size:13px;flex:1}header span{color:#9ba8be;font-size:11px}button{font:12px system-ui,Arial;margin:3px;padding:7px 10px;color:#eef2fa;background:#222836;border:1px solid #3c4b65;border-radius:8px;cursor:pointer}button:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid #6b9cff;outline-offset:2px}button:hover{background:#304366}p{max-height:120px;overflow:auto;overflow-wrap:anywhere;white-space:pre-wrap;margin:10px 0;color:#c4cfe1}details{border-top:1px solid #303849;margin-top:8px;padding-top:8px}summary{cursor:pointer;color:#9fb9e4}';
+    style.textContent = ':host{all:initial}[hidden]{display:none!important}section{font:13px/1.5 system-ui,Arial;color:#eef2fa;background:linear-gradient(180deg,#1e2431,#161b25);border:1px solid #3a465e;border-radius:14px;padding:12px;box-shadow:0 8px 28px #0008}header{display:flex;align-items:center;gap:8px}header strong{font-size:14px;flex:1;letter-spacing:.2px}header span{color:#9ba8be;font-size:11px;font-variant-numeric:tabular-nums}.stages{display:flex;gap:6px;margin:10px 0 6px}.stage{flex:1;font-size:11px;color:#8d99ae;background:#202839;border:1px solid #33405a;border-radius:8px;padding:5px 4px;text-align:center;white-space:nowrap;overflow:hidden}.stage b{display:block;font-size:11px;font-variant-numeric:tabular-nums}.stage.done{color:#7fe0a8;border-color:#2f6b4c;background:#1c2f26}.stage.active{color:#fff;border-color:#6b9cff;background:#25324d;box-shadow:0 0 0 1px #6b9cff55}.bar{height:6px;border-radius:4px;background:#242d40;overflow:hidden;margin:2px 0 4px}.bar i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#6b9cff,#57d998);transition:width .3s}.meta{font-size:11px;color:#9ba8be;margin:2px 0 0;font-variant-numeric:tabular-nums}button{font:12px system-ui,Arial;margin:3px;padding:7px 10px;color:#eef2fa;background:#222836;border:1px solid #3c4b65;border-radius:8px;cursor:pointer}button:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid #6b9cff;outline-offset:2px}button:hover{background:#304366}button:disabled{opacity:.45;cursor:default}p{max-height:120px;overflow:auto;overflow-wrap:anywhere;white-space:pre-wrap;margin:10px 0;color:#c4cfe1}.log{font:11px/1.6 ui-monospace,Consolas,monospace;color:#a9b6cc;background:#141924;border:1px solid #2b3549;border-radius:8px;padding:8px;max-height:132px;overflow:auto;white-space:pre-wrap;margin:6px 0}.log time{color:#66748c}details{border-top:1px solid #303849;margin-top:8px;padding-top:8px}summary{cursor:pointer;color:#9fb9e4}';
     const section = document.createElement('section'), title = document.createElement('strong'); title.textContent = 'MangaLens';
     const header = document.createElement('header'), fold = document.createElement('button'); fold.textContent = '−'; fold.setAttribute('aria-label', 'Paneli katla'); fold.setAttribute('aria-expanded', 'true');
     counterNode = document.createElement('span'); counterNode.textContent = 'Hazırlanıyor'; header.append(title, counterNode, fold);
+    const stageRow = document.createElement('div'); stageRow.className = 'stages'; stageNodes = [];
+    for (const label of ['Tarama', 'Çeviri', 'Yerleşim']) {
+      const pill = document.createElement('div'); pill.className = 'stage';
+      const name = document.createElement('span'); name.textContent = label;
+      const count = document.createElement('b'); count.textContent = '–';
+      pill.append(name, count); stageRow.append(pill); stageNodes.push({ pill, count });
+    }
+    const bar = document.createElement('div'); bar.className = 'bar'; barFill = document.createElement('i'); barFill.style.width = '0%'; bar.append(barFill);
+    metaNode = document.createElement('p'); metaNode.className = 'meta';
     statusNode = document.createElement('p'); statusNode.setAttribute('role', 'status');
-    section.append(header, statusNode);
+    section.append(header, stageRow, bar, metaNode, statusNode);
     actionLink = document.createElement('a'); actionLink.textContent = 'OpenRouter ayarlarını aç';
     actionLink.href = 'https://openrouter.ai/settings/preferences'; actionLink.target = '_blank'; actionLink.rel = 'noopener noreferrer';
     actionLink.style.cssText = 'color:#b7ccff;margin:8px 0'; actionLink.hidden = true; section.append(actionLink);
     const body = document.createElement('div'); section.append(body);
     const button = (text, action, parent = body) => { const b = document.createElement('button'); b.textContent = text; b.onclick = () => Promise.resolve().then(action).catch(e => status(e.message)); parent.append(b); return b; };
     pauseButton = button('Duraklat', pause); resumeButton = button('Devam et', () => start({ resume: true })); retryButton = button('Hatalıları yeniden dene', () => start({ resume: true, retry: true }));
+    const stream = document.createElement('details'), streamSummary = document.createElement('summary'); streamSummary.textContent = 'Canlı akış';
+    logNode = document.createElement('div'); logNode.className = 'log'; logNode.textContent = 'Henüz işlem yok.';
+    stream.append(streamSummary, logNode); body.append(stream);
     const tools = document.createElement('details'), summary = document.createElement('summary'); summary.textContent = 'Görünüm ve kontrol araçları'; tools.append(summary); body.append(tools);
     fold.onclick = () => { body.hidden = !body.hidden; panelCollapsed = body.hidden; controls(); fold.textContent = body.hidden ? '+' : '−'; fold.setAttribute('aria-expanded', String(!body.hidden)); fold.setAttribute('aria-label', body.hidden ? 'Paneli genişlet' : 'Paneli katla'); };
     button('Orijinal / çeviri', () => { original = !original; synchronize(); }, tools);
@@ -91,7 +137,7 @@
     ]).filter(Boolean).join('\n') || 'Kontrol gerektiren alan yok.'); }, tools);
     button('Tanılama özeti', async () => {
       const groups = job?.metrics?.groups || [], summary = {
-        model: job?.config?.model, provider: job?.config?.provider, elapsedMs: (job?.elapsedMs || 0) + (segmentClock ? performance.now() - segmentClock : 0),
+        model: job?.config?.model, provider: job?.config?.provider, providerCalls: job?.providerCalls || 0, elapsedMs: (job?.elapsedMs || 0) + (segmentClock ? performance.now() - segmentClock : 0),
         images: job?.pages?.length || 0, cards: job?.pages?.reduce((n,p)=>n+(p.translated||0),0) || 0,
         errors: (job?.pages || []).map((p,index)=>p.error ? {image:index+1,message:p.error} : null).filter(Boolean),
         groups: groups.map(g=>({groupId:g.groupId,regions:g.regions || g.regionCount,queueMs:g.queueMs,providerMs:g.providerMs,wallMs:g.wallMs,concurrency:g.concurrency,cached:g.cached,failed:g.failed,code:g.code}))
@@ -104,6 +150,7 @@
   }
   async function save(signal = controller?.signal) { if (job) { job.updatedAt = Date.now(); const snapshot = structuredClone(job); snapshot.pages?.forEach(p => { delete p.translations; }); const task = saveChain.catch(() => {}).then(() => request('ML_JOB_SAVE', { job: snapshot }, signal)); saveChain = task; await task; } }
   function pause() {
+    logEvent('Duraklatıldı.');
     if (job && segmentClock) { job.elapsedMs = (job.elapsedMs || 0) + performance.now() - segmentClock; segmentClock = 0; }
     paused = true; epoch++; resumePending = null; controller?.abort();
     if (job?.id) chrome.runtime.sendMessage({ type: 'ML_JOB_CONTROL', jobId: job.id, paused: true }).catch(() => {});
@@ -219,12 +266,15 @@
       if (!buffer.length || stopError) return;
       while (pending.size >= (caps.maxPending || 8)) { await Promise.race(pending); alive(token); if (stopError) return; }
       const group = buffer; buffer = []; bytes = 65536;
+      logEvent(`Grup gönderildi: ${group.length} bölge → ${job.config.model}`);
       const imageIds = new Set(group.map(r => r.imageId));
       const affectedItems = () => job.pages.filter(p => imageIds.has(p.imageId) && reports.has(p));
       const started = performance.now();
       const operation = (async () => {
         try {
           const result = await request('ML_TRANSLATE', { jobId: job.id, config: job.config, regions: group, context: job.fixedContext || [], retry }); alive(token);
+          if (!result.cached) job.providerCalls = (job.providerCalls || 0) + 1;
+          logEvent(result.cached ? `Önbellek: ${group.length} bölge` : `Grup tamam: ${group.length} bölge · ${((result.timing?.providerMs || 0) / 1000).toFixed(1)} sn`);
           job.metrics.groups.push({ groupId: result.groupId, ...result.timing, wallMs: performance.now() - started, cached: !!result.cached });
           for (const item of affectedItems()) {
             const fresh = result.regions.filter(r => group.some(g => g.regionId === r.regionId && g.imageId === item.imageId));
@@ -235,6 +285,8 @@
           if (error.name === 'AbortError') return;
           alive(token);
           job.metrics.groups.push({ ...error.timing, failed: true, code: error.code, wallMs: performance.now() - started, regionCount: group.length });
+          if (!error.timing?.notSent) job.providerCalls = (job.providerCalls || 0) + 1;
+          logEvent(`Grup hatası: ${error.code || 'bilinmiyor'} · ${group.length} bölge`);
           for (const item of affectedItems()) { item.state = 'error'; item.error = error.message; item.errorCode = error.code; }
           if (error.stopJob) {
             if (!stopError || stopError.code === 'DISPATCH_STOPPED' && error.code !== 'DISPATCH_STOPPED') { stopError = error; job.blocked = { error: error.message, code: error.code, actionUrl: error.actionUrl, retryAt:error.retryAt, cooldownScope:error.cooldownScope }; }
@@ -301,6 +353,7 @@
       return;
     }
     running = true; paused = false; controller = new AbortController(); const token = ++epoch, segmentStarted = performance.now(); segmentClock = segmentStarted;
+    if (!resume) { eventLog.length = 0; if (logNode) logNode.textContent = 'Henüz işlem yok.'; }
     try {
       const settings = await chrome.storage.sync.get({ enabled: true });
       alive(token);
@@ -319,6 +372,7 @@
       }
       alive(token); delete job.blocked; job.state = 'running'; await save(); alive(token);
       job.id ||= crypto.randomUUID();
+      logEvent(resume ? `Devam ediliyor: ${job.pages.length} görsel · ${job.config.model}` : `Tarama başladı: ${job.pages.length} görsel · ${job.config.model}`);
       const control=await request('ML_JOB_CONTROL', { jobId: job.id, paused: false, retry, config:job.config }); alive(token);
       if (control?.batching) { job.config.batching=control.batching; await save(); alive(token); }
       if (!await processChapter(token, retry)) return;
@@ -328,7 +382,7 @@
       const elapsed = ((job.elapsedMs || 0) + performance.now() - segmentStarted) / 1000;
       const groups = job.metrics?.groups || [];
       const seconds = name => (job.pages.reduce((n, p) => n + (p.timing?.[name] || 0), 0) / 1000).toFixed(1);
-      status(`Tarama bitti: ${cards} çeviri gösterildi, ${done + review}/${job.pages.length} görsel işlendi, ${issues} alan kontrol gerekli, ${errors} hata.\n${job.config.provider} / ${job.config.model}\nGeçen süre: ${elapsed.toFixed(1)} sn · tarama ${seconds('totalMs')} sn · kart ${seconds('renderMs')} sn.\nGruplar: ${groups.filter(g => !g.cached && !g.failed).length} başarılı, ${groups.filter(g => g.failed).length} hata, ${groups.filter(g => g.cached).length} önbellek. Toplam istek süresi (paralel): ${(groups.reduce((n,g) => n + (g.providerMs || 0),0)/1000).toFixed(1)} sn.\nÇeviriler sade kart olarak gösterilir; özgün görsel dosyası korunur. Bütün yazıların bulunduğu henüz doğrulanmadı.${errors ? '\nİlk hata: ' + job.pages.find(p => p.error)?.error : ''}`);
+      status(`Tarama bitti: ${cards} çeviri gösterildi, ${done + review}/${job.pages.length} görsel işlendi, ${issues} alan kontrol gerekli, ${errors} hata.\n${job.config.provider} / ${job.config.model} · sağlayıcı isteği: ${job.providerCalls || 0}\nGeçen süre: ${elapsed.toFixed(1)} sn · tarama ${seconds('totalMs')} sn · kart ${seconds('renderMs')} sn.\nGruplar: ${groups.filter(g => !g.cached && !g.failed).length} başarılı, ${groups.filter(g => g.failed).length} hata, ${groups.filter(g => g.cached).length} önbellek. Toplam istek süresi (paralel): ${(groups.reduce((n,g) => n + (g.providerMs || 0),0)/1000).toFixed(1)} sn.\nÇeviriler sade kart olarak gösterilir; özgün görsel dosyası korunur. Bütün yazıların bulunduğu henüz doğrulanmadı.${errors ? '\nİlk hata: ' + job.pages.find(p => p.error)?.error : ''}`);
     } catch (error) {
       if (error.name !== 'AbortError' && token === epoch) status(error.message);
     } finally {

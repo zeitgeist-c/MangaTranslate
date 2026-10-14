@@ -67,6 +67,34 @@ test('all five router adapters preserve exact chosen model and keep Google crede
   }
   assert.equal(calls.length, context.MLProviders.catalog.openrouter.length);
 });
+test('gemini single key is paced to 12 sends per minute window', async () => {
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  const gemini = { provider: 'gemini', model: 'gemini-3.5-flash-lite' };
+  for (let i = 0; i < 12; i++) assert.equal(await context.mlProviderCall(gemini, 'Hi', []), 'OK');
+  await assert.rejects(context.mlProviderCall(gemini, 'Hi', []),
+    e => e.code === 'GEMINI_BUDGET_EXHAUSTED' && e.retryAt > Date.now() && e.notSent === true && e.stopJob === true);
+});
+test('gemini budget rotates across saved keys before waiting', async () => {
+  const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  context.MLKeys = { active: async () => 'AAA', all: async () => [{ id: 'k1', key: 'AAA' }, { id: 'k2', key: 'BBB' }] };
+  const gemini = { provider: 'gemini', model: 'gemini-3.5-flash-lite' };
+  for (let i = 0; i < 24; i++) await context.mlProviderCall(gemini, 'Hi', []);
+  const auths = calls.map(c => c.headers['x-goog-api-key']);
+  assert.deepEqual(auths.slice(0, 12), Array(12).fill('AAA'));
+  assert.deepEqual(auths.slice(12), Array(12).fill('BBB'));
+  await assert.rejects(context.mlProviderCall(gemini, 'Hi', []), e => e.code === 'GEMINI_BUDGET_EXHAUSTED');
+  assert.equal(calls.length, 24);
+});
+test('gemini budget frees slots older than one minute', async () => {
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext(`mlGeminiBudget.set('google-private-key', Array(12).fill(${Date.now() - 61000}))`, context);
+  assert.equal(await context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []), 'OK');
+});
+test('explicit key override skips gemini budget accounting', async () => {
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  const gemini = { provider: 'gemini', model: 'gemini-3.5-flash-lite' };
+  for (let i = 0; i < 13; i++) assert.equal(await context.mlProviderCall(gemini, 'Hi', [], 'override-key'), 'OK');
+});
 test('all direct Google models use Google credentials; reasoning text never reaches translation', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   for (const [model] of context.MLProviders.catalog.gemini) {

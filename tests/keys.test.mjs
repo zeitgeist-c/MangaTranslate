@@ -71,3 +71,10 @@ test('key messages accept only exact extension settings/popup senders', async ()
   assert.equal(f.data.openrouterApiKeys, undefined);
   const result = await f.invoke(message, { id: 'ext', url: 'chrome-extension://ext/options/settings.html#keys/openrouter' }); assert.equal(result.ok, true); assert.ok(!JSON.stringify(result).includes(routerKey));
 });
+test('rotation source lists raw keys worker-side while messages stay masked', async () => {
+  const f = fixture({ googleApiKeys: [{ id: 'g1', key: 'K1' }, { id: 'g2', key: 'K2' }], activeGoogleApiKeyId: 'g1' });
+  assert.deepEqual((await f.keys.all('gemini')).map(k => k.id), ['g1', 'g2']);
+  assert.deepEqual((await f.keys.all('gemini')).map(k => k.key), ['K1', 'K2']);
+  const listed = await action(f, 'gemini');
+  assert.deepEqual(listed.map(k => k.id), ['g1', 'g2']); assert.ok(listed.every(k => !('key' in k)));
+});
