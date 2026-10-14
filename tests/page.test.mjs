@@ -13,6 +13,14 @@ test('providers preserve separate selected models and require explicit contribut
   assert.throws(() => providers.settings({ translationProvider: 'openrouter', openrouterModel: 'meta/muse-spark-1.3-contributor' }), /onaylayın/);
   assert.equal(providers.settings({ translationProvider: 'openrouter', openrouterModel: 'meta/muse-spark-1.3-contributor', contributorConsent: true }).provider, 'openrouter');
 });
+test('removed models migrate openly to the provider default', () => {
+  const moved = what => { const m = providers.migrate(what); return [m.provider, m.model, m.migrated]; };
+  assert.deepEqual(moved({ translationProvider: 'openrouter', openrouterModel: 'qwen/qwen3.8-flash' }), ['openrouter', 'qwen/qwen3.8-flash', false]);
+  assert.deepEqual(moved({ translationProvider: 'openrouter', openrouterModel: 'deepseek/deepseek-v4.1-flash' }), ['openrouter', 'qwen/qwen3.8-flash', true]);
+  assert.equal(providers.migrate({ translationProvider: 'openrouter', openrouterModel: 'meta/muse-spark-1.3-contributor' }).migrated, false);
+  assert.deepEqual(moved({}), ['gemini', 'gemini-3.5-flash-lite', true]);
+  assert.equal(providers.migrate({ translationProvider: 'gemini', geminiModel: 'gemma-4-26b-a4b-it' }).migrated, false);
+});
 test('translation association uses identity even with shuffled replies; missing/duplicate IDs fail', () => {
   const values = [{ regionId: 'b', sourceText: 'English', status: 'translated', translatedText: 'Türkçe' }, { regionId: 'a', sourceText: '', status: 'unreadable', translatedText: '' }];
   assert.deepEqual(Array.from(providers.parse(JSON.stringify({ regions: values }), ['a', 'b']), r => r.regionId), ['a', 'b']);
@@ -46,7 +54,7 @@ test('partial batch mode never guesses missing or duplicate identities and null 
 
 test('schema is restricted to supported batch models; manual crop keeps its separate output contract',()=>{
   const images=[{regionId:'a',dataUrl:'data:image/png;base64,AAAA'}];
-  for(const model of ['qwen/qwen3.8-flash','deepseek/deepseek-v4.1-flash']){
+  for(const model of ['qwen/qwen3.8-flash']){
     const batch=providers.routerBody(model,'JSON',images,16384,true);
     assert.equal(batch.response_format.type,'json_schema');assert.equal(batch.response_format.json_schema.strict,true);
     assert.deepEqual(Array.from(batch.response_format.json_schema.schema.properties.regions.items.properties.regionId.enum),['a']);

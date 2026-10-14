@@ -8,6 +8,10 @@ async function refresh() {
   saved = config; $('enabled-toggle').checked = config.enabled;
   for (const provider of ['gemini', 'openrouter']) $(`provider-${provider}`).setAttribute('aria-pressed', String(provider === config.translationProvider));
   MLUI.models($('model'), config.translationProvider, config.translationProvider === 'gemini' ? config.geminiModel : config.openrouterModel);
+  if (!$('model').value) {
+    const moved = MLProviders.migrate(config);
+    if (moved.migrated) { await save({ [config.translationProvider === 'gemini' ? 'geminiModel' : 'openrouterModel']: moved.model }); notice(`Desteklenmeyen model yerine ${moved.model} seçildi; yeni taramada geçerli.`); return; }
+  }
   $('contributor-row').hidden = !String($('model').value).endsWith('-contributor'); $('contributor-consent').checked = config.contributorConsent;
   const active = keys.find(k => k.active);
   $('key-summary').textContent = active ? `Aktif anahtar: ${active.label} · Kayıtlı` : 'Aktif API anahtarı yok';

@@ -79,8 +79,8 @@ test('8 MiB serialized provider body guard rejects oversized requests without ne
   const f=fixture();f.context.mlProviderCall=f.actualProviderCall;let network=0;f.context.fetch=async()=>{network++;throw new Error('network');};f.context.mlKey=async()=> 'synthetic';
   await assert.rejects(f.context.mlProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash'},'',Array.from({length:3},()=>({dataUrl:'data:image/png;base64,'+'A'.repeat(3000000)}))),e=>e.notSent && e.code==='BATCH_TOO_LARGE');assert.equal(network,0);
 });
-test('removed OpenRouter Gemini models require a new choice; direct Gemini remains supported',()=>{
-  const f=fixture();for(const model of ['google/gemini-2.5-flash-lite','google/gemini-3.1-flash-lite'])assert.throws(()=>f.context.MLProviders.settings({translationProvider:'openrouter',openrouterModel:model}),/desteklenmiyor/);
+test('removed OpenRouter models require a new choice; direct Gemini remains supported',()=>{
+  const f=fixture();for(const model of ['google/gemini-2.5-flash-lite','google/gemini-3.1-flash-lite','deepseek/deepseek-v4.1-flash'])assert.throws(()=>f.context.MLProviders.settings({translationProvider:'openrouter',openrouterModel:model}),/desteklenmiyor/);
   assert.equal(f.context.MLProviders.settings({geminiModel:'gemini-3.1-flash-lite'}).model,'gemini-3.1-flash-lite');
 });
 test('metadata uses the smallest documented endpoint capacity and cached public data; unknown metadata keeps 12/8192',async()=>{
@@ -98,14 +98,14 @@ test('in-flight budget refusal is distinct from an exhausted balance',async()=>{
 
 test('model metadata excludes JSON-incompatible and unavailable endpoints and ignores v1 cache',async()=>{
   const f=fixture();
-  f.stored['ml-model-capabilities:deepseek/deepseek-v4.1-flash']={expires:Date.now()+100000,value:{maxRegions:20,maxOutputTokens:16384}};
+  f.stored['ml-model-capabilities:qwen/qwen3.8-flash']={expires:Date.now()+100000,value:{maxRegions:20,maxOutputTokens:16384}};
   f.context.fetch=async()=>({ok:true,json:async()=>({data:{endpoints:[
     {status:0,context_length:1048576,max_completion_tokens:2000,supported_parameters:['max_tokens','reasoning']},
     {status:-5,context_length:1048576,max_completion_tokens:1000,supported_parameters:['max_tokens','reasoning','response_format','structured_outputs']},
     {status:0,context_length:1048576,max_completion_tokens:32768,supported_parameters:['max_tokens','reasoning','response_format','structured_outputs']}
   ]}})});
-  const caps=await f.actualCapabilities({provider:'openrouter',model:'deepseek/deepseek-v4.1-flash'});
-  assert.equal(caps.maxRegions,8);assert.equal(caps.maxOutputTokens,16384);
+  const caps=await f.actualCapabilities({provider:'openrouter',model:'qwen/qwen3.8-flash'});
+  assert.equal(caps.maxRegions,12);assert.equal(caps.maxOutputTokens,16384);
 });
 
 test('known incompatible model metadata refuses before translation, without paid probing',async()=>{
@@ -164,8 +164,8 @@ test('known IDs with one malformed translation retain neighboring successes and 
   assert.equal((await f.context.mlTranslate(f.message(rs))).cached,true);assert.equal(f.calls.length,1);
 });
 
-test('DeepSeek has a bounded 120 second deadline while Muse remains at 60 seconds',async()=>{
-  for(const [model,ms] of [['deepseek/deepseek-v4.1-flash',120000],['meta/muse-spark-1.3',60000]]){
+test('Muse models keep a bounded 60 second deadline',async()=>{
+  for(const [model,ms] of [['meta/muse-spark-1.3',60000],['meta/muse-spark-1.3-contributor',60000]]){
     const f=fixture();let watchdog,limit,network=0;f.context.setTimeout=(fn,ms)=>{watchdog=fn;limit=ms;return 1;};f.context.clearTimeout=()=>{};f.context.mlKey=async()=> 'synthetic';
     f.context.fetch=async(url,options)=>{network++;return new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))));};
     const promise=f.actualProviderCall({provider:'openrouter',model},'',[]);await flush();assert.equal(limit,ms);watchdog();
@@ -201,7 +201,44 @@ test('SSE 429 also honors Retry-After and records a model-scoped cooldown',async
 
 test('model-specific crop limits preserve Muse throughput and constrain slower model batches',async()=>{
   const f=fixture();f.context.fetch=async()=>({ok:true,json:async()=>({data:{endpoints:[{status:0,context_length:1048576,max_completion_tokens:32768}]}})});
-  for(const [model,regions,pending] of [['deepseek/deepseek-v4.1-flash',8,4],['qwen/qwen3.8-flash',12,4],['anthropic/claude-haiku-5.5',12,4],['meta/muse-spark-1.3',20,8]]){
+  for(const [model,regions,pending] of [['qwen/qwen3.8-flash',12,4],['anthropic/claude-haiku-5.5',12,4],['meta/muse-spark-1.3',20,8]]){
     const caps=await f.actualCapabilities({provider:'openrouter',model});assert.equal(caps.maxRegions,regions);assert.equal(caps.maxPending,pending);
   }
+});
+test('a provider timeout temporarily shrinks later groups until one succeeds',async()=>{
+  const f=fixture();f.context.mlKey=async()=>'synthetic';
+  const timers=[];f.context.setTimeout=(fn,ms)=>{timers.push({fn,ms});return timers.length;};f.context.clearTimeout=()=>{};
+  f.context.fetch=async(url,options)=>new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))));
+  const images=Array.from({length:8},(_,i)=>({regionId:'r'+i,dataUrl:'data:image/png;base64,AAAA'}));
+  const promise=f.actualProviderCall({provider:'openrouter',model:'meta/muse-spark-1.3'},'',images);
+  await flush();timers.at(-1).fn();
+  await assert.rejects(promise,e=>e.code==='PROVIDER_TIMEOUT'&&e.message.includes('küçültüldü'));
+  f.context.fetch=async()=>({ok:true,json:async()=>({data:{endpoints:[{status:0,context_length:1048576,max_completion_tokens:32768}]}})});
+  assert.equal((await f.actualCapabilities({provider:'openrouter',model:'meta/muse-spark-1.3'})).maxRegions,4);
+  const message={jobId:'job',owner:'1:job',config:f.context.MLProviders.settings({translationProvider:'openrouter',openrouterModel:'meta/muse-spark-1.3'}),regions:[f.region(1)],context:[]};
+  await f.context.mlTranslate(message);
+  assert.equal((await f.actualCapabilities({provider:'openrouter',model:'meta/muse-spark-1.3'})).maxRegions,20);
+});
+test('streaming groups use an idle watchdog with a doubled absolute deadline',async()=>{
+  const hang=()=>{const f=fixture();f.context.mlKey=async()=>'synthetic';
+    const timers=[];f.context.setTimeout=(fn,ms)=>{timers.push({fn,ms});return timers.length;};f.context.clearTimeout=()=>{};
+    f.context.fetch=async(url,options)=>new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))));
+    return {f,timers};};
+  { const {f,timers}=hang();
+    const promise=f.actualProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash',maxOutputTokens:16384},'',[{regionId:'r',dataUrl:'data:image/png;base64,AAAA'}]);
+    await flush();assert.deepEqual(timers.map(t=>t.ms).sort((a,b)=>a-b),[90000,180000]);
+    timers.find(t=>t.ms===180000).fn();
+    await assert.rejects(promise,e=>e.code==='PROVIDER_TIMEOUT'&&e.message.includes('saniyede yanıt vermedi')); }
+  { const {f,timers}=hang();
+    const promise=f.actualProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash',maxOutputTokens:16384},'',[{regionId:'r',dataUrl:'data:image/png;base64,AAAA'}]);
+    await flush();timers.find(t=>t.ms===90000).fn();
+    await assert.rejects(promise,e=>e.code==='PROVIDER_TIMEOUT'&&e.message.includes('ilerlemedi')); }
+});
+test('stream reader reports activity per received chunk',async()=>{
+  const f=fixture(),nl=String.fromCharCode(10);
+  const frame=obj=>'data: '+JSON.stringify(obj)+nl+nl;
+  const bytes=new TextEncoder().encode(frame({choices:[{delta:{content:'İŞĞ'}}]})+frame({choices:[{delta:{},finish_reason:'stop'}]})+'data: [DONE]'+nl+nl);
+  const stream=new ReadableStream({start(controller){for(let i=0;i<bytes.length;i+=3)controller.enqueue(bytes.slice(i,i+3));controller.close();}});
+  let pings=0;const value=await f.context.mlReadStream(new Response(stream),()=>pings++);
+  assert.equal(value.choices[0].message.content,'İŞĞ');assert.ok(pings>0);
 });

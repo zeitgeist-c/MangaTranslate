@@ -1,4 +1,6 @@
-# MangaLens TR 3.8.2 — kuyruk ve yanıt dayanıklılığı
+# MangaLens TR 3.8.3 — zaman aşımı dayanıklılığı ve model göçü
+
+3.8.3: DeepSeek V4.1 Flash OpenRouter listesinden çıkarıldı (5 model kaldı); kayıtlı modeli kaldırılana denk gelen kullanıcıya varsayılan model otomatik seçilip bilgi verilir. Zaman aşımı alan modelde sonraki gruplar geçici küçültülür, başarılı grup eski boyuta döndürür. Akan yanıtlarda parça geldikçe sıfırlanan sessizlik bekçisi ve iki katı mutlak tavan kullanılır; duran akış ayrı mesajla bildirilir. Otomatik ücretli tekrar yine yok.
 
 3.8.2: Qwen/DeepSeek/Haiku için model başına 2 eşzamanlı istek; DeepSeek 8, Qwen/Haiku 12 kırpma. DeepSeek 120 sn, Qwen/Haiku 90 sn, Muse 60 sn watchdog kullanır. Eski iş hatası yeni işi durdurmaz. 429 kaynak modeli/geri sayımıyla gösterilir, worker restart'ta korunur. Kimliği belli tek bozuk yanıt alanı kontrol listesine ayrılır; diğer kartlar çizilir. Otomatik ücretli tekrar yok. [Ayrıntılar ve sınırlar](docs/KUYRUK-VE-YANIT-3.8.2.md).
 
@@ -12,7 +14,7 @@ Brave/Chromium Manifest V3 uzantısı. İngilizce manga/manhwa/manhua yazıları
 
 ## Kullanım
 
-1. `MangaLensTR-3.8.2.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle. Açık eski ayarlar pencerelerini de yenile. 3.7.0 ve daha eski işlere Devam et yerine popup’tan yeni bölüm taraması başlat; bölge gruplama sürümü değişti.
+1. `MangaLensTR-3.8.3.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle. Açık eski ayarlar pencerelerini de yenile. 3.7.0 ve daha eski işlere Devam et yerine popup’tan yeni bölüm taraması başlat; bölge gruplama sürümü değişti.
 
    Güncellemede aynı yüklenmiş klasörü kullan: farklı klasörden ikinci bir uzantı eklemek ayrı uzantı kimliği oluşturabilir ve kayıtlı anahtarlarını yeni kimlikte göstermeyebilir. Mevcut uzantıyı kaldırmadan klasörünü güncelle ve **Yeniden yükle** kullan.
 2. Popup'taki dişliyle **Ayarlar → API Anahtarları** aç. Gemini/OpenRouter için etiketli birden fazla anahtar ekleyebilirsin; **Aktif yap** ile seç. Eski Google listesi korunur, eski tek OpenRouter anahtarı otomatik aktarılır. Ana popup yalnız aktif anahtar etiketini gösterir.
@@ -32,7 +34,7 @@ Yalnız seçili model kullanılır; başka modele sessiz geçiş olmaz. Hatalıl
 
 Gemini: Gemini3.5 Flash Lite, Gemini3.1 Flash Lite, Gemma4 26B A4B.
 
-OpenRouter: Qwen3.7/3.8 Flash, Claude Haiku5.5, DeepSeekV4.1 Flash, Muse Spark1.3 ve Contributor. OpenRouter’daki Gemini2.5/3.1 Flash Lite kaldırıldı; doğrudan Gemini sekmesi korunur. Haiku4.5 yok. Contributor veri paylaşımı nedeniyle ayrı açık seçime bağlıdır. Hesap erişimi/fiyat/çeviri kalitesini kullanıcı deneyecek; canlı API testleri kullanıcı isteğiyle yapılmadı.
+OpenRouter: Qwen3.7/3.8 Flash, Claude Haiku5.5, Muse Spark1.3 ve Contributor. OpenRouter’daki Gemini2.5/3.1 Flash Lite kaldırıldı; doğrudan Gemini sekmesi korunur. Haiku4.5 yok. Contributor veri paylaşımı nedeniyle ayrı açık seçime bağlıdır. Hesap erişimi/fiyat/çeviri kalitesini kullanıcı deneyecek; canlı API testleri kullanıcı isteğiyle yapılmadı.
 
 **Hızlı yazı taraması (önerilen)** varsayılandır: yazı dedektörü satırları kaynak piksel konumunda gruplar; ağır balon modeli çalışmaz. Desteklenen GPU’da PP-OCR WebGPU, desteklenmeyen veya başarısız GPU’da aynı doğrulanmış model WASM/CPU ile çalışır. Önceki Standart seçimi hızlı yola eşlenir. Önceden küçük modeli seçtiysen **Ayarlar → Çeviri Tercihleri → Yerel tarama** bölümünden hızlı yolu seçip Kaydet. Alternatif/ayrıntılı balon modelleri isteğe bağlı ve daha yavaştır.
 

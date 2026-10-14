@@ -56,7 +56,7 @@ test('a saved 3.5.1 job with age refusal restores as blocked while keeping page 
   assert.equal(restored.state, 'blocked'); assert.equal(restored.blocked.code, 'AGE_CONFIRMATION_REQUIRED');
   assert.equal(restored.pages[0].translated, 2); assert.equal(restored.pages[2].state, 'queued');
 });
-test('all six router adapters preserve exact chosen model and keep Google credentials separate', async () => {
+test('all five router adapters preserve exact chosen model and keep Google credentials separate', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   for (const [model] of context.MLProviders.catalog.openrouter) {
     const result = await context.mlProviderCall({ provider: 'openrouter', model }, 'Translate', [{ regionId: 'r', dataUrl: 'data:image/png;base64,AAAA' }]);
@@ -65,7 +65,7 @@ test('all six router adapters preserve exact chosen model and keep Google creden
     assert.equal(request.headers.Authorization, 'Bearer router-private-key');
     assert.equal(request.headers['x-goog-api-key'], undefined); assert.ok(!JSON.stringify(request.body).includes('private-key'));
   }
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, context.MLProviders.catalog.openrouter.length);
 });
 test('all direct Google models use Google credentials; reasoning text never reaches translation', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
@@ -76,7 +76,7 @@ test('all direct Google models use Google credentials; reasoning text never reac
   }
 });
 
-test('Qwen and DeepSeek disable default reasoning; mandatory Muse reasoning is untouched', async () => {
+test('Qwen disables default reasoning; mandatory Muse reasoning is untouched', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   for (const [model] of context.MLProviders.catalog.openrouter) {
     await context.mlProviderCall({ provider: 'openrouter', model }, 'Return JSON', []);
@@ -84,10 +84,10 @@ test('Qwen and DeepSeek disable default reasoning; mandatory Muse reasoning is u
     assert.equal(body.provider.require_parameters, true);
     assert.equal(body.provider.allow_fallbacks, false);
     assert.equal(body.response_format.type, 'json_object');
-    if (model.startsWith('qwen/') || model.startsWith('deepseek/')) assert.deepEqual(body.reasoning, { enabled: false });
+    if (model.startsWith('qwen/')) assert.deepEqual(body.reasoning, { enabled: false });
     else assert.equal(body.reasoning, undefined);
   }
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, context.MLProviders.catalog.openrouter.length);
 });
 
 test('upstream thinking/JSON rejection is actionable and never retried or routed to another model', async () => {
@@ -100,7 +100,7 @@ test('upstream thinking/JSON rejection is actionable and never retried or routed
 
 test('no matching JSON endpoint is distinguished from data policy and age restrictions', () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
-  const config = { provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash' };
+  const config = { provider: 'openrouter', model: 'qwen/qwen3.8-flash' };
   assert.equal(context.mlAccessError(config, 404, 'No endpoints found that support all requested parameters').code, 'MODEL_ENDPOINT_UNAVAILABLE');
   assert.equal(context.mlAccessError(config, 404, 'No endpoints matching your data policy').code, 'PROVIDER_DATA_POLICY_BLOCK');
 });
@@ -119,7 +119,7 @@ test('reasoning-only output hitting the token limit is not accepted as translati
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   context.fetch = async (url, options) => { calls.push({ url, options }); return { ok: true,
     json: async () => ({ choices: [{ message: { content: '', reasoning: '{"regions":[]}' }, finish_reason: 'length' }] }) }; };
-  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash' }, '', []), e => e.code === 'PROVIDER_OUTPUT_TRUNCATED');
+  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'qwen/qwen3.8-flash' }, '', []), e => e.code === 'PROVIDER_OUTPUT_TRUNCATED');
   assert.equal(calls.length, 1);
 });
 
