@@ -13,6 +13,7 @@ Thumbs.db
 *.log
 # Generated extension packages
 MangaLensTR-*.zip
+dist/
 
 # Private recovery data and locally downloaded evaluation assets
 .rollback/

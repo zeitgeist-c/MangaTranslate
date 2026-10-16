@@ -1,4 +1,4 @@
-# MangaLens TR 3.9.0 — batched adaptive chapter translation
+# MangaLens TR 3.9.1 — batched adaptive chapter translation
 
 [Türkçe kullanım kılavuzu](README.tr.md)
 
@@ -6,7 +6,7 @@ Manifest V3 extension for Brave/Chromium. Translates English manga, manhwa and m
 
 Full-chapter processing is a **preview**: complete coverage and the planned 98% quality target have not passed human-reviewed acceptance. Uncertain regions, unsafe backgrounds and text overflow remain available for review.
 
-Extract `MangaLensTR-3.9.0.zip`, load its folder through Developer mode in `brave://extensions`. For an existing unpacked installation, keep the same folder/extension identity and reload the extension, reader and settings tabs. Start a new chapter job after this upgrade: processing version changed. The compact popup selects provider/model automatically and shows the active key label. Its gear opens settings with matching multi-key lists for Gemini/OpenRouter. Existing keys remain intact.
+Extract `dist/MangaLensTR-3.9.1.zip`, load its folder through Developer mode in `brave://extensions`. For an existing unpacked installation, keep the same folder/extension identity and reload the extension, reader and settings tabs. To run live from source, load the `dist/` folder itself unpacked after `package.ps1` refreshes it. Start a new chapter job after this upgrade: processing version changed. The compact popup selects provider/model automatically and shows the active key label. Its gear opens settings with matching multi-key lists for Gemini/OpenRouter. Existing keys remain intact.
 
 Key cards distinguish saved keys from explicitly checked connections. Checks use provider metadata endpoints without generating a translation; success does not confirm model access or age attestation. Keys remain masked, changing the active key affects subsequent requests, and deleting the last key disables translation for that provider. Each page job sends 10 consecutive requests per saved key in turn (active key first), wraps around, and skips a key's remaining batch after a 429/quota failure. Collapsing the reader panel keeps processing; closing pauses it.
 

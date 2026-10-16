@@ -1,4 +1,6 @@
-# MangaLens TR 3.9.0 — 10'lu anahtar rotasyonu
+# MangaLens TR 3.9.1 — sade sürüm adı
+
+3.9.1: Tarayıcı listesindeki sürüm yazısı sadeleşti (HeraAi düzeni); `version_name` kaldırıldı, yalnız ad + sürüm görünür.
 
 3.9.0: Gemini ve OpenRouter'da kayıtlı anahtarlar iş başına 10'ar istekle sırayla kullanılır (önce aktif anahtar), liste bitince başa dönülür; 429/kota yiyen anahtarın kalan 10'luğu atlanır. Yeni iş rotasyonu sıfırlar, yeniden deneme kaldığı yerden devam eder.
 
@@ -22,7 +24,7 @@ Brave/Chromium Manifest V3 uzantısı. İngilizce manga/manhwa/manhua yazıları
 
 ## Kullanım
 
-1. `MangaLensTR-3.9.0.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle. Açık eski ayarlar pencerelerini de yenile. 3.7.0 ve daha eski işlere Devam et yerine popup’tan yeni bölüm taraması başlat; bölge gruplama sürümü değişti.
+1. `dist/MangaLensTR-3.9.1.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Kaynaktan canlı çalıştırmak için `package.ps1` sonrası yenilenen `dist/` klasörünü doğrudan yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle. Açık eski ayarlar pencerelerini de yenile. 3.7.0 ve daha eski işlere Devam et yerine popup’tan yeni bölüm taraması başlat; bölge gruplama sürümü değişti.
 
    Güncellemede aynı yüklenmiş klasörü kullan: farklı klasörden ikinci bir uzantı eklemek ayrı uzantı kimliği oluşturabilir ve kayıtlı anahtarlarını yeni kimlikte göstermeyebilir. Mevcut uzantıyı kaldırmadan klasörünü güncelle ve **Yeniden yükle** kullan.
 2. Popup'taki dişliyle **Ayarlar → API Anahtarları** aç. Gemini/OpenRouter için etiketli birden fazla anahtar ekleyebilirsin; **Aktif yap** ile seç. Eski Google listesi korunur, eski tek OpenRouter anahtarı otomatik aktarılır. Ana popup yalnız aktif anahtar etiketini gösterir.
