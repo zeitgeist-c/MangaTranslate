@@ -14,6 +14,8 @@ MangaLens TR, manga, manhwa ve manhua sayfalarındaki İngilizce metinleri Türk
 - Birden fazla API anahtarını ayrı ayarlar sayfasından yönetebilirsiniz.
 - Seri adı, sözlük ve çeviri yönergeleriyle terimlerin tutarlılığını destekler.
 - Tarama duraklatılabilir; tamamlanan çeviriler korunur.
+- Gemini'de her anahtar dakikada en fazla 12 istek kullanır, anahtarlar dönüşümlü ve paralel çalışır; limit dolarsa otomatik beklenip devam edilir.
+- Sayfa panelinde aşama takibi, istek sayacı ve canlı akış görünür.
 
 Kendi sağlayıcı API anahtarınız gerekir. Sağlayıcı kullanımı ücretli olabilir; ücretler ve model erişim koşulları seçtiğiniz sağlayıcıya bağlıdır. Uzantı sağlayıcı aboneliği veya API kredisi içermez.
 
