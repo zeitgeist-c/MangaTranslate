@@ -13,7 +13,11 @@ globalThis.MLProviders = (() => {
     ['meta/muse-spark-1.3', 'Muse Spark 1.3'],
     ['meta/muse-spark-1.3-contributor', 'Muse Spark 1.3 Contributor · veri paylaşımı'],
   ];
-  const catalog = Object.freeze({ gemini: google, openrouter: router });
+  const ollama = [
+    ['nemotron-3-nano:30b', 'Nemotron 3 Nano 30B'],
+    ['gemma4:31b', 'Gemma 4 31B'],
+  ];
+  const catalog = Object.freeze({ gemini: google, openrouter: router, ollama });
   // Translation needs visible JSON, not a provider's default reasoning budget.
   // Muse Spark requires reasoning; leave its working policy and Haiku unchanged.
   function routerPolicy(model = '') {
@@ -28,9 +32,13 @@ globalThis.MLProviders = (() => {
     const ids = google.map(([id]) => id), at = ids.indexOf(model);
     return at >= 0 && at + 1 < ids.length ? ids[at + 1] : null;
   }
+  function providerModelKey(provider) {
+    return provider === 'openrouter' ? 'openrouterModel' : provider === 'ollama' ? 'ollamaModel' : 'geminiModel';
+  }
   function settings(raw = {}) {
-    const provider = raw.translationProvider === 'openrouter' ? 'openrouter' : 'gemini';
-    const model = provider === 'gemini' ? raw.geminiModel || google[0][0] : raw.openrouterModel || 'qwen/qwen3.8-flash';
+    const provider = ['openrouter', 'ollama'].includes(raw.translationProvider) ? raw.translationProvider : 'gemini';
+    const fallback = provider === 'gemini' ? google[0][0] : provider === 'openrouter' ? 'qwen/qwen3.8-flash' : 'nemotron-3-nano:30b';
+    const model = raw[providerModelKey(provider)] || fallback;
     if (!catalog[provider].some(([id]) => id === model)) throw new Error('Seçili model desteklenmiyor; ayarlardan yeniden seçin.');
     if (model.endsWith('-contributor') && raw.contributorConsent !== true) throw new Error('Contributor modeli için veri paylaşımı seçeneğini onaylayın.');
     return { provider, model, profileVersion: version, processingVersion, geminiFallback: raw.geminiFallback === true, contentType: ['manga', 'manhwa', 'manhua'].includes(raw.contentType) ? raw.contentType : 'auto',
@@ -40,9 +48,9 @@ globalThis.MLProviders = (() => {
   }
   // Removed models fall back to the provider default; callers migrate stored settings openly.
   function migrate(raw = {}) {
-    const provider = raw.translationProvider === 'openrouter' ? 'openrouter' : 'gemini';
-    const fallback = provider === 'gemini' ? google[0][0] : 'qwen/qwen3.8-flash';
-    const key = provider === 'gemini' ? raw.geminiModel : raw.openrouterModel;
+    const provider = ['openrouter', 'ollama'].includes(raw.translationProvider) ? raw.translationProvider : 'gemini';
+    const fallback = provider === 'gemini' ? google[0][0] : provider === 'openrouter' ? 'qwen/qwen3.8-flash' : 'nemotron-3-nano:30b';
+    const key = raw[providerModelKey(provider)];
     if (catalog[provider].some(([id]) => id === key)) return { provider, model: key, migrated: false };
     return { provider, model: fallback, migrated: true };
   }
@@ -103,5 +111,16 @@ REGION ORDER: ${JSON.stringify(regions.map(r => r.regionId))}`;
         { type: 'image_url', image_url: { url: image.dataUrl } }
       ])] }] };
   }
-  return { catalog, settings, migrate, nextGeminiModel, style, prompt, parse, routerBody, routerPolicy, version, processingVersion };
+  function ollamaPolicy(model = '') {
+    if (!ollama.some(([id]) => id === model)) throw new Error('Bilinmeyen Ollama modeli');
+    return { maxRegions: 12, maxConcurrency: 4, timeoutMs: 90000,
+      requiredParameters: ['max_tokens', 'response_format'] };
+  }
+  function ollamaBody(model, promptText, images) {
+    if (!ollama.some(([id]) => id === model)) throw new Error('Bilinmeyen Ollama modeli');
+    return { model, stream: false, format: 'json',
+      messages: [{ role: 'user', content: [promptText, ...images.map(image => `regionId=${image.regionId || 'manual'}`)].join('\n'),
+        images: images.map(image => String(image.dataUrl).replace(/^data:image\/\w+;base64,/, '')) }] };
+  }
+  return { catalog, settings, migrate, nextGeminiModel, providerModelKey, style, prompt, parse, routerBody, routerPolicy, ollamaBody, ollamaPolicy, version, processingVersion };
 })();

@@ -1,9 +1,11 @@
 'use strict';
 globalThis.MLKeys = (() => {
   let serial = Promise.resolve();
+  const names = { gemini: 'Google', openrouter: 'OpenRouter', ollama: 'Ollama' };
   const fields = provider => {
     if (provider === 'gemini') return ['googleApiKeys', 'activeGoogleApiKeyId'];
     if (provider === 'openrouter') return ['openrouterApiKeys', 'activeOpenrouterApiKeyId'];
+    if (provider === 'ollama') return ['ollamaApiKeys', 'activeOllamaApiKeyId'];
     throw new Error('Bilinmeyen sağlayıcı.');
   };
   const queue = task => { const next = serial.then(task); serial = next.catch(() => {}); return next; };
@@ -11,13 +13,14 @@ globalThis.MLKeys = (() => {
     const [listField, activeField] = fields(provider), normalized = list.map(k => ({ ...k, isActive: k.id === activeId }));
     const patch = { [listField]: normalized, [activeField]: activeId };
     if (provider === 'openrouter') patch.openrouterApiKey = normalized.find(k => k.id === activeId)?.key || '';
+    if (provider === 'ollama') patch.ollamaApiKey = normalized.find(k => k.id === activeId)?.key || '';
     await chrome.storage.local.set(patch);
   }
   async function load(provider) {
-    const [listField, activeField] = fields(provider), data = await chrome.storage.local.get([listField, activeField, 'openrouterApiKey', 'googleApiKey', 'apiKey', 'geminiApiKey']);
+    const [listField, activeField] = fields(provider), data = await chrome.storage.local.get([listField, activeField, 'openrouterApiKey', 'ollamaApiKey', 'googleApiKey', 'apiKey', 'geminiApiKey']);
     if (!Array.isArray(data[listField])) {
-      const legacy = provider === 'openrouter' ? data.openrouterApiKey : data.googleApiKey || data.apiKey || data.geminiApiKey;
-      const list = legacy ? [{ id: crypto.randomUUID(), key: legacy, label: provider === 'openrouter' ? 'OpenRouter API 1' : 'Google API 1', createdAt: Date.now() }] : [];
+      const legacy = provider === 'openrouter' ? data.openrouterApiKey : provider === 'ollama' ? data.ollamaApiKey : data.googleApiKey || data.apiKey || data.geminiApiKey;
+      const list = legacy ? [{ id: crypto.randomUUID(), key: legacy, label: `${names[provider]} API 1`, createdAt: Date.now() }] : [];
       await persist(provider, list, list[0]?.id || null); return { list, activeId: list[0]?.id || null };
     }
     return { list: data[listField], activeId: data[activeField] || null };
@@ -28,10 +31,13 @@ globalThis.MLKeys = (() => {
   async function check(provider, entry) {
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
     try {
-      const router = provider === 'openrouter', response = await fetch(router ? 'https://openrouter.ai/api/v1/key' : 'https://generativelanguage.googleapis.com/v1beta/models', {
-        method: 'GET', signal: controller.signal, headers: router ? { Authorization: `Bearer ${entry.key}` } : { 'x-goog-api-key': entry.key }
-      }), data = await response.json();
-      if (response.ok && !data.error && (router ? data.data && typeof data.data === 'object' : Array.isArray(data.models)))
+      const endpoint = provider === 'openrouter' ? 'https://openrouter.ai/api/v1/key'
+        : provider === 'ollama' ? 'https://ollama.com/api/tags'
+        : 'https://generativelanguage.googleapis.com/v1beta/models';
+      const headers = provider === 'gemini' ? { 'x-goog-api-key': entry.key } : { Authorization: `Bearer ${entry.key}` };
+      const response = await fetch(endpoint, { method: 'GET', signal: controller.signal, headers }), data = await response.json();
+      const valid = provider === 'openrouter' ? data.data && typeof data.data === 'object' : Array.isArray(data.models);
+      if (response.ok && !data.error && valid)
         return { status: 'success', message: 'Bağlantı doğrulandı. Seçili model erişimi ve yaş onayı ayrıca değerlendirilir.' };
       return { status: response.status === 401 ? 'invalid' : response.status === 429 ? 'rate_limited' : 'error', message: `Bağlantı doğrulanamadı (HTTP ${response.status}). Anahtarınızı ve sağlayıcı hesabınızı kontrol edin.` };
     } catch { return { status: 'error', message: 'Bağlantı kontrolü tamamlanamadı. Ağ bağlantısını kontrol edip tekrar deneyin.' }; }
@@ -55,7 +61,7 @@ globalThis.MLKeys = (() => {
           const key = String(m.key || '').trim();
           if (key.length < 20 || key.length > 512 || /\s/.test(key)) throw new Error('Geçerli bir API anahtarı girin; anahtar boşluk içermemeli.');
           if (list.some(k => k.key === key)) throw new Error('Bu API anahtarı zaten kayıtlı.');
-          const item = { id: crypto.randomUUID(), key, label: label() || `${provider === 'gemini' ? 'Google' : 'OpenRouter'} API ${list.length + 1}`, createdAt: Date.now() };
+          const item = { id: crypto.randomUUID(), key, label: label() || `${names[provider]} API ${list.length + 1}`, createdAt: Date.now() };
           list = [...list, item]; if (!list.some(k => k.id === activeId)) activeId = item.id; break;
         }
         case 'ML_KEYS_RENAME': if (!entry) throw new Error('Anahtar bulunamadı.'); entry.label = label() || 'Adsız anahtar'; break;

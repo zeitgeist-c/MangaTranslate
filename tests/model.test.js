@@ -30,8 +30,8 @@ const values = vm.runInContext('GEMINI_MODEL_VALUES', context);
   // ── Model listesi ve etiket butunlugu ──────────────────────────────────────
   assert.deepEqual([...values], [
     'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemma-4-26b-a4b-it',
-  ], 'model rotasyonu hizli -> yavas sirali olmali (gemma-4-31b-it listede yok)');
-  assert.ok(!values.includes('gemma-4-31b-it'), 'kaldirilan model zincire geri sizmamali');
+  ], 'model zinciri onem sirasinda 3 model olmali (gemma-4-31b-it pratikte yanit vermiyor)');
+  assert.ok(!values.includes('gemma-4-31b-it'), 'yavas model zincire geri sizmamali');
   const labels = vm.runInContext('GEMINI_MODEL_LABELS', context);
   for (const model of values) assert.ok(labels[model], `etiket eksik: ${model}`);
   const popupSource = fs.readFileSync(path.join(root, 'popup/popup.js'), 'utf8');
@@ -40,7 +40,7 @@ const values = vm.runInContext('GEMINI_MODEL_VALUES', context);
   assert.deepEqual(context.MLProviders.catalog.gemini.map(([id]) => id).join(','), [...values].join(','));
   assert.ok(popupSource.includes('MLUI.models('), 'popup ortak model katalogunu kullanmali');
   assert.ok(popupHtml.includes('id="model"'), 'popup model secimi bulunmali');
-  assert.ok(!popupHtml.includes('gemma-4-31b-it'), 'kaldirilan model popup listesinde kalmamali');
+  assert.ok(!popupHtml.includes('gemma-4-31b-it'), 'yavas model popup listesinde kalmamali');
 
   // ── Yedek zincir: secili modelden baslar, 3 modeli de dolasir ───────────────
   for (const selected of values) {
@@ -70,9 +70,9 @@ const values = vm.runInContext('GEMINI_MODEL_VALUES', context);
   assert.equal(answer, 'OK');
   assert.equal(requests[0].body.contents[0].parts[1].inline_data.mime_type, 'image/png');
 
-  // ── Kaldirilan model: bilinmeyen ad varsayilana duser, zincire sizmaz ──────
+  // ── Cikarilan model: adi varsayilana duser, zincire sizmaz ──────────────────
   assert.equal(context.normalizeGeminiModel('gemma-4-31b-it'), 'gemini-3.5-flash-lite',
-    'kaldirilan model adi varsayilan modele normalize edilmeli');
+    'yavas model adi varsayilan modele normalize edilmeli');
 
   // ── Adaptif aralik matematigi (olcum: 2.5sn taban, 429'da artar, temizde azalir) ──
   assert.equal(vm.runInContext('MIN_INTERVAL_MS', context), 2500, 'taban aralik 2.5sn olmali');

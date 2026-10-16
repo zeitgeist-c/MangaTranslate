@@ -75,31 +75,25 @@ test('gemini single key is paced to 12 sends per minute window', async () => {
   await assert.rejects(context.mlProviderCall(gemini, 'Hi', []),
     e => e.code === 'GEMINI_BUDGET_EXHAUSTED' && e.retryAt > Date.now() && e.notSent === true && e.stopJob === true);
 });
-test('gemini keys serve 10-request batches per job before rotating', async () => {
+test('gemini keys rotate every request with 5 in flight each', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   vm.runInContext('mlGeminiGapMs = 5', context);
   context.MLKeys = { active: async () => 'AAA', all: async () => [{ id: 'k1', key: 'AAA' }, { id: 'k2', key: 'BBB' }] };
   const gemini = { provider: 'gemini', model: 'gemini-3.5-flash-lite' };
-  for (let i = 0; i < 24; i++) await context.mlProviderCall(gemini, 'Hi', [], undefined, 'job1');
-  const auths = calls.map(c => c.headers['x-goog-api-key']);
-  assert.deepEqual(auths.slice(0, 10), Array(10).fill('AAA'));
-  assert.deepEqual(auths.slice(10, 20), Array(10).fill('BBB'));
-  assert.deepEqual(auths.slice(20, 22), Array(2).fill('AAA'));
-  assert.deepEqual(auths.slice(22), Array(2).fill('BBB'));
-  await assert.rejects(context.mlProviderCall(gemini, 'Hi', [], undefined, 'job1'), e => e.code === 'GEMINI_BUDGET_EXHAUSTED');
+  for (let i = 0; i < 4; i++) await context.mlProviderCall(gemini, 'Hi', [], undefined, 'job1');
+  assert.deepEqual(calls.map(c => c.headers['x-goog-api-key']), ['AAA', 'BBB', 'AAA', 'BBB']);
+  for (let i = 0; i < 20; i++) await context.mlProviderCall(gemini, 'Hi', [], undefined, 'job1');
   assert.equal(calls.length, 24);
+  await assert.rejects(context.mlProviderCall(gemini, 'Hi', [], undefined, 'job1'), e => e.code === 'GEMINI_BUDGET_EXHAUSTED');
 });
-test('openrouter rotates 10-request batches across saved keys and wraps', async () => {
+test('openrouter rotates keys every request and wraps', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
   const config = { provider: 'openrouter', model: 'qwen/qwen3.8-flash' };
-  for (let i = 0; i < 21; i++) await context.mlProviderCall(config, 'Hi', [], undefined, 'jobA');
-  const auths = calls.map(c => c.headers.Authorization);
-  assert.deepEqual(auths.slice(0, 10), Array(10).fill('Bearer A'));
-  assert.deepEqual(auths.slice(10, 20), Array(10).fill('Bearer B'));
-  assert.deepEqual(auths.slice(20), ['Bearer A']);
+  for (let i = 0; i < 5; i++) await context.mlProviderCall(config, 'Hi', [], undefined, 'jobA');
+  assert.deepEqual(calls.map(c => c.headers.Authorization), ['Bearer A', 'Bearer B', 'Bearer A', 'Bearer B', 'Bearer A']);
 });
-test('a 429 key skips the rest of its batch within the same job', async () => {
+test('a 429 key is skipped within the same job', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
   context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
@@ -118,7 +112,7 @@ test('a 429 key skips the rest of its batch within the same job', async () => {
 test('each page job restarts key rotation from the active key', async () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
-  for (let i = 0; i < 10; i++) assert.equal((await context.mlPickOpenrouterKey('jobC')).key, 'A');
+  assert.equal((await context.mlPickOpenrouterKey('jobC')).key, 'A');
   assert.equal((await context.mlPickOpenrouterKey('jobC')).key, 'B');
   context.mlBatchReset('openrouter', 'jobC');
   assert.equal((await context.mlPickOpenrouterKey('jobC')).key, 'A');
@@ -218,14 +212,14 @@ test('transient provider overload is retried then served',async()=>{
   assert.equal(await context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []), 'OK');
   assert.equal(calls, 3);
 });
-test('persistent overload stops with a countdown after three attempts',async()=>{
+test('persistent overload chains through all gemini models then stops with a countdown',async()=>{
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
   let calls = 0;
   context.fetch = async () => { calls++; return { ok: false, status: 503, json: async () => ({ error: { message: 'high demand' } }) }; };
   await assert.rejects(context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []),
     e => e.code === 'PROVIDER_OVERLOADED' && e.retryAt > Date.now() && e.message.includes('3 deneme'));
-  assert.equal(calls, 3);
+  assert.equal(calls, 9);
 });
 test('unavailable statuses map distinctly; refusals never retry',async()=>{
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
@@ -238,16 +232,83 @@ test('unavailable statuses map distinctly; refusals never retry',async()=>{
   await assert.rejects(context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []));
   assert.equal(calls, 4);
 });
-test('overload switches an opted-in gemini job to the next model',async()=>{
+test('opt-in chains other retryable gemini failures; without it the job stops',async()=>{
+  const mk = () => { const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+    vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context); return { context, calls }; };
+  const failing = (url, options, calls) => { calls.push({ url, options });
+    if (url.includes('gemini-3.5-flash-lite')) return { ok: false, status: 500, json: async () => ({ error: { message: 'backend error' } }) };
+    return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'OK' }] }, finishReason: 'STOP' }] }) }; };
+  { const { context, calls } = mk();
+    context.fetch = async (url, options) => failing(url, options, calls);
+    assert.equal(await context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite', geminiFallback: true }, 'Hi', []), 'OK');
+    assert.equal(calls.length, 4); assert.ok(calls.at(-1).url.includes('gemini-3.1-flash-lite')); }
+  { const { context, calls } = mk();
+    context.fetch = async (url, options) => failing(url, options, calls);
+    await assert.rejects(context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []),
+      e => e.code === 'PROVIDER_UNAVAILABLE');
+    assert.equal(calls.length, 3); }
+});
+test('full keys are skipped and freed slots are preferred',async()=>{
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
+  const held = [];
+  for (let i = 0; i < 10; i++) held.push(await context.mlPickOpenrouterKey('jobW'));
+  assert.deepEqual(held.map(h => h.key), ['A', 'B', 'A', 'B', 'A', 'B', 'A', 'B', 'A', 'B']);
+  held.filter(h => h.key === 'B').forEach(h => h.release());
+  assert.equal((await context.mlPickOpenrouterKey('jobW')).key, 'B');
+});
+test('503 chains to the next gemini model automatically within one call',async()=>{
+  const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
-  context.fetch = async () => ({ ok: false, status: 503, json: async () => ({ error: { message: 'high demand' } }) });
-  await assert.rejects(context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite', geminiFallback: true }, 'Hi', []),
-    e => e.code === 'GEMINI_MODEL_FALLBACK' && e.nextModel === 'gemini-3.1-flash-lite' && e.retryAt > Date.now());
-  await assert.rejects(context.mlProviderCall({ provider: 'gemini', model: 'gemma-4-26b-a4b-it', geminiFallback: true }, 'Hi', []),
-    e => e.code === 'PROVIDER_OVERLOADED');
-  await assert.rejects(context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []),
-    e => e.code === 'PROVIDER_OVERLOADED');
+  context.fetch = async (url, options) => {
+    calls.push({ url, options });
+    if (url.includes('gemini-3.5-flash-lite')) return { ok: false, status: 503, json: async () => ({ error: { message: 'high demand' } }) };
+    return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'OK' }] }, finishReason: 'STOP' }] }) };
+  };
+  assert.equal(await context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []), 'OK');
+  assert.equal(calls.length, 4);
+  assert.ok(calls.at(-1).url.includes('gemini-3.1-flash-lite'));
+});
+test('gemma requests disable thinking and omit the JSON mime type',async()=>{
+  const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext('mlGeminiGapMs = 5', context);
+  assert.equal(await context.mlProviderCall({ provider: 'gemini', model: 'gemma-4-26b-a4b-it' }, 'Hi', [], undefined, 'gemma'), 'OK');
+  const body = calls.at(-1).body;
+  assert.equal(body.generationConfig.responseMimeType, undefined);
+  assert.equal(body.generationConfig.thinkingConfig.thinkingLevel, 'minimal');
+  assert.ok(calls.at(-1).url.includes('gemma-4-26b-a4b-it'));
+});
+test('ollama sends native chat bodies and reads message content',async()=>{
+  const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  context.MLKeys = { active: async () => 'O', all: async () => [{ id: 'o1', key: 'O' }] };
+  context.fetch = async (url, options) => {
+    calls.push({ url, options, body: JSON.parse(options.body) });
+    assert.equal(url, 'https://ollama.com/api/chat');
+    assert.equal(options.headers.Authorization, 'Bearer O');
+    const body = JSON.parse(options.body);
+    assert.equal(body.model, 'nemotron-3-nano:30b'); assert.equal(body.stream, false); assert.equal(body.format, 'json');
+    assert.deepEqual(body.messages[0].images, ['AAAA']);
+    assert.ok(body.messages[0].content.includes('regionId=r'));
+    return { ok: true, json: async () => ({ message: { content: 'OK' }, done_reason: 'stop' }) };
+  };
+  assert.equal(await context.mlProviderCall({ provider: 'ollama', model: 'nemotron-3-nano:30b' }, 'Hi', [{ regionId: 'r', dataUrl: 'data:image/png;base64,AAAA' }]), 'OK');
+  assert.equal((await context.mlCapabilities({ provider: 'ollama', model: 'nemotron-3-nano:30b' })).maxRegions, 12);
+});
+test('ollama keys rotate and a 429 key is skipped',async()=>{
+  const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
+  context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
+  const config = { provider: 'ollama', model: 'nemotron-3-nano:30b' };
+  context.fetch = async (url, options) => { calls.push({ url, options });
+    return { ok: true, json: async () => ({ message: { content: 'OK' }, done_reason: 'stop' }) }; };
+  for (let i = 0; i < 4; i++) await context.mlProviderCall(config, 'Hi', [], undefined, 'jobO');
+  assert.deepEqual(calls.map(c => c.options.headers.Authorization), ['Bearer A', 'Bearer B', 'Bearer A', 'Bearer B']);
+  context.fetch = async (url, options) => { calls.push({ url, options });
+    if (options.headers.Authorization.includes('A'))
+      return { ok: false, status: 429, json: async () => ({ error: { message: 'too many', metadata: { provider_name: 'Ollama' } } }) };
+    return { ok: true, json: async () => ({ message: { content: 'OK' }, done_reason: 'stop' }) }; };
+  assert.equal(await context.mlProviderCall({ provider: 'ollama', model: 'gemma4:31b' }, 'Hi', [], undefined, 'jobO'), 'OK');
+  assert.deepEqual(calls.slice(-2).map(c => c.options.headers.Authorization), ['Bearer A', 'Bearer B']);
 });
 test('gemini overload halves parallel lanes until the cut expires',async()=>{
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));

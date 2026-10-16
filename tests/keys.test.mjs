@@ -47,6 +47,24 @@ test('failed writes preserve old keys and a later operation still succeeds', asy
   assert.equal(await f.keys.active('openrouter'), routerKey); await action(f, 'openrouter', 'RENAME', { id: old.id, label: 'Korundu' });
   assert.equal((await action(f, 'openrouter'))[0].label, 'Korundu');
 });
+test('ollama keys add once, mirror the active key and check via tags endpoint', async () => {
+  const f = fixture();
+  await assert.rejects(action(f, 'ollama', 'ADD', { key: 'short' }), /boşluk|Geçerli/);
+  const key = 'o'.repeat(40) + '1234567890';
+  await action(f, 'ollama', 'ADD', { key, label: 'Bulut 1' });
+  await assert.rejects(action(f, 'ollama', 'ADD', { key }), /zaten/);
+  let list = await action(f, 'ollama');
+  assert.equal(list.length, 1); assert.equal(list[0].label, 'Bulut 1'); assert.equal(list[0].active, true);
+  assert.equal(f.data.ollamaApiKey, key); assert.equal(await f.keys.active('ollama'), key);
+  assert.equal(f.data.openrouterApiKey, undefined);
+  f.fetch(async (url, options) => {
+    assert.equal(url, 'https://ollama.com/api/tags');
+    assert.equal(options.headers.Authorization, 'Bearer ' + key);
+    return { ok: true, json: async () => ({ models: [{ name: 'nemotron-3-nano:30b' }] }) };
+  });
+  const [result] = await action(f, 'ollama', 'CHECK', { id: list[0].id });
+  assert.equal(result.status, 'success');
+});
 test('metadata checks use correct headers and never generate a translation', async () => {
   const f = fixture({ openrouterApiKey: routerKey, googleApiKey: googleKey });
   for (const provider of ['openrouter', 'gemini']) { const [key] = await action(f, provider); const [result] = await action(f, provider, 'CHECK', { id: key.id }); assert.equal(result.status, 'success'); }

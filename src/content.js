@@ -11,8 +11,9 @@ globalThis.__mlManualController = true;
 
 let sm_overlay = null;
 let sm_controls = null;
+let ml_quick_controls = null;
 
-const MAX_SELECTIONS = 12;
+const MAX_SELECTIONS = 60;
 const MIN_SELECTION_SIZE = 24;
 const QUICK_CAPTURE_TIMEOUT_MS = 12000;
 // v3.1.4: ceviri beklemesi kuyruk derinligine gore buyur — sabit 75sn, kuyrukta bekleyen
@@ -730,7 +731,7 @@ function prepareManualSelectionCapture(selection) {
   selection.captureDirty = false;
   var version = selection.captureVersion;
   var hiddenUi = [];
-  [sm_overlay, sm_controls].concat(Array.from(document.querySelectorAll('.ml-selection-box'))).forEach(function(el) {
+  [sm_overlay, sm_controls, ml_quick_controls].concat(Array.from(document.querySelectorAll('.ml-selection-box'))).forEach(function(el) {
     if (!el || hiddenUi.some(function(item) { return item.el === el; })) return;
     hiddenUi.push({ el: el, visibility: el.style.visibility });
   });
@@ -792,6 +793,27 @@ function startQuickTranslateMode() {
   window.addEventListener('blur', cancelQuickDrawing, true);
   window.addEventListener('resize', syncQuickJobLayers, true);
   window.addEventListener('scroll', syncQuickJobLayers, true);
+  createQuickControls();
+}
+
+function createQuickControls() {
+  if (ml_quick_controls) ml_quick_controls.remove();
+  ml_quick_controls = document.createElement('div');
+  ml_quick_controls.id = 'ml-quick-controls';
+  ml_quick_controls.style.cssText =
+    'position:fixed!important;bottom:18px!important;left:50%!important;' +
+    'transform:translateX(-50%)!important;' +
+    'width:max-content!important;max-width:calc(100vw - 16px)!important;box-sizing:border-box!important;' +
+    'background:rgba(17,24,39,0.96)!important;color:#f9fafb!important;' +
+    'border:1px solid rgba(255,255,255,0.16)!important;border-radius:8px!important;' +
+    'padding:8px!important;display:flex!important;align-items:center!important;' +
+    'gap:6px!important;z-index:2147483647!important;font-family:system-ui,sans-serif!important;' +
+    'box-shadow:0 14px 40px rgba(0,0,0,0.34)!important;';
+  ml_quick_controls.innerHTML =
+    '<span style="font-size:12px;font-weight:700;white-space:nowrap;line-height:1.2;">Oto Çevir aktif</span>' +
+    '<button id="ml-quick-stop" type="button" style="' + selectionControlButtonStyle(false) + '">Durdur (Esc)</button>';
+  document.body.appendChild(ml_quick_controls);
+  document.getElementById('ml-quick-stop').addEventListener('click', function() { stopQuickTranslateMode(); });
 }
 
 function stopQuickTranslateMode() {
@@ -809,6 +831,10 @@ function stopQuickTranslateMode() {
   if (quickTranslateMode.hitLayer) {
     quickTranslateMode.hitLayer.remove();
     quickTranslateMode.hitLayer = null;
+  }
+  if (ml_quick_controls) {
+    ml_quick_controls.remove();
+    ml_quick_controls = null;
   }
   cancelQuickDrawing();
 }
@@ -837,7 +863,7 @@ function onQuickStart(e) {
   if (!quickTranslateMode.active) return;
   if (quickTranslateMode.drawing) return;
   if (e.button !== 0) return;
-  if (e.target.closest('#ml-selection-controls') || e.target.closest('.ml-selection-box')) return;
+  if (e.target.closest('#ml-selection-controls') || e.target.closest('#ml-quick-controls') || e.target.closest('.ml-selection-box')) return;
   var page = findMangaPageAtPoint(e.clientX, e.clientY);
   if (!page) return;
   e.preventDefault();
