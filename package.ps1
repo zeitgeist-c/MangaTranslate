@@ -81,7 +81,9 @@ foreach ($relativePath in @('popup\popup.js', 'popup\ui.js', 'options\settings.j
 }
 
 $packageName = "MangaLensTR-$version.zip"
-$packagePath = Join-Path $projectRoot $packageName
+$distDir = Join-Path $projectRoot 'dist'
+if (-not (Test-Path -LiteralPath $distDir)) { New-Item -ItemType Directory -Path $distDir | Out-Null; }
+$packagePath = Join-Path $distDir $packageName
 if (Test-Path -LiteralPath $packagePath) {
     throw "Önceki paket korunuyor; aynı sürümün üzerine yazılmaz: $packagePath"
 }
@@ -96,12 +98,22 @@ foreach ($readmePath in @('README.md', 'README.tr.md')) {
 & $node.Source --test (Get-ChildItem -LiteralPath (Join-Path $projectRoot 'tests') -File | Where-Object { $_.Name -match '\.test\.(js|mjs)$' } | ForEach-Object FullName)
 if ($LASTEXITCODE -ne 0) { throw 'Sürüm testleri başarısız; paket oluşturulmadı.' }
 
+# dist: canlı yüklenebilir paketlenmemiş kopya (zip'ler korunur, eski kopya yenilenir)
+foreach ($stale in @('manifest.json', 'assets', 'popup', 'options', 'src')) {
+    $stalePath = Join-Path $distDir $stale
+    if (Test-Path -LiteralPath $stalePath) { Remove-Item -LiteralPath $stalePath -Recurse -Force }
+}
+Copy-Item -LiteralPath (Join-Path $projectRoot 'manifest.json') -Destination $distDir -Force
+foreach ($dir in @('assets', 'popup', 'options', 'src')) {
+    Copy-Item -LiteralPath (Join-Path $projectRoot $dir) -Destination (Join-Path $distDir $dir) -Recurse -Force
+}
+
 $archiveInputs = @(
-    (Join-Path $projectRoot 'manifest.json'),
-    (Join-Path $projectRoot 'assets'),
-    (Join-Path $projectRoot 'popup'),
-    (Join-Path $projectRoot 'options'),
-    (Join-Path $projectRoot 'src')
+    (Join-Path $distDir 'manifest.json'),
+    (Join-Path $distDir 'assets'),
+    (Join-Path $distDir 'popup'),
+    (Join-Path $distDir 'options'),
+    (Join-Path $distDir 'src')
 )
 Compress-Archive -LiteralPath $archiveInputs -DestinationPath $packagePath -CompressionLevel Optimal
 
