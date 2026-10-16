@@ -2,29 +2,46 @@
 
 Tarih: 14 Ekim 2026 — sürüm 3.8.6 için taslak
 
+MangaLens TR, manga/manhwa/manhua sayfalarındaki metinleri Türkçe çeviriyle sayfada gösteren bir tarayıcı uzantısıdır.
+
+Toplanan veriler ve kullanımı
+
+• Sayfa görselleri ve kırpmalar: yalnızca çevirisini istediğin bölgeler, seçtiğin yapay zekâ servisine (Gemini veya OpenRouter) gönderilir.
+
+• Çeviri metinleri, seri adı, sözlük ve yönergeler: çeviri bağlamı için aynı servise gönderilir.
+
+• API anahtarların: yalnızca ilgili servise bağlanmak için iletilir.
+
+Yerel saklama: API anahtarların, tercihlerin, iş kayıtların ve çeviri önbelleğin öncelikle kendi tarayıcında saklanır.
+
+Üçüncü taraflar: Gemini (Google) ve OpenRouter. Kendi gizlilik politikaları geçerlidir: https://ai.google.dev/gemini-api/terms, https://openrouter.ai/privacy
+
+Sınırlı kullanım: veriler çeviri işlevi dışında kullanılmaz, satılmaz, reklam veya kredi değerlendirmesi için kullanılmaz. İnsan tarafından okunmasına yalnızca açık onayın, güvenlik incelemesi veya yasal zorunluluk hâlinde başvurulur.
+
+Veri katkılı modeller (ör. Contributor): sağlayıcı koşuluna göre istek/yanıtlar eğitimde kullanılabilir; sağlayıcı tercihlerini incele.
+
 İletişim: zeitgeist.geeker@gmail.com
 
-MangaLens TR, kullanıcının açtığı çizgi roman sayfalarında metin alanlarını bulur ve kullanıcının seçtiği yapay zekâ sağlayıcısıyla Türkçe çeviri gösterir.
+---
 
-## İşlenen bilgiler
+# MangaLens TR Privacy Policy
 
-Uzantı, çeviri işlemi için sayfadaki görselleri ve görsel adreslerini işler. Bölge tespiti cihaz üzerinde paket içindeki modellerle yapılır. Çeviri istediğinizde seçilen görsel kırpmaları, kaynak/çeviri metinleri, seri adı, sözlük ve yazdığınız yönergeler seçtiğiniz Gemini veya OpenRouter hizmetine gönderilebilir. Bunlara hassas bilgi eklemeyin.
+MangaLens TR is a browser extension that shows Turkish translations of manga/manhwa/manhua page text on the page.
 
-API anahtarları sağlayıcıya kimlik doğrulamak için kullanılır; uzantının yerel tarayıcı depolamasında tutulur. Anahtar yönetimi arayüzü kayıtlı anahtarları maskeler. Anahtarlar uzantı tarafından tarayıcı senkronizasyon deposuna kaydedilmez. Tarayıcı profilinize erişebilen yazılımlara karşı mutlak koruma vaat edilmez.
+Data collected and use
 
-Tercihlerin bir bölümü tarayıcının senkronizasyon deposunda tutulur ve tarayıcı hesabınızın eşitleme ayarlarına tabi olabilir. İş durumu, ilgili sayfa adresi, bölgeler, sözlük ve çeviri önbelleği yerel depolamada/IndexedDB'de saklanabilir. Bunlar işlemi sürdürmek ve tamamlanan sonuçları yeniden kullanmak içindir.
+• Page images and crops: only the regions you ask to translate are sent to the AI provider you choose (Gemini or OpenRouter).
 
-## Üçüncü taraflar
+• Translated texts, series name, glossary and instructions: sent to the same provider as translation context.
 
-Geliştirici, çevirileri alan kendi sunucusunu veya uzantı içinde analitik/reklam izleme hizmetini işletmez. Ancak çeviri sırasında veriler seçtiğiniz üçüncü taraf sağlayıcıya gider. OpenRouter istekleri yönlendirdiği model sağlayıcısını da kapsayabilir. İşleme, saklama ve eğitim koşulları seçilen model ve hesap ayarlarına bağlıdır. Contributor gibi veri katkısı koşulu bulunan modellerde istek/yanıtlar eğitim amacıyla kullanılabilir; uzantı tüm modeller için sıfır saklama veya eğitim dışında kalma garantisi vermez.
+• Your API keys: transmitted only to connect to the relevant provider.
 
-- Google: https://ai.google.dev/gemini-api/terms
-- OpenRouter: https://openrouter.ai/privacy
+Local storage: your API keys, preferences, job records and translation cache are stored primarily in your own browser.
 
-Veriler geliştirici tarafından satılmaz veya reklam profili oluşturmak için kullanılmaz. Sağlayıcılara aktarım kullanıcının istediği çeviri işlevini yerine getirmek içindir.
+Third parties: Gemini (Google) and OpenRouter. Their own privacy policies apply: https://ai.google.dev/gemini-api/terms, https://openrouter.ai/privacy
 
-## Kontrol ve silme
+Limited use: data is never used beyond the translation feature, never sold, never used for advertising or credit scoring. Human review occurs only with your explicit consent, for security review, or legal obligation.
 
-API anahtarlarını uzantının ayarlar sayfasından silebilir ve sağlayıcı hesabınızdan iptal edebilirsiniz. Tarayıcının uzantıya ait site/depolama verilerini temizlemek veya uzantıyı kaldırmak yerel kayıtları kaldırabilir; tarayıcı yedekleri ve sağlayıcılardaki kayıtlar ayrı kurallara tabidir. Sağlayıcıya gönderilmiş verilerin silinmesi için ilgili sağlayıcının başvuru kanallarını kullanın.
+Data-contributor models (e.g. Contributor): requests/responses may be used for training per provider terms; review provider preferences.
 
-Bu metin yayınlanmadan önce herkese açık bir HTTPS adrese yerleştirilmelidir. Yerel Markdown dosyası tek başına mağaza gizlilik URL'si yerine geçmez.
+Contact: zeitgeist.geeker@gmail.com
