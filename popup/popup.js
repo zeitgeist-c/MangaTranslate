@@ -6,11 +6,11 @@ async function refresh() {
   const token = ++generation, config = await MLUI.settings(), keys = await MLUI.keys(config.translationProvider);
   if (token !== generation) return;
   saved = config; $('enabled-toggle').checked = config.enabled;
-  for (const provider of ['gemini', 'openrouter']) $(`provider-${provider}`).setAttribute('aria-pressed', String(provider === config.translationProvider));
-  MLUI.models($('model'), config.translationProvider, config.translationProvider === 'gemini' ? config.geminiModel : config.openrouterModel);
+  for (const provider of ['gemini', 'openrouter', 'ollama']) $(`provider-${provider}`).setAttribute('aria-pressed', String(provider === config.translationProvider));
+  MLUI.models($('model'), config.translationProvider, config[MLProviders.providerModelKey(config.translationProvider)]);
   if (!$('model').value) {
     const moved = MLProviders.migrate(config);
-    if (moved.migrated) { await save({ [config.translationProvider === 'gemini' ? 'geminiModel' : 'openrouterModel']: moved.model }); notice(`Desteklenmeyen model yerine ${moved.model} seçildi; yeni taramada geçerli.`); return; }
+    if (moved.migrated) { await save({ [MLProviders.providerModelKey(config.translationProvider)]: moved.model }); notice(`Desteklenmeyen model yerine ${moved.model} seçildi; yeni taramada geçerli.`); return; }
   }
   $('contributor-row').hidden = !String($('model').value).endsWith('-contributor'); $('contributor-consent').checked = config.contributorConsent;
   const active = keys.find(k => k.active);
@@ -18,11 +18,11 @@ async function refresh() {
   $('key-dot').classList.toggle('ready', !!active); $('add-key').hidden = !!active;
   for (const id of ['btn-full-chapter', 'btn-translate-page', 'btn-quick-translate']) $(id).disabled = saving || !active || !config.enabled || !$('model').value;
   $('model').disabled = saving; $('enabled-toggle').disabled = saving; $('contributor-consent').disabled = saving;
-  for (const provider of ['gemini', 'openrouter']) $(`provider-${provider}`).disabled = saving;
+  for (const provider of ['gemini', 'openrouter', 'ollama']) $(`provider-${provider}`).disabled = saving;
 }
 async function save(patch) {
   if (saving) return; saving = true; generation++;
-  for (const id of ['enabled-toggle', 'model', 'contributor-consent', 'provider-gemini', 'provider-openrouter', 'btn-full-chapter', 'btn-translate-page', 'btn-quick-translate']) $(id).disabled = true;
+  for (const id of ['enabled-toggle', 'model', 'contributor-consent', 'provider-gemini', 'provider-openrouter', 'provider-ollama', 'btn-full-chapter', 'btn-translate-page', 'btn-quick-translate']) $(id).disabled = true;
   try { await chrome.storage.sync.set(patch); notice(''); }
   catch (error) { notice('Ayar kaydedilemedi: ' + error.message); }
   finally { saving = false; await refresh().catch(error => notice(error.message)); }
@@ -52,8 +52,8 @@ async function stats() {
   $('ml-stat-day').textContent = s.day?.bucket === day ? s.day.count || 0 : 0; $('ml-stat-lifetime').textContent = s.lifetime?.count || 0;
 }
 $('version').textContent = 'v' + chrome.runtime.getManifest().version;
-for (const provider of ['gemini', 'openrouter']) $(`provider-${provider}`).onclick = () => save({ translationProvider: provider });
-$('model').onchange = () => save({ [saved.translationProvider === 'gemini' ? 'geminiModel' : 'openrouterModel']: $('model').value });
+for (const provider of ['gemini', 'openrouter', 'ollama']) $(`provider-${provider}`).onclick = () => save({ translationProvider: provider });
+$('model').onchange = () => save({ [MLProviders.providerModelKey(saved.translationProvider)]: $('model').value });
 $('enabled-toggle').onchange = () => save({ enabled: $('enabled-toggle').checked }); $('contributor-consent').onchange = () => save({ contributorConsent: $('contributor-consent').checked });
 for (const id of ['settings', 'add-key']) $(id).onclick = () => MLUI.openSettings(saved?.translationProvider || 'gemini').catch(error => notice(error.message));
 $('btn-full-chapter').onclick = () => start('START_PAGE_TRANSLATION'); $('btn-translate-page').onclick = () => start('START_SELECTION_MODE'); $('btn-quick-translate').onclick = () => start(quick ? 'STOP_QUICK_TRANSLATE_MODE' : 'START_QUICK_TRANSLATE_MODE');

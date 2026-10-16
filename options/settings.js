@@ -46,9 +46,9 @@ function applyRoute() {
     markDirty(false); loadPreferences().catch(error => notice(error.message));
   }
   if (provider !== nextProvider && !adding) { $('new-key').value = ''; $('new-label').value = ''; }
-  section = ['keys', 'preferences', 'about'].includes(nextSection) ? nextSection : 'keys'; provider = nextProvider === 'openrouter' ? 'openrouter' : 'gemini';
+  section = ['keys', 'preferences', 'about'].includes(nextSection) ? nextSection : 'keys'; provider = ['gemini', 'openrouter', 'ollama'].includes(nextProvider) ? nextProvider : 'gemini';
   for (const name of ['keys', 'preferences', 'about']) { $('section-' + name).hidden = section !== name; document.querySelector(`[data-section="${name}"]`).setAttribute('aria-selected', String(section === name)); }
-  for (const name of ['gemini', 'openrouter']) $('keys-' + name).setAttribute('aria-pressed', String(provider === name));
+  for (const name of ['gemini', 'openrouter', 'ollama']) $('keys-' + name).setAttribute('aria-pressed', String(provider === name));
   renderKeys().catch(error => notice(error.message));
 }
 function navigate(nextSection, nextProvider) {
@@ -59,7 +59,7 @@ function navigate(nextSection, nextProvider) {
   location.hash = `${nextSection}/${nextProvider}`;
 }
 for (const b of document.querySelectorAll('[data-section]')) b.onclick = () => navigate(b.dataset.section, provider);
-for (const name of ['gemini', 'openrouter']) $('keys-' + name).onclick = () => navigate('keys', name);
+for (const name of ['gemini', 'openrouter', 'ollama']) $('keys-' + name).onclick = () => navigate('keys', name);
 for (const id of prefs) $(id).addEventListener('input', () => markDirty(true));
 $('series-name').addEventListener('change', async () => { const { seriesGlossaries = {} } = await chrome.storage.local.get('seriesGlossaries'); const name = $('series-name').value.trim(); if (Object.hasOwn(seriesGlossaries, name)) $('translation-glossary').value = seriesGlossaries[name]; });
 $('add-form').onsubmit = async event => {

@@ -10,7 +10,8 @@ const GEMINI_MODELS = Object.freeze({
   FALLBACK: 'gemini-3.1-flash-lite',
   GEMMA_FAST: 'gemma-4-26b-a4b-it',
 });
-// Sirasi = yedek model rotasyon sirasi (hizli -> yavas). Secili modelden baslanir.
+// Sirasi = onem/yedek zincir sirasi. Secili modelden baslanir, listedeki sonrakiyle devam edilir.
+// Gemma 4 31B pratikte yanıt vermedigi icin (60sn zaman asimi, v3.1.5 olcumu) listede yok.
 const GEMINI_MODEL_VALUES = Object.freeze(Object.values(GEMINI_MODELS));
 const GEMINI_MODEL_LABELS = Object.freeze({
   [GEMINI_MODELS.DEFAULT]: 'Gemini 3.5 Flash Lite',
@@ -281,7 +282,7 @@ async function callGemini({ apiKey, model, prompt, imageBase64, responseMimeType
   if (imageBase64) {
     parts.push({ inline_data: { mime_type: imageBase64.mime, data: imageBase64.base64 } });
   }
-  const isGemma = normalizedModel === GEMINI_MODELS.GEMMA_FAST;
+  const isGemma = normalizedModel.startsWith('gemma');
 
   const body = {
     contents: [{ parts }],
