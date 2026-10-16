@@ -60,7 +60,7 @@ test('ollama keys add once, mirror the active key and check via tags endpoint', 
   f.fetch(async (url, options) => {
     assert.equal(url, 'https://ollama.com/api/tags');
     assert.equal(options.headers.Authorization, 'Bearer ' + key);
-    return { ok: true, json: async () => ({ models: [{ name: 'nemotron-3-nano:30b' }] }) };
+    return { ok: true, json: async () => ({ models: [{ name: 'gemma4:31b' }] }) };
   });
   const [result] = await action(f, 'ollama', 'CHECK', { id: list[0].id });
   assert.equal(result.status, 'success');

@@ -1,6 +1,8 @@
-# MangaLens TR 3.9.2 — Ollama sağlayıcısı
+# MangaLens TR 3.9.3 — ikinci bakış ve Ollama seri pencere
 
-3.9.2: Üçüncü sağlayıcı Ollama eklendi (Nemotron 3 Nano 30B varsayılan, Gemma 4 31B). Anahtar listesi, 5'li pencere rotasyonu ve 429 atlaması diğerleriyle aynı. Canlı doğrulama kullanıcının denemesinde.
+3.9.3: Bölüm bitince kartsız bölgeler küçük gruplarla otomatik tekrar gönderiliyor (ikinci bakış); Ollama anahtar başına tek uçuşa alındı; ölü yedek dalı temizlendi.
+
+3.9.2: Üçüncü sağlayıcı Ollama eklendi (Gemma 4 31B; Nano bulutta görüntü kabul etmediği için çıkarıldı). Anahtar listesi, pencere rotasyonu ve 429 atlaması diğerleriyle aynı.
 
 3.9.1: Tarayıcı listesindeki sürüm yazısı sadeleşti (HeraAi düzeni); `version_name` kaldırıldı, yalnız ad + sürüm görünür.
 
@@ -26,7 +28,7 @@ Brave/Chromium Manifest V3 uzantısı. İngilizce manga/manhwa/manhua yazıları
 
 ## Kullanım
 
-1. `dist/MangaLensTR-3.9.2.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Kaynaktan canlı çalıştırmak için `package.ps1` sonrası yenilenen `dist/` klasörünü doğrudan yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle. Açık eski ayarlar pencerelerini de yenile. 3.7.0 ve daha eski işlere Devam et yerine popup’tan yeni bölüm taraması başlat; bölge gruplama sürümü değişti.
+1. `dist/MangaLensTR-3.9.3.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Kaynaktan canlı çalıştırmak için `package.ps1` sonrası yenilenen `dist/` klasörünü doğrudan yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle. Açık eski ayarlar pencerelerini de yenile. 3.7.0 ve daha eski işlere Devam et yerine popup’tan yeni bölüm taraması başlat; bölge gruplama sürümü değişti.
 
    Güncellemede aynı yüklenmiş klasörü kullan: farklı klasörden ikinci bir uzantı eklemek ayrı uzantı kimliği oluşturabilir ve kayıtlı anahtarlarını yeni kimlikte göstermeyebilir. Mevcut uzantıyı kaldırmadan klasörünü güncelle ve **Yeniden yükle** kullan.
 2. Popup'taki dişliyle **Ayarlar → API Anahtarları** aç. Gemini/OpenRouter/Ollama için etiketli birden fazla anahtar ekleyebilirsin; **Aktif yap** ile seç. Eski Google listesi korunur, eski tek OpenRouter anahtarı otomatik aktarılır. Ana popup yalnız aktif anahtar etiketini gösterir.
@@ -46,7 +48,7 @@ Yalnız seçili model kullanılır; 429/503'te zincirdeki sonraki Gemini modelin
 
 Gemini: Gemini3.5 Flash Lite, Gemini3.1 Flash Lite, Gemma4 26B A4B.
 
-OpenRouter: Qwen3.7/3.8 Flash, Claude Haiku5.5, Muse Spark1.3 ve Contributor. OpenRouter’daki Gemini2.5/3.1 Flash Lite kaldırıldı; doğrudan Gemini sekmesi korunur. Haiku4.5 yok. Contributor veri paylaşımı nedeniyle ayrı açık seçime bağlıdır. Ollama: Nemotron 3 Nano 30B, Gemma 4 31B (canlı doğrulama kullanıcının denemesinde). Hesap erişimi/fiyat/çeviri kalitesini kullanıcı deneyecek; canlı API testleri kullanıcı isteğiyle yapılmadı.
+OpenRouter: Qwen3.7/3.8 Flash, Claude Haiku5.5, Muse Spark1.3 ve Contributor. OpenRouter’daki Gemini2.5/3.1 Flash Lite kaldırıldı; doğrudan Gemini sekmesi korunur. Haiku4.5 yok. Contributor veri paylaşımı nedeniyle ayrı açık seçime bağlıdır. Ollama: Gemma 4 31B (Nemotron 3 Nano bulutta görüntü kabul etmediği için çıkarıldı). Hesap erişimi/fiyat/çeviri kalitesini kullanıcı deneyecek; canlı API testleri kullanıcı isteğiyle yapılmadı.
 
 **Hızlı yazı taraması (önerilen)** varsayılandır: yazı dedektörü satırları kaynak piksel konumunda gruplar; ağır balon modeli çalışmaz. Desteklenen GPU’da PP-OCR WebGPU, desteklenmeyen veya başarısız GPU’da aynı doğrulanmış model WASM/CPU ile çalışır. Önceki Standart seçimi hızlı yola eşlenir. Önceden küçük modeli seçtiysen **Ayarlar → Çeviri Tercihleri → Yerel tarama** bölümünden hızlı yolu seçip Kaydet. Alternatif/ayrıntılı balon modelleri isteğe bağlı ve daha yavaştır.
 

@@ -166,6 +166,12 @@ test('no matching JSON endpoint is distinguished from data policy and age restri
   assert.equal(context.mlAccessError(config, 404, 'No endpoints found that support all requested parameters').code, 'MODEL_ENDPOINT_UNAVAILABLE');
   assert.equal(context.mlAccessError(config, 404, 'No endpoints matching your data policy').code, 'PROVIDER_DATA_POLICY_BLOCK');
 });
+test('ollama image refusal is actionable and stops the job', () => {
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  const error = context.mlAccessError({ provider: 'ollama', model: 'gemma4:31b' }, 400, 'this model does not support image input');
+  assert.equal(error.code, 'MODEL_VISION_UNSUPPORTED'); assert.equal(error.stopJob, true);
+  assert.ok(error.message.includes('başka model'));
+});
 
 test('streamed upstream error preserves its explanation, redacts key and stops without a retry', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
@@ -257,6 +263,16 @@ test('full keys are skipped and freed slots are preferred',async()=>{
   held.filter(h => h.key === 'B').forEach(h => h.release());
   assert.equal((await context.mlPickOpenrouterKey('jobW')).key, 'B');
 });
+test('expired key cooldowns are pruned while active ones survive',async()=>{
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
+  vm.runInContext(`{ for (let i = 0; i < 600; i++) mlBatchCooldown.set('openrouter:jobP:stale' + i, 1);
+    mlBatchCooldown.set('openrouter:jobP:b', Date.now() + 60000); }`, context);
+  assert.equal((await context.mlPickOpenrouterKey('jobP')).key, 'A');
+  const sizes = vm.runInContext(`[mlBatchCooldown.size, [...mlBatchCooldown.values()].filter(v => v === 1).length,
+    mlBatchCooldown.get('openrouter:jobP:b') > Date.now()]`, context);
+  assert.ok(sizes[0] < 600); assert.equal(sizes[1], 0); assert.equal(sizes[2], true);
+});
 test('503 chains to the next gemini model automatically within one call',async()=>{
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
@@ -286,19 +302,19 @@ test('ollama sends native chat bodies and reads message content',async()=>{
     assert.equal(url, 'https://ollama.com/api/chat');
     assert.equal(options.headers.Authorization, 'Bearer O');
     const body = JSON.parse(options.body);
-    assert.equal(body.model, 'nemotron-3-nano:30b'); assert.equal(body.stream, false); assert.equal(body.format, 'json');
+    assert.equal(body.model, 'gemma4:31b'); assert.equal(body.stream, false); assert.equal(body.format, 'json');
     assert.deepEqual(body.messages[0].images, ['AAAA']);
     assert.ok(body.messages[0].content.includes('regionId=r'));
     return { ok: true, json: async () => ({ message: { content: 'OK' }, done_reason: 'stop' }) };
   };
-  assert.equal(await context.mlProviderCall({ provider: 'ollama', model: 'nemotron-3-nano:30b' }, 'Hi', [{ regionId: 'r', dataUrl: 'data:image/png;base64,AAAA' }]), 'OK');
-  assert.equal((await context.mlCapabilities({ provider: 'ollama', model: 'nemotron-3-nano:30b' })).maxRegions, 12);
+  assert.equal(await context.mlProviderCall({ provider: 'ollama', model: 'gemma4:31b' }, 'Hi', [{ regionId: 'r', dataUrl: 'data:image/png;base64,AAAA' }]), 'OK');
+  assert.equal((await context.mlCapabilities({ provider: 'ollama', model: 'gemma4:31b' })).maxRegions, 12);
 });
 test('ollama keys rotate and a 429 key is skipped',async()=>{
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
   context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
-  const config = { provider: 'ollama', model: 'nemotron-3-nano:30b' };
+  const config = { provider: 'ollama', model: 'gemma4:31b' };
   context.fetch = async (url, options) => { calls.push({ url, options });
     return { ok: true, json: async () => ({ message: { content: 'OK' }, done_reason: 'stop' }) }; };
   for (let i = 0; i < 4; i++) await context.mlProviderCall(config, 'Hi', [], undefined, 'jobO');
@@ -309,6 +325,34 @@ test('ollama keys rotate and a 429 key is skipped',async()=>{
     return { ok: true, json: async () => ({ message: { content: 'OK' }, done_reason: 'stop' }) }; };
   assert.equal(await context.mlProviderCall({ provider: 'ollama', model: 'gemma4:31b' }, 'Hi', [], undefined, 'jobO'), 'OK');
   assert.deepEqual(calls.slice(-2).map(c => c.options.headers.Authorization), ['Bearer A', 'Bearer B']);
+});
+test('ollama allows one in-flight request per key and waits for the slot',async()=>{
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  context.MLKeys = { active: async () => 'O', all: async () => [{ id: 'o1', key: 'O' }] };
+  const first = await context.mlPickOllamaKey('jobS');
+  const second = context.mlPickOllamaKey('jobS', { maxWaitMs: 5000 });
+  setTimeout(() => first.release(), 100);
+  assert.equal((await second).key, 'O');
+});
+test('ollama overflow still goes out after the wait cap',async()=>{
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  context.MLKeys = { active: async () => 'O', all: async () => [{ id: 'o1', key: 'O' }] };
+  await context.mlPickOllamaKey('jobT');
+  const started = Date.now();
+  assert.equal((await context.mlPickOllamaKey('jobT', { maxWaitMs: 250 })).key, 'O');
+  assert.ok(Date.now() - started < 5000);
+});
+test('string provider errors surface their real message',async()=>{
+  const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  context.MLKeys = { active: async () => 'O', all: async () => [{ id: 'o1', key: 'O' }] };
+  context.fetch = async (url, options) => { calls.push({ url, options });
+    return { ok: false, status: 400, json: async () => ({ error: 'model requires vision input' }) }; };
+  await assert.rejects(context.mlProviderCall({ provider: 'ollama', model: 'gemma4:31b' }, 'Hi', []),
+    e => e.message.includes('HTTP 400') && e.message.includes('model requires vision input'));
+  context.fetch = async () => ({ ok: false, status: 400, json: async () => ({ status: 'bad request' }) });
+  await assert.rejects(context.mlProviderCall({ provider: 'ollama', model: 'gemma4:31b' }, 'Hi', []),
+    e => e.message.includes('HTTP 400') && e.message.includes('bad request'));
+  assert.equal(calls.length, 1);
 });
 test('gemini overload halves parallel lanes until the cut expires',async()=>{
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));

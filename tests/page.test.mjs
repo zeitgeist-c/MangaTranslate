@@ -15,7 +15,7 @@ test('providers preserve separate selected models and require explicit contribut
 });
 test('ollama provider validates models and builds native chat bodies', () => {
   assert.equal(providers.settings({}).provider, 'gemini');
-  assert.equal(providers.settings({ translationProvider: 'ollama' }).model, 'nemotron-3-nano:30b');
+  assert.equal(providers.settings({ translationProvider: 'ollama' }).model, 'gemma4:31b');
   assert.equal(providers.settings({ translationProvider: 'ollama', ollamaModel: 'gemma4:31b' }).model, 'gemma4:31b');
   assert.throws(() => providers.settings({ translationProvider: 'ollama', ollamaModel: 'qwen/qwen3.8-flash' }), /desteklenmiyor/);
   assert.equal(providers.providerModelKey('ollama'), 'ollamaModel');
@@ -24,12 +24,12 @@ test('ollama provider validates models and builds native chat bodies', () => {
   const mg = providers.migrate({ translationProvider: 'ollama', ollamaModel: 'gemma4:31b' });
   assert.equal(mg.provider, 'ollama'); assert.equal(mg.model, 'gemma4:31b'); assert.equal(mg.migrated, false);
   assert.equal(providers.migrate({ translationProvider: 'ollama', ollamaModel: 'gpt-oss:20b' }).migrated, true);
-  const body = providers.ollamaBody('nemotron-3-nano:30b', 'Translate', [{ regionId: 'r1', dataUrl: 'data:image/png;base64,AAAA' }, { regionId: 'r2', dataUrl: 'data:image/jpeg;base64,BBBB' }]);
-  assert.equal(body.model, 'nemotron-3-nano:30b'); assert.equal(body.stream, false); assert.equal(body.format, 'json');
+  const body = providers.ollamaBody('gemma4:31b', 'Translate', [{ regionId: 'r1', dataUrl: 'data:image/png;base64,AAAA' }, { regionId: 'r2', dataUrl: 'data:image/jpeg;base64,BBBB' }]);
+  assert.equal(body.model, 'gemma4:31b'); assert.equal(body.stream, false); assert.equal(body.format, 'json');
   assert.equal(JSON.stringify(body.messages[0].images), JSON.stringify(['AAAA', 'BBBB']));
   assert.ok(body.messages[0].content.includes('regionId=r1') && body.messages[0].content.includes('regionId=r2'));
   assert.throws(() => providers.ollamaBody('qwen/qwen3.8-flash', '', []), /Bilinmeyen Ollama/);
-  const policy = providers.ollamaPolicy('nemotron-3-nano:30b');
+  const policy = providers.ollamaPolicy('gemma4:31b');
   assert.equal(policy.maxRegions, 12);  assert.ok(policy.timeoutMs >= 60000);
 });
 test('removed models migrate openly to the provider default', () => {
@@ -50,7 +50,7 @@ test('gemini fallback chain follows catalog order and stays opt-in', () => {
 });
 test('translation association uses identity even with shuffled replies; missing/duplicate IDs fail', () => {
   const values = [{ regionId: 'b', sourceText: 'English', status: 'translated', translatedText: 'Türkçe' }, { regionId: 'a', sourceText: '', status: 'unreadable', translatedText: '' }];
-  assert.deepEqual(Array.from(providers.parse(JSON.stringify({ regions: values }), ['a', 'b']), r => r.regionId), ['a', 'b']);
+  assert.deepEqual(Array.from(providers.parse('<think>reasoning</think>' + JSON.stringify({ regions: values }), ['a', 'b']), r => r.regionId), ['a', 'b']);
   assert.throws(() => providers.parse(JSON.stringify({ regions: [values[0], values[0]] }), ['a', 'b']), /kimlik/);
   assert.throws(() => providers.parse(JSON.stringify({ regions: [values[0]] }), ['a', 'b']), /sayısı/);
   assert.throws(() => providers.parse(JSON.stringify({ regions: [{ ...values[1], translatedText: 'uydurma' }] }), ['a']), /Geçersiz/);
