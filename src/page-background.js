@@ -18,27 +18,120 @@ function mlApplyShrink(model, regions) {
   if (shrink.until <= Date.now()) { mlTimeoutShrink.delete(model); return regions; }
   return Math.min(regions, shrink.regions);
 }
-// Gemini per-key sliding budget: 12 sends per 60 s window (+5 s margin), rotated across all saved keys.
+// Per-key rotation: each saved key serves ML_KEY_BATCH consecutive sends per page job,
+// then the next key; the order wraps and a 429/quota failure skips the rest of that key's batch.
+// Gemini additionally keeps a sliding budget (12 sends per 60 s window + 5 s margin) per key.
 const mlGeminiBudget = new Map(), ML_GEMINI_RPM = 12, ML_GEMINI_WINDOW_MS = 60000, ML_GEMINI_MARGIN_MS = 5000;
+const ML_KEY_BATCH = 10;
+const mlBatchState = new Map(), mlBatchCooldown = new Map();
 function mlPruneGeminiBudget(id, now = Date.now()) {
   const uses = (mlGeminiBudget.get(id) || []).filter(t => t > now - ML_GEMINI_WINDOW_MS);
   mlGeminiBudget.set(id, uses); return uses;
 }
-async function mlPickGeminiKey() {
-  let keys = [];
-  if (typeof MLKeys !== 'undefined' && typeof MLKeys.all === 'function') keys = await MLKeys.all('gemini');
-  else { const single = await mlKey('gemini'); if (single) keys = [{ id: single, key: single }]; }
+function mlBatchScope(provider, owner) { return provider + ':' + (owner || 'manual'); }
+function mlBatchReset(provider, owner) {
+  const scope = mlBatchScope(provider, owner);
+  mlBatchState.delete(scope);
+  for (const key of [...mlBatchCooldown.keys()]) if (key.startsWith(scope + ':')) mlBatchCooldown.delete(key);
+}
+async function mlListProviderKeys(provider) {
+  if (typeof MLKeys !== 'undefined' && typeof MLKeys.all === 'function') {
+    try { const list = await MLKeys.all(provider); if (Array.isArray(list) && list.length) return list; } catch { /* Active/legacy key below. */ }
+  }
+  const single = await mlKey(provider);
+  return single ? [{ id: single, key: single }] : [];
+}
+async function mlBatchActiveId(provider, keys) {
+  if (keys.length < 2 || typeof MLKeys === 'undefined' || typeof MLKeys.active !== 'function') return null;
+  try {
+    const activeKey = await MLKeys.active(provider), found = keys.find(k => k.key === activeKey);
+    return found ? found.id : null;
+  } catch { return null; }
+}
+function mlBatchOrder(keys, scope, firstId) {
+  if (!mlBatchState.has(scope) && mlBatchState.size > 50) mlBatchState.delete(mlBatchState.keys().next().value);
+  let state = mlBatchState.get(scope);
+  const ids = keys.map(k => k.id);
+  if (!state) {
+    const order = [...ids];
+    if (firstId && order.includes(firstId)) while (order[0] !== firstId) order.push(order.shift());
+    state = { order, pos: 0, used: 0 }; mlBatchState.set(scope, state); return state;
+  }
+  state.order = state.order.filter(id => ids.includes(id));
+  for (const id of ids) if (!state.order.includes(id)) state.order.push(id);
+  if (!state.order.length) { state.order = [...ids]; state.pos = 0; state.used = 0; }
+  else state.pos = Math.min(state.pos, state.order.length - 1);
+  return state;
+}
+// Advance past keyId: the rest of its 10-batch goes to the next key.
+function mlBatchSkip(provider, owner, keyId, cooldownMs = 30000) {
+  const scope = mlBatchScope(provider, owner);
+  if (keyId) mlBatchCooldown.set(scope + ':' + keyId, Date.now() + Math.max(1000, cooldownMs || 0));
+  const state = mlBatchState.get(scope);
+  if (!state || !state.order.length) return;
+  const at = keyId ? state.order.indexOf(keyId) : -1;
+  state.pos = (at >= 0 ? at + 1 : state.pos + 1) % state.order.length;
+  state.used = 0;
+}
+async function mlPickGeminiKey(owner) {
+  const keys = await mlListProviderKeys('gemini');
   if (!keys.length) throw new Error('Gemini API anahtarı eksik.');
   const now = Date.now(), base = Math.max(1, Math.min(4, keys.length));
   if (!(globalThis.mlLaneCutUntil > now)) globalThis.mlGeminiLanes = base;
+  const scope = mlBatchScope('gemini', owner);
+  const state = mlBatchState.has(scope) ? mlBatchOrder(keys, scope) : mlBatchOrder(keys, scope, await mlBatchActiveId('gemini', keys));
   let earliest = Infinity;
-  for (const k of keys) {
-    const uses = mlPruneGeminiBudget(k.id, now);
-    if (uses.length < ML_GEMINI_RPM) return k;
-    earliest = Math.min(earliest, uses[0] + ML_GEMINI_WINDOW_MS + ML_GEMINI_MARGIN_MS);
-  }
+  const scan = ignoreCooling => {
+    for (let step = 0; step < state.order.length; step++) {
+      const index = (state.pos + step) % state.order.length, id = state.order[index];
+      const entry = keys.find(k => k.id === id);
+      if (!entry) continue;
+      if (!ignoreCooling) {
+        const cooling = mlBatchCooldown.get(scope + ':' + id) || 0;
+        if (cooling > now) { earliest = Math.min(earliest, cooling); continue; }
+      }
+      const uses = mlPruneGeminiBudget(id, now);
+      if (uses.length >= ML_GEMINI_RPM) { earliest = Math.min(earliest, uses[0] + ML_GEMINI_WINDOW_MS + ML_GEMINI_MARGIN_MS); continue; }
+      if (step > 0) { state.pos = index; state.used = 0; }
+      state.used++;
+      if (state.used >= ML_KEY_BATCH) { state.pos = (index + 1) % state.order.length; state.used = 0; }
+      return entry;
+    }
+    return null;
+  };
+  // Prefer a non-cooling key; when every key is cooling (e.g. a single 429 key mid-retry),
+  // fall back to rotation order so the scheduled retry still goes out.
+  const picked = scan(false) || scan(true);
+  if (picked) return picked;
   throw Object.assign(new Error(`Gemini istek limiti doldu (12/dk, ${keys.length} anahtar). Pencere bitiminde otomatik devam edilecek.`),
-    { notSent: true, stopJob: true, code: 'GEMINI_BUDGET_EXHAUSTED', retryAt: earliest });
+    { notSent: true, stopJob: true, code: 'GEMINI_BUDGET_EXHAUSTED', retryAt: earliest === Infinity ? now + ML_GEMINI_MARGIN_MS : earliest });
+}
+async function mlPickOpenrouterKey(owner) {
+  const keys = await mlListProviderKeys('openrouter');
+  if (!keys.length) throw new Error('OpenRouter API anahtarı eksik.');
+  const now = Date.now(), scope = mlBatchScope('openrouter', owner);
+  const state = mlBatchState.has(scope) ? mlBatchOrder(keys, scope) : mlBatchOrder(keys, scope, await mlBatchActiveId('openrouter', keys));
+  let earliest = Infinity;
+  const scan = ignoreCooling => {
+    for (let step = 0; step < state.order.length; step++) {
+      const index = (state.pos + step) % state.order.length, id = state.order[index];
+      const entry = keys.find(k => k.id === id);
+      if (!entry) continue;
+      if (!ignoreCooling) {
+        const cooling = mlBatchCooldown.get(scope + ':' + id) || 0;
+        if (cooling > now) { earliest = Math.min(earliest, cooling); continue; }
+      }
+      if (step > 0) { state.pos = index; state.used = 0; }
+      state.used++;
+      if (state.used >= ML_KEY_BATCH) { state.pos = (index + 1) % state.order.length; state.used = 0; }
+      return entry;
+    }
+    return null;
+  };
+  const picked = scan(false) || scan(true);
+  if (picked) return picked;
+  throw Object.assign(new Error('OpenRouter anahtarları geçici beklemede. Süre dolunca “Hatalıları yeniden dene”yi kullanın.'),
+    { notSent: true, stopJob: true, code: 'PROVIDER_COOLDOWN', retryAt: earliest === Infinity ? now + 30000 : earliest, cooldownScope: 'account' });
 }
 function mlReserveGeminiKey(id) { mlPruneGeminiBudget(id).push(Date.now()); }
 const mlGeminiKeyLocks = new Map(), mlGeminiLastSend = new Map();
@@ -212,7 +305,7 @@ function mlMarkRetryable(config, error, status) {
   if (!error.code) error.code = status === 503 ? 'PROVIDER_OVERLOADED' : status === 429 ? 'PROVIDER_RATE_LIMITED' : 'PROVIDER_UNAVAILABLE';
   if (status === 503 && config.provider === 'gemini') mlCutGeminiLanes();
 }
-async function mlProviderCall(config, prompt, images, keyOverride) {
+async function mlProviderCall(config, prompt, images, keyOverride, owner) {
   const heartbeat = globalThis.setInterval?.(() => chrome.runtime.getContexts?.({ contextTypes: ['OFFSCREEN_DOCUMENT'] }).catch(() => {}), 10000);
   try {
     const tuning = globalThis.mlRetryTuning || {};
@@ -220,7 +313,7 @@ async function mlProviderCall(config, prompt, images, keyOverride) {
     const maxWait = Number.isFinite(tuning.maxWait) ? tuning.maxWait : 120000;
     let error;
     for (let attempt = 0; ; attempt++) {
-      try { return await mlProviderAttempt(config, prompt, images, keyOverride); }
+      try { return await mlProviderAttempt(config, prompt, images, keyOverride, owner); }
       catch (e) {
         error = e; error.attempts = attempt + 1;
         if (!e.retryableStatus || attempt >= delays.length) break;
@@ -239,11 +332,15 @@ async function mlProviderCall(config, prompt, images, keyOverride) {
     throw error;
   } finally { if (heartbeat) globalThis.clearInterval(heartbeat); }
 }
-async function mlProviderAttempt(config, prompt, images, keyOverride) {
-  let key = keyOverride, geminiKeyId;
+async function mlProviderAttempt(config, prompt, images, keyOverride, owner) {
+  let key = keyOverride, geminiKeyId, routerKeyId;
   if (!key && config.provider === 'gemini') {
-    const picked = await mlPickGeminiKey();
+    const picked = await mlPickGeminiKey(owner);
     key = picked.key; geminiKeyId = picked.id;
+  }
+  if (!key && config.provider === 'openrouter') {
+    const picked = await mlPickOpenrouterKey(owner);
+    key = picked.key; routerKeyId = picked.id;
   }
   if (!key) key = await mlKey(config.provider);
   if (!key) throw new Error(`${config.provider === 'gemini' ? 'Gemini' : 'OpenRouter'} API anahtarı eksik.`);
@@ -300,6 +397,11 @@ async function mlProviderAttempt(config, prompt, images, keyOverride) {
     if (error.name === 'AbortError') { mlNoteTimeout(config.model, images.length);
       const reason = idleFired ? `yanıt akışı ${timeoutMs/1000} saniye ilerlemedi` : `${timeoutMs/1000} saniyede yanıt vermedi`;
       throw Object.assign(new Error(`${config.provider}/${config.model}: Sağlayıcı ${reason}; ücretlendirme durumu belirsiz. Otomatik tekrar yapılmadı. Sonraki gruplar bu modelde geçici küçültüldü.`), { stopJob: true, code: 'PROVIDER_TIMEOUT' }); }
+    const failedId = geminiKeyId || routerKeyId;
+    if (failedId && (error.httpStatus === 429 || error.status === 'rate_limited')) {
+      const wait = Math.max(0, (error.retryAt || error.cooldownUntil || Date.now() + 30000) - Date.now());
+      mlBatchSkip(config.provider, owner, failedId, wait);
+    }
     error.message = String(error.message).replaceAll(key, '[anahtar]').slice(0, 1000);
     if (error.httpStatus && !error.code) {
       const access=mlAccessError(config,error.httpStatus,error.message);
@@ -431,7 +533,7 @@ async function mlTranslateGroup(message) {
         catch { throw Object.assign(new Error('Grup kaydı yazılamadı; sağlayıcıya gönderilmedi.'), { notSent: true, stopJob: true, code: 'LOCAL_STORAGE_FAILED' }); }
         sentAt = Date.now(); dispatched = true;
         try {
-          const raw = await mlProviderCall({ ...checked, maxOutputTokens: caps.maxOutputTokens, regionsOutput:true }, prompt, missing.map(r => ({ regionId: r.regionId, dataUrl: r.crop })));
+          const raw = await mlProviderCall({ ...checked, maxOutputTokens: caps.maxOutputTokens, regionsOutput:true }, prompt, missing.map(r => ({ regionId: r.regionId, dataUrl: r.crop })), undefined, owner);
           return MLProviders.parse(raw, missing.map(r => r.regionId), true);
         } catch (error) { error.stopJob = true; error.code ||= 'UNCERTAIN_GROUP'; throw error; }
       }, owner);
@@ -477,7 +579,11 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         if (!MLProviders.catalog[provider]?.some(([id])=>id===model)) throw new Error('Geçersiz iş modeli.');
         batching=await mlCapabilities({provider,model});
       }
-      if (message.paused) mlRouterQueue.pause(owner); else mlRouterQueue.begin(owner, message.retry === true);
+      if (message.paused) mlRouterQueue.pause(owner);
+      else {
+        if (message.retry !== true) { mlBatchReset('gemini', owner); mlBatchReset('openrouter', owner); }
+        mlRouterQueue.begin(owner, message.retry === true);
+      }
       return batching ? {batching} : true;
     }
     if (message.type === 'ML_CANCEL') { mlLocalRequests.get(`${sender.tab.id}:${message.requestId}`)?.abort(); return true; }
