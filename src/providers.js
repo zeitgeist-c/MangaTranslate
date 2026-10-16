@@ -14,7 +14,6 @@ globalThis.MLProviders = (() => {
     ['meta/muse-spark-1.3-contributor', 'Muse Spark 1.3 Contributor · veri paylaşımı'],
   ];
   const ollama = [
-    ['nemotron-3-nano:30b', 'Nemotron 3 Nano 30B'],
     ['gemma4:31b', 'Gemma 4 31B'],
   ];
   const catalog = Object.freeze({ gemini: google, openrouter: router, ollama });
@@ -37,7 +36,7 @@ globalThis.MLProviders = (() => {
   }
   function settings(raw = {}) {
     const provider = ['openrouter', 'ollama'].includes(raw.translationProvider) ? raw.translationProvider : 'gemini';
-    const fallback = provider === 'gemini' ? google[0][0] : provider === 'openrouter' ? 'qwen/qwen3.8-flash' : 'nemotron-3-nano:30b';
+    const fallback = provider === 'gemini' ? google[0][0] : provider === 'openrouter' ? 'qwen/qwen3.8-flash' : 'gemma4:31b';
     const model = raw[providerModelKey(provider)] || fallback;
     if (!catalog[provider].some(([id]) => id === model)) throw new Error('Seçili model desteklenmiyor; ayarlardan yeniden seçin.');
     if (model.endsWith('-contributor') && raw.contributorConsent !== true) throw new Error('Contributor modeli için veri paylaşımı seçeneğini onaylayın.');
@@ -49,7 +48,7 @@ globalThis.MLProviders = (() => {
   // Removed models fall back to the provider default; callers migrate stored settings openly.
   function migrate(raw = {}) {
     const provider = ['openrouter', 'ollama'].includes(raw.translationProvider) ? raw.translationProvider : 'gemini';
-    const fallback = provider === 'gemini' ? google[0][0] : provider === 'openrouter' ? 'qwen/qwen3.8-flash' : 'nemotron-3-nano:30b';
+    const fallback = provider === 'gemini' ? google[0][0] : provider === 'openrouter' ? 'qwen/qwen3.8-flash' : 'gemma4:31b';
     const key = raw[providerModelKey(provider)];
     if (catalog[provider].some(([id]) => id === key)) return { provider, model: key, migrated: false };
     return { provider, model: fallback, migrated: true };
@@ -76,7 +75,8 @@ PREVIOUS CONTEXT: ${JSON.stringify(context.slice(-12))}
 REGION ORDER: ${JSON.stringify(regions.map(r => r.regionId))}`;
   }
   function parse(raw, expected, partial = false) {
-    const cleaned = String(raw).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    const cleaned = String(raw).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+      .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
     const data = JSON.parse(cleaned);
     if (!data || !Array.isArray(data.regions) || data.regions.length !== expected.length) throw new Error('Çeviri bölge sayısı uyuşmuyor.');
     const allowed = new Set(expected), seen = new Set();

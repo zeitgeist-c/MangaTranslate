@@ -1,4 +1,4 @@
-# MangaLens TR 3.9.2 — batched adaptive chapter translation
+# MangaLens TR 3.9.3 — batched adaptive chapter translation
 
 [Türkçe kullanım kılavuzu](README.tr.md)
 
@@ -6,7 +6,7 @@ Manifest V3 extension for Brave/Chromium. Translates English manga, manhwa and m
 
 Full-chapter processing is a **preview**: complete coverage and the planned 98% quality target have not passed human-reviewed acceptance. Uncertain regions, unsafe backgrounds and text overflow remain available for review.
 
-Extract `dist/MangaLensTR-3.9.2.zip`, load its folder through Developer mode in `brave://extensions`. For an existing unpacked installation, keep the same folder/extension identity and reload the extension, reader and settings tabs. To run live from source, load the `dist/` folder itself unpacked after `package.ps1` refreshes it. Start a new chapter job after this upgrade: processing version changed. The compact popup selects provider/model automatically and shows the active key label. Its gear opens settings with matching multi-key lists for Gemini/OpenRouter/Ollama. Existing keys remain intact.
+Extract `dist/MangaLensTR-3.9.3.zip`, load its folder through Developer mode in `brave://extensions`. For an existing unpacked installation, keep the same folder/extension identity and reload the extension, reader and settings tabs. To run live from source, load the `dist/` folder itself unpacked after `package.ps1` refreshes it. Start a new chapter job after this upgrade: processing version changed. The compact popup selects provider/model automatically and shows the active key label. Its gear opens settings with matching multi-key lists for Gemini/OpenRouter/Ollama. Existing keys remain intact.
 
 Key cards distinguish saved keys from explicitly checked connections. Checks use provider metadata endpoints without generating a translation; success does not confirm model access or age attestation. Keys remain masked, changing the active key affects subsequent requests, and deleting the last key disables translation for that provider. Requests rotate across saved keys (active key first), each key serving up to 5 concurrent sends; full keys are skipped, the order wraps, and a 429/quota key rests for a while. Collapsing the reader panel keeps processing; closing pauses it.
 

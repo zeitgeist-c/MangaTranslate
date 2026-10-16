@@ -1,6 +1,6 @@
 'use strict';
 globalThis.MLUI = (() => {
-  const defaults = { enabled: true, translationProvider: 'gemini', geminiModel: 'gemini-3.5-flash-lite', openrouterModel: 'qwen/qwen3.8-flash', ollamaModel: 'nemotron-3-nano:30b', contributorConsent: false, geminiFallback: false,
+  const defaults = { enabled: true, translationProvider: 'gemini', geminiModel: 'gemini-3.5-flash-lite', openrouterModel: 'qwen/qwen3.8-flash', ollamaModel: 'gemma4:31b', contributorConsent: false, geminiFallback: false,
     contentType: 'auto', localDetector: 'fast', seriesName: '', translationInstructions: '', translationGlossary: '', translationFontSize: 16 };
   async function settings() { const [sync, local] = await Promise.all([chrome.storage.sync.get(defaults), chrome.storage.local.get('translationGlossary')]); return { ...sync, localDetector: ['small', 'detailed'].includes(sync.localDetector) ? sync.localDetector : 'fast', translationGlossary: local.translationGlossary ?? sync.translationGlossary }; }
   async function keys(provider, type = 'LIST', data = {}) { const response = await chrome.runtime.sendMessage({ type: `ML_KEYS_${type}`, provider, ...data }); if (!response?.ok) throw new Error(response?.error || 'Uzantı bağlantısı kurulamadı.'); return response.value; }

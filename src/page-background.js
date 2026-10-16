@@ -52,6 +52,7 @@ async function mlBatchActiveId(provider, keys) {
 }
 function mlBatchOrder(keys, scope, firstId) {
   if (!mlBatchState.has(scope) && mlBatchState.size > 50) mlBatchState.delete(mlBatchState.keys().next().value);
+  if (mlBatchCooldown.size > 500) { const now = Date.now(); for (const [key, until] of mlBatchCooldown) if (until <= now) mlBatchCooldown.delete(key); }
   let state = mlBatchState.get(scope);
   const ids = keys.map(k => k.id);
   if (!state) {
@@ -117,29 +118,45 @@ async function mlPickGeminiKey(owner) {
   throw Object.assign(new Error(`Gemini istek limiti doldu (12/dk, ${keys.length} anahtar). Pencere bitiminde otomatik devam edilecek.`),
     { notSent: true, stopJob: true, code: 'GEMINI_BUDGET_EXHAUSTED', retryAt: earliest === Infinity ? now + ML_GEMINI_MARGIN_MS : earliest });
 }
-async function mlPickRoundRobin(provider, owner) {
+async function mlPickRoundRobin(provider, owner, opts = {}) {
   const keys = await mlListProviderKeys(provider);
   if (!keys.length) throw new Error(`${provider === 'gemini' ? 'Gemini' : provider === 'openrouter' ? 'OpenRouter' : 'Ollama'} API anahtarı eksik.`);
   const now = Date.now(), scope = mlBatchScope(provider, owner);
+  // Ollama bulutu anahtar başına tek isteğe izin verir: pencere dolar dolmaz beklenir, taşma yapılmaz.
+  const limit = provider === 'ollama' ? 1 : ML_KEY_WINDOW;
   const state = mlBatchState.has(scope) ? mlBatchOrder(keys, scope) : mlBatchOrder(keys, scope, await mlBatchActiveId(provider, keys));
   let earliest = Infinity;
-  for (let pass = 0; pass < 3; pass++) {
+  const scan = (ignoreCooling, ignoreWindow) => {
     for (let step = 0; step < state.order.length; step++) {
       const index = (state.pos + step) % state.order.length, id = state.order[index];
       if (!keys.some(k => k.id === id)) continue;
-      if (pass < 2) {
+      if (!ignoreCooling) {
         const cooling = mlBatchCooldown.get(scope + ':' + id) || 0;
         if (cooling > now) { earliest = Math.min(earliest, cooling); continue; }
       }
-      if (pass === 0 && (state.flight[id] || 0) >= ML_KEY_WINDOW) continue;
+      if (!ignoreWindow && (state.flight[id] || 0) >= limit) continue;
       return mlBatchTake(keys, scope, state, index);
     }
+    return null;
+  };
+  // Pass 0: free window; pass 1: overflow ignoring the window; pass 2: last resort ignoring cooldown (mid-retry).
+  let picked = scan(false, false);
+  if (!picked && provider === 'ollama') {
+    const cap = Number.isFinite(opts.maxWaitMs) ? opts.maxWaitMs
+      : Number.isFinite(globalThis.mlOllamaSlotWaitMs) ? globalThis.mlOllamaSlotWaitMs : 300000;
+    const start = Date.now();
+    while (!picked && Date.now() - start < cap) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      picked = scan(false, false);
+    }
   }
+  picked = picked || scan(false, true) || scan(true, true);
+  if (picked) return picked;
   throw Object.assign(new Error(`${provider === 'ollama' ? 'Ollama' : 'OpenRouter'} anahtarları geçici beklemede. Süre dolunca “Hatalıları yeniden dene”yi kullanın.`),
     { notSent: true, stopJob: true, code: 'PROVIDER_COOLDOWN', retryAt: earliest === Infinity ? now + 30000 : earliest, cooldownScope: 'account' });
 }
 async function mlPickOpenrouterKey(owner) { return mlPickRoundRobin('openrouter', owner); }
-async function mlPickOllamaKey(owner) { return mlPickRoundRobin('ollama', owner); }
+async function mlPickOllamaKey(owner, opts) { return mlPickRoundRobin('ollama', owner, opts); }
 function mlReserveGeminiKey(id) { mlPruneGeminiBudget(id).push(Date.now()); }
 const mlGeminiKeyLocks = new Map(), mlGeminiLastSend = new Map();
 async function mlWithGeminiKeySlot(id, gapMs, task) {
@@ -289,6 +306,8 @@ function mlAccessError(config, status, message) {
     actionUrl = 'https://openrouter.ai/settings/privacy';
   } else if (status === 429) {
     code = 'PROVIDER_RATE_LIMITED'; advice = 'Sağlayıcı istek sınırına ulaşıldı. Biraz bekleyip “Hatalıları yeniden dene”yi kullanın; otomatik tekrar yapılmadı.';
+  } else if (config.provider === 'ollama' && status === 400 && /image input/i.test(message)) {
+    code = 'MODEL_VISION_UNSUPPORTED'; advice = 'Bu model Ollama bulutunda görüntü kabul etmiyor. Popup’tan başka model seçip yeni tarama başlatın.';
   } else if (config.provider === 'openrouter' && status === 404 && /(?:no (?:available )?endpoints|no providers|parameters|routing)/i.test(message)) {
     code = 'MODEL_ENDPOINT_UNAVAILABLE'; advice = 'Seçili model için hesap politikanıza ve gerekli JSON/istek parametrelerine uygun sağlayıcı bulunamadı. OpenRouter model erişimi ve hesap filtrelerini kontrol edin veya kendiniz başka model seçin; otomatik tekrar yapılmadı.';
   } else if (config.provider === 'openrouter' && status === 400 && /(?:thinking|reasoning|response_format|json mode|unsupported.*parameter)/i.test(message)) {
@@ -405,7 +424,8 @@ async function mlProviderAttempt(config, prompt, images, keyOverride, owner) {
     }
     if (!response.ok || data.error) {
       const cooldown = (router || cloud) && response.status === 429 ? await mlRememberCooldown(config,response,data) : null;
-      const detail = String(data.error?.message || 'Sağlayıcı hatası').replaceAll(key, '[anahtar]');
+      const rawDetail = typeof data.error === 'string' ? data.error : (data.error?.message || '');
+      const detail = String(rawDetail || JSON.stringify(data)?.slice(0, 240) || 'Sağlayıcı hatası').replaceAll(key, '[anahtar]');
       if (data.error?.metadata?.limit_source === 'openrouter_in_flight_budget') throw Object.assign(new Error('Eşzamanlı OpenRouter kredi bütçesi doldu. Devam eden isteklerin bitmesini bekleyip açıkça yeniden deneyin.'), { stopJob: true, code: 'PROVIDER_IN_FLIGHT_BUDGET', httpStatus: response.status });
       const access = mlAccessError(config, response.status, detail);
       if (access && cooldown) { access.retryAt=cooldown.until; access.cooldownScope=cooldown.scope; access.cooldownUntil=cooldown.until; }
@@ -453,7 +473,8 @@ async function mlReadStream(response, onActivity) {
     if (!data) return; if (data === '[DONE]') { doneMarker = true; return; }
     let parsed; try { parsed = JSON.parse(data); } catch { throw new Error('Sağlayıcı akış JSON verisi geçersiz.'); }
     if (parsed.error) {
-      const error = new Error('Sağlayıcı akış hatası: ' + String(parsed.error.message || parsed.error.code || 'unknown'));
+      const problem = typeof parsed.error === 'string' ? parsed.error : (parsed.error.message || parsed.error.code || 'unknown');
+      const error = new Error('Sağlayıcı akış hatası: ' + String(problem));
       error.httpStatus = Number.isInteger(parsed.error.code) ? parsed.error.code : undefined;
       error.providerError = parsed.error;
       throw error;

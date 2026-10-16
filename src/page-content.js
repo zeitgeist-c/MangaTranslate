@@ -94,9 +94,6 @@
         if (!seconds && blockedTimer) { globalThis.clearInterval?.(blockedTimer); blockedTimer=null; }
       }; tick(); blockedTimer=globalThis.setInterval?.(tick,1000);
       if (auto) { const token = epoch; logEvent('Limit bekleniyor; süre bitince otomatik devam edecek.');
-        if (error.code === 'GEMINI_MODEL_FALLBACK' && error.nextModel && job) {
-          job.config.model = error.nextModel; logEvent(`Model geçişi: ${error.nextModel} ile devam ediliyor.`); save().catch(() => {});
-        }
         setTimeout(() => { if (token === epoch && !paused && job?.state === 'blocked') start({ resume: true, retry: true }).catch(() => {}); }, Math.min(error.retryAt - Date.now(), 300000)); }
     }
   };
@@ -304,6 +301,64 @@
       })();
       pending.add(operation); operation.finally(() => pending.delete(operation)).catch(() => {});
     };
+    const secondLook = async () => {
+      const lacking = [], have = new Set();
+      for (const item of job.pages) {
+        const report = reports.get(item);
+        if (!report) continue;
+        const byId = new Map((item.translations || []).map(r => [r.regionId, r]));
+        for (const region of report.regions.filter(r => r.crop && !r.needsReview && (r.bubbleId || r.kind === 'text_free'))) {
+          if (have.has(region.regionId)) continue;
+          const done = byId.get(region.regionId);
+          if (done && done.status === 'translated' && done.translatedText?.trim()) continue;
+          have.add(region.regionId);
+          lacking.push({ ...region, imageId: report.imageId });
+        }
+      }
+      if (!lacking.length) { logEvent('İkinci bakış: eksik çeviri yok.'); return; }
+      logEvent(`İkinci bakış: ${lacking.length} eksik bölge küçük gruplarla yeniden gönderiliyor…`);
+      let recovered = 0;
+      const pendingLook = new Set();
+      const sendLook = group => {
+        const operation = (async () => {
+          try {
+            const result = await request('ML_TRANSLATE', { jobId: job.id, config: job.config, regions: group, context: job.fixedContext || [], retry: true }); alive(token);
+            if (!result.cached) job.providerCalls = (job.providerCalls || 0) + 1;
+            const fresh = new Map(result.regions.filter(Boolean).map(r => [r.regionId, r]));
+            const imageIds = new Set(group.map(r => r.imageId));
+            for (const item of job.pages.filter(p => imageIds.has(p.imageId) && reports.has(p))) {
+              const byId = new Map((item.translations || []).map(r => [r.regionId, r]));
+              let changed = false;
+              for (const r of group.filter(g => g.imageId === item.imageId)) {
+                const t = fresh.get(r.regionId);
+                if (t && t.status === 'translated' && t.translatedText?.trim()) { byId.set(r.regionId, t); changed = true; recovered++; }
+              }
+              if (changed) { item.translations = [...byId.values()]; await renderItem(item); alive(token); }
+            }
+            job.metrics.groups.push({ groupId: result.groupId, ...result.timing, secondLook: true, cached: !!result.cached });
+            await save();
+          } catch (error) {
+            if (error.name === 'AbortError') return;
+            alive(token);
+            job.metrics.groups.push({ ...error.timing, failed: true, secondLook: true, code: error.code, regionCount: group.length });
+            logEvent(`İkinci bakış hatası: ${error.code || 'bilinmiyor'} · ${group.length} bölge`);
+          }
+        })();
+        pendingLook.add(operation); operation.finally(() => pendingLook.delete(operation)).catch(() => {});
+      };
+      let lookBuffer = [], lookBytes = 65536;
+      for (const region of lacking) {
+        alive(token); if (stopError) break;
+        const size = new TextEncoder().encode(JSON.stringify(region)).length + 1024;
+        if (lookBuffer.length && (lookBuffer.length >= 3 || lookBytes + size > 8 * 1024 * 1024)) { sendLook(lookBuffer); lookBuffer = []; lookBytes = 65536; }
+        if (stopError) break; lookBuffer.push(region); lookBytes += size;
+      }
+      if (!stopError && lookBuffer.length) sendLook(lookBuffer);
+      while (pendingLook.size) { await Promise.race(pendingLook); alive(token); if (stopError) break; }
+      await Promise.allSettled([...pendingLook]); alive(token);
+      await Promise.allSettled([...rendering.values()]); alive(token);
+      logEvent(`İkinci bakış bitti: ${recovered}/${lacking.length} bölge kurtarıldı.`);
+    };
     for (const item of job.pages) {
       alive(token); if (stopError) break;
       if (item.state === 'error' && !retry) continue;
@@ -350,6 +405,7 @@
     if (!stopError) await dispatch();
     await Promise.allSettled([...pending]); alive(token);
     await Promise.allSettled([...rendering.values()]); alive(token);
+    if (!stopError) await secondLook();
     if (stopError) { job.state = 'blocked'; await save(); blockedStatus(stopError); return false; }
     return true;
   }
