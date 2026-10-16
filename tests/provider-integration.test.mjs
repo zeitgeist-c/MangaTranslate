@@ -75,17 +75,53 @@ test('gemini single key is paced to 12 sends per minute window', async () => {
   await assert.rejects(context.mlProviderCall(gemini, 'Hi', []),
     e => e.code === 'GEMINI_BUDGET_EXHAUSTED' && e.retryAt > Date.now() && e.notSent === true && e.stopJob === true);
 });
-test('gemini budget rotates across saved keys before waiting', async () => {
+test('gemini keys serve 10-request batches per job before rotating', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   vm.runInContext('mlGeminiGapMs = 5', context);
   context.MLKeys = { active: async () => 'AAA', all: async () => [{ id: 'k1', key: 'AAA' }, { id: 'k2', key: 'BBB' }] };
   const gemini = { provider: 'gemini', model: 'gemini-3.5-flash-lite' };
-  for (let i = 0; i < 24; i++) await context.mlProviderCall(gemini, 'Hi', []);
+  for (let i = 0; i < 24; i++) await context.mlProviderCall(gemini, 'Hi', [], undefined, 'job1');
   const auths = calls.map(c => c.headers['x-goog-api-key']);
-  assert.deepEqual(auths.slice(0, 12), Array(12).fill('AAA'));
-  assert.deepEqual(auths.slice(12), Array(12).fill('BBB'));
-  await assert.rejects(context.mlProviderCall(gemini, 'Hi', []), e => e.code === 'GEMINI_BUDGET_EXHAUSTED');
+  assert.deepEqual(auths.slice(0, 10), Array(10).fill('AAA'));
+  assert.deepEqual(auths.slice(10, 20), Array(10).fill('BBB'));
+  assert.deepEqual(auths.slice(20, 22), Array(2).fill('AAA'));
+  assert.deepEqual(auths.slice(22), Array(2).fill('BBB'));
+  await assert.rejects(context.mlProviderCall(gemini, 'Hi', [], undefined, 'job1'), e => e.code === 'GEMINI_BUDGET_EXHAUSTED');
   assert.equal(calls.length, 24);
+});
+test('openrouter rotates 10-request batches across saved keys and wraps', async () => {
+  const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
+  const config = { provider: 'openrouter', model: 'qwen/qwen3.8-flash' };
+  for (let i = 0; i < 21; i++) await context.mlProviderCall(config, 'Hi', [], undefined, 'jobA');
+  const auths = calls.map(c => c.headers.Authorization);
+  assert.deepEqual(auths.slice(0, 10), Array(10).fill('Bearer A'));
+  assert.deepEqual(auths.slice(10, 20), Array(10).fill('Bearer B'));
+  assert.deepEqual(auths.slice(20), ['Bearer A']);
+});
+test('a 429 key skips the rest of its batch within the same job', async () => {
+  const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
+  context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
+  context.fetch = async (url, options) => {
+    calls.push({ url, options });
+    if (options.headers.Authorization.includes('A'))
+      return { ok: false, status: 429, json: async () => ({ error: { message: 'rate limited', metadata: { provider_name: 'Upstream' } } }) };
+    return { ok: true, json: async () => ({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }] }) };
+  };
+  assert.equal(await context.mlProviderCall({ provider: 'openrouter', model: 'qwen/qwen3.7-flash' }, 'Hi', [], undefined, 'jobB'), 'OK');
+  assert.deepEqual(calls.map(c => c.options.headers.Authorization), ['Bearer A', 'Bearer B']);
+  assert.equal(await context.mlProviderCall({ provider: 'openrouter', model: 'qwen/qwen3.8-flash' }, 'Hi', [], undefined, 'jobB'), 'OK');
+  assert.equal(calls.at(-1).options.headers.Authorization, 'Bearer B');
+  assert.equal(calls.length, 3);
+});
+test('each page job restarts key rotation from the active key', async () => {
+  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
+  for (let i = 0; i < 10; i++) assert.equal((await context.mlPickOpenrouterKey('jobC')).key, 'A');
+  assert.equal((await context.mlPickOpenrouterKey('jobC')).key, 'B');
+  context.mlBatchReset('openrouter', 'jobC');
+  assert.equal((await context.mlPickOpenrouterKey('jobC')).key, 'A');
 });
 test('gemini budget frees slots older than one minute', async () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
