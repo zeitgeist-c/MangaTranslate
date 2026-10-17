@@ -8,9 +8,10 @@ globalThis.MLProviders = (() => {
     ['gemma-4-26b-a4b-it', 'Gemma 4 26B A4B'],
   ];
   const router = [
-    ['qwen/qwen3.7-flash', 'Qwen3.7 Flash'], ['qwen/qwen3.8-flash', 'Qwen3.8 Flash'],
-    ['anthropic/claude-haiku-5.5', 'Claude Haiku 5.5'],
-    ['meta/muse-spark-1.3', 'Muse Spark 1.3'],
+    // 2026-10-17 live endpoint check: healthy status + strict JSON (response_format/structured_outputs).
+    // GLM 5.3 Flash removed after the owner's live test produced no translation.
+    ['openai/gpt-6-luna', 'GPT-6 Luna'],
+    ['google/gemma-4-26b-a4b-it', 'Gemma 4 26B'],
     ['meta/muse-spark-1.3-contributor', 'Muse Spark 1.3 Contributor · veri paylaşımı'],
   ];
   const ollama = [
@@ -18,13 +19,14 @@ globalThis.MLProviders = (() => {
   ];
   const catalog = Object.freeze({ gemini: google, openrouter: router, ollama });
   // Translation needs visible JSON, not a provider's default reasoning budget.
-  // Muse Spark requires reasoning; leave its working policy and Haiku unchanged.
+  // GPT-6 Luna reasons by default; disable for cost/latency and use the strict
+  // region schema on batch sends. Muse Spark requires reasoning; leave its working policy untouched.
   function routerPolicy(model = '') {
-    const disableReasoning = ['qwen/qwen3.7-flash', 'qwen/qwen3.8-flash'].includes(model);
-    const structuredRegions = model === 'qwen/qwen3.8-flash';
+    const disableReasoning = model === 'openai/gpt-6-luna';
+    const structuredRegions = disableReasoning;
     return { disableReasoning, structuredRegions, maxRegions: model.startsWith('meta/') ? 20 : 12,
-      maxConcurrency: model.startsWith('meta/') ? 8 : disableReasoning || model.startsWith('anthropic/') ? 2 : 4,
-      timeoutMs: model.startsWith('qwen/') || model.startsWith('anthropic/') ? 90000 : 60000,
+      maxConcurrency: model.startsWith('meta/') ? 8 : disableReasoning ? 2 : 4,
+      timeoutMs: model.startsWith('openai/') ? 90000 : 60000,
       requiredParameters: ['max_tokens', 'response_format', ...(disableReasoning ? ['reasoning'] : []), ...(structuredRegions ? ['structured_outputs'] : [])] };
   }
   function nextGeminiModel(model = '') {
@@ -36,7 +38,7 @@ globalThis.MLProviders = (() => {
   }
   function settings(raw = {}) {
     const provider = ['openrouter', 'ollama'].includes(raw.translationProvider) ? raw.translationProvider : 'gemini';
-    const fallback = provider === 'gemini' ? google[0][0] : provider === 'openrouter' ? 'qwen/qwen3.8-flash' : 'gemma4:31b';
+    const fallback = provider === 'gemini' ? google[0][0] : provider === 'openrouter' ? 'openai/gpt-6-luna' : 'gemma4:31b';
     const model = raw[providerModelKey(provider)] || fallback;
     if (!catalog[provider].some(([id]) => id === model)) throw new Error('Seçili model desteklenmiyor; ayarlardan yeniden seçin.');
     if (model.endsWith('-contributor') && raw.contributorConsent !== true) throw new Error('Contributor modeli için veri paylaşımı seçeneğini onaylayın.');
@@ -48,7 +50,7 @@ globalThis.MLProviders = (() => {
   // Removed models fall back to the provider default; callers migrate stored settings openly.
   function migrate(raw = {}) {
     const provider = ['openrouter', 'ollama'].includes(raw.translationProvider) ? raw.translationProvider : 'gemini';
-    const fallback = provider === 'gemini' ? google[0][0] : provider === 'openrouter' ? 'qwen/qwen3.8-flash' : 'gemma4:31b';
+    const fallback = provider === 'gemini' ? google[0][0] : provider === 'openrouter' ? 'openai/gpt-6-luna' : 'gemma4:31b';
     const key = raw[providerModelKey(provider)];
     if (catalog[provider].some(([id]) => id === key)) return { provider, model: key, migrated: false };
     return { provider, model: fallback, migrated: true };

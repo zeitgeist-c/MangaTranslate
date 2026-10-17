@@ -31,7 +31,7 @@ test('account authentication and credit errors block the job; content moderation
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   for (const [status, message, expected] of [[401, 'Invalid key', 'PROVIDER_AUTH_REQUIRED'], [402, 'Insufficient credits', 'PROVIDER_CREDIT_REQUIRED'], [403, 'Input flagged by moderation', undefined]]) {
     context.fetch = async () => ({ ok: false, status, json: async () => ({ error: { message } }) });
-    await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'qwen/qwen3.8-flash' }, '', []), error => error.code === expected && Boolean(error.stopJob) === Boolean(expected));
+    await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'openai/gpt-6-luna' }, '', []), error => error.code === expected && Boolean(error.stopJob) === Boolean(expected));
   }
 });
 
@@ -56,7 +56,7 @@ test('a saved 3.5.1 job with age refusal restores as blocked while keeping page 
   assert.equal(restored.state, 'blocked'); assert.equal(restored.blocked.code, 'AGE_CONFIRMATION_REQUIRED');
   assert.equal(restored.pages[0].translated, 2); assert.equal(restored.pages[2].state, 'queued');
 });
-test('all five router adapters preserve exact chosen model and keep Google credentials separate', async () => {
+test('all router adapters preserve exact chosen model and keep Google credentials separate', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   for (const [model] of context.MLProviders.catalog.openrouter) {
     const result = await context.mlProviderCall({ provider: 'openrouter', model }, 'Translate', [{ regionId: 'r', dataUrl: 'data:image/png;base64,AAAA' }]);
@@ -89,7 +89,7 @@ test('gemini keys rotate every request with 5 in flight each', async () => {
 test('openrouter rotates keys every request and wraps', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
-  const config = { provider: 'openrouter', model: 'qwen/qwen3.8-flash' };
+  const config = { provider: 'openrouter', model: 'openai/gpt-6-luna' };
   for (let i = 0; i < 5; i++) await context.mlProviderCall(config, 'Hi', [], undefined, 'jobA');
   assert.deepEqual(calls.map(c => c.headers.Authorization), ['Bearer A', 'Bearer B', 'Bearer A', 'Bearer B', 'Bearer A']);
 });
@@ -103,9 +103,9 @@ test('a 429 key is skipped within the same job', async () => {
       return { ok: false, status: 429, json: async () => ({ error: { message: 'rate limited', metadata: { provider_name: 'Upstream' } } }) };
     return { ok: true, json: async () => ({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }] }) };
   };
-  assert.equal(await context.mlProviderCall({ provider: 'openrouter', model: 'qwen/qwen3.7-flash' }, 'Hi', [], undefined, 'jobB'), 'OK');
+  assert.equal(await context.mlProviderCall({ provider: 'openrouter', model: 'openai/gpt-6-luna' }, 'Hi', [], undefined, 'jobB'), 'OK');
   assert.deepEqual(calls.map(c => c.options.headers.Authorization), ['Bearer A', 'Bearer B']);
-  assert.equal(await context.mlProviderCall({ provider: 'openrouter', model: 'qwen/qwen3.8-flash' }, 'Hi', [], undefined, 'jobB'), 'OK');
+  assert.equal(await context.mlProviderCall({ provider: 'openrouter', model: 'openai/gpt-6-luna' }, 'Hi', [], undefined, 'jobB'), 'OK');
   assert.equal(calls.at(-1).options.headers.Authorization, 'Bearer B');
   assert.equal(calls.length, 3);
 });
@@ -138,7 +138,7 @@ test('all direct Google models use Google credentials; reasoning text never reac
   }
 });
 
-test('Qwen disables default reasoning; mandatory Muse reasoning is untouched', async () => {
+test('Luna disables default reasoning; mandatory Muse reasoning is untouched', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   for (const [model] of context.MLProviders.catalog.openrouter) {
     await context.mlProviderCall({ provider: 'openrouter', model }, 'Return JSON', []);
@@ -146,7 +146,7 @@ test('Qwen disables default reasoning; mandatory Muse reasoning is untouched', a
     assert.equal(body.provider.require_parameters, true);
     assert.equal(body.provider.allow_fallbacks, false);
     assert.equal(body.response_format.type, 'json_object');
-    if (model.startsWith('qwen/')) assert.deepEqual(body.reasoning, { enabled: false });
+    if (model === 'openai/gpt-6-luna') assert.deepEqual(body.reasoning, { enabled: false });
     else assert.equal(body.reasoning, undefined);
   }
   assert.equal(calls.length, context.MLProviders.catalog.openrouter.length);
@@ -156,13 +156,13 @@ test('upstream thinking/JSON rejection is actionable and never retried or routed
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   context.fetch = async (url, options) => { calls.push({ url, options }); return { ok: false, status: 400,
     json: async () => ({ error: { message: 'Json mode response is not supported when enable_thinking is true' } }) }; };
-  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'qwen/qwen3.7-flash' }, '', []), e => e.code === 'MODEL_PARAMETER_REJECTED' && e.stopJob);
+  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'openai/gpt-6-luna' }, '', []), e => e.code === 'MODEL_PARAMETER_REJECTED' && e.stopJob);
   assert.equal(calls.length, 1);
 });
 
 test('no matching JSON endpoint is distinguished from data policy and age restrictions', () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
-  const config = { provider: 'openrouter', model: 'qwen/qwen3.8-flash' };
+  const config = { provider: 'openrouter', model: 'openai/gpt-6-luna' };
   assert.equal(context.mlAccessError(config, 404, 'No endpoints found that support all requested parameters').code, 'MODEL_ENDPOINT_UNAVAILABLE');
   assert.equal(context.mlAccessError(config, 404, 'No endpoints matching your data policy').code, 'PROVIDER_DATA_POLICY_BLOCK');
 });
@@ -178,7 +178,7 @@ test('streamed upstream error preserves its explanation, redacts key and stops w
   context.fetch = async (url, options) => { calls.push({ url, options }); return new Response(
     'data: '+JSON.stringify({ error: { code: 400, message: 'response_format thinking rejected router-private-key' } })+'\n\n',
     { headers: { 'Content-Type': 'text/event-stream' } }); };
-  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'qwen/qwen3.8-flash', maxOutputTokens: 16384 }, '', []),
+  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'openai/gpt-6-luna', maxOutputTokens: 16384 }, '', []),
     e => e.code === 'MODEL_PARAMETER_REJECTED' && !e.message.includes('router-private-key'));
   assert.equal(calls.length, 1);
 });
@@ -187,7 +187,7 @@ test('reasoning-only output hitting the token limit is not accepted as translati
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   context.fetch = async (url, options) => { calls.push({ url, options }); return { ok: true,
     json: async () => ({ choices: [{ message: { content: '', reasoning: '{"regions":[]}' }, finish_reason: 'length' }] }) }; };
-  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'qwen/qwen3.8-flash' }, '', []), e => e.code === 'PROVIDER_OUTPUT_TRUNCATED');
+  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'openai/gpt-6-luna' }, '', []), e => e.code === 'PROVIDER_OUTPUT_TRUNCATED');
   assert.equal(calls.length, 1);
 });
 
@@ -197,14 +197,14 @@ test('stream messages redact the complete credential before applying length limi
   let calls = 0;
   context.fetch = async () => { calls++; return new Response('data: '+JSON.stringify({error:{code:502,message:'x'.repeat(470)+'router-private-key'+'y'.repeat(1200)}})+'\n\n',
     {headers:{'Content-Type':'text/event-stream'}}); };
-  await assert.rejects(context.mlProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash',maxOutputTokens:16384},'',[]),
+  await assert.rejects(context.mlProviderCall({provider:'openrouter',model:'openai/gpt-6-luna',maxOutputTokens:16384},'',[]),
     e=>e.message.includes('[anahtar]')&&!e.message.includes('router-')&&e.message.length<=1012); // 1000 cap + ' (3 deneme)' suffix
   assert.equal(calls, 3);
 });
 test('overload halves model lane concurrency like quota failures',async()=>{
   const f=fixture(); scripts.forEach(source => vm.runInContext(source, f.context));
   f.context.chrome.storage.local.set = async () => {};
-  await assert.rejects(f.context.mlEnqueue({provider:'openrouter',model:'qwen/qwen3.8-flash'},
+  await assert.rejects(f.context.mlEnqueue({provider:'openrouter',model:'openai/gpt-6-luna'},
     async()=>{ throw Object.assign(new Error('overload'),{stopJob:true,code:'PROVIDER_OVERLOADED'}); },'owner'),/overload/);
   assert.equal(vm.runInContext('mlRouterQueue.limit',f.context),2);
 });
@@ -368,7 +368,7 @@ test('gemini overload halves parallel lanes until the cut expires',async()=>{
 test('provider error never invokes another model and redacts echoed credentials', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   context.fetch = async (url, options) => { calls.push({ url, options }); return { ok: false, status: 401, json: async () => ({ error: { message: 'router-private-key invalid' } }) }; };
-  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'qwen/qwen3.8-flash' }, '', []), error => error.message.includes('401') && !error.message.includes('router-private-key'));
+  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'openai/gpt-6-luna' }, '', []), error => error.message.includes('401') && !error.message.includes('router-private-key'));
   assert.equal(calls.length, 1);
 });
 test('strict translation jobs never automatically retry potentially billed failures', async () => {
@@ -427,7 +427,7 @@ test('resuming while a provider reply is pending reuses the same operation and c
   context.mlProviderCall = async () => { attempts++; return new Promise(resolve => { release = resolve; }); };
   context.incrementTranslationStats = async () => {};
   const imageId = 'a'.repeat(64), regionId = `${imageId}:r1`;
-  const config = context.MLProviders.settings({ translationProvider: 'openrouter', openrouterModel: 'qwen/qwen3.8-flash' });
+  const config = context.MLProviders.settings({ translationProvider: 'openrouter', openrouterModel: 'openai/gpt-6-luna' });
   const message = { config, imageId, regions: [{ regionId, crop: 'data:image/png;base64,AAAA' }] };
   const first = context.mlTranslate(message);
   for (let i = 0; i < 100 && !release; i++) await new Promise(resolve => setImmediate(resolve));

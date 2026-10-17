@@ -88,7 +88,7 @@
     actionLink.hidden = !allowed.includes(error.actionUrl); if (!actionLink.hidden) actionLink.href = error.actionUrl;
     if (error.retryAt > Date.now()) {
       const base=statusNode.textContent;
-      const auto = ['GEMINI_BUDGET_EXHAUSTED', 'GEMINI_MODEL_FALLBACK', 'PROVIDER_OVERLOADED', 'PROVIDER_UNAVAILABLE', 'PROVIDER_RATE_LIMITED'].includes(error.code);
+      const auto = ['GEMINI_BUDGET_EXHAUSTED', 'GEMINI_MODEL_FALLBACK', 'PROVIDER_OVERLOADED', 'PROVIDER_UNAVAILABLE', 'PROVIDER_RATE_LIMITED', 'PROVIDER_COOLDOWN'].includes(error.code);
       const tick=()=>{ const seconds=Math.max(0,Math.ceil((error.retryAt-Date.now())/1000));
         statusNode.textContent=base+'\n'+(seconds ? `Yeniden deneme için kalan süre: ${seconds} sn.` : auto ? 'Süre doldu; otomatik devam ediliyor…' : 'Bekleme doldu; otomatik istek gönderilmedi.'); controls();
         if (!seconds && blockedTimer) { globalThis.clearInterval?.(blockedTimer); blockedTimer=null; }

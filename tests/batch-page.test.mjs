@@ -8,7 +8,7 @@ const flush = async()=>{for(let i=0;i<8;i++) await new Promise(r=>setImmediate(r
 function fixture(cache=new Map(),initialStored={}) {
   const stored={...initialStored}, calls=[];
   const context=vm.createContext({crypto:webcrypto,TextEncoder,TextDecoder,AbortController,setTimeout,clearTimeout,console,
-    chrome:{runtime:{onMessage:{addListener(){}}},storage:{sync:{get:async()=>({})},local:{get:async key=>Array.isArray(key)?Object.fromEntries(key.map(k=>[k,stored[k]])):({[key]:stored[key]}),set:async x=>Object.assign(stored,x)}}},
+    chrome:{runtime:{onMessage:{addListener(){}}},storage:{sync:{get:async()=>({contributorConsent:true})},local:{get:async key=>Array.isArray(key)?Object.fromEntries(key.map(k=>[k,stored[k]])):({[key]:stored[key]}),set:async x=>Object.assign(stored,x)}}},
     enqueueWithRateLimit:async fn=>fn(),incrementTranslationStats:async()=>{},fetch:async()=>{throw new Error('Real network forbidden');}});
   sources.forEach(s=>vm.runInContext(s,context));
   const actualProviderCall = context.mlProviderCall, actualCapabilities = context.mlCapabilities;
@@ -77,7 +77,7 @@ test('batch validation rejects duplicate and mismatched image identities before 
 });
 test('8 MiB serialized provider body guard rejects oversized requests without network access',async()=>{
   const f=fixture();f.context.mlProviderCall=f.actualProviderCall;let network=0;f.context.fetch=async()=>{network++;throw new Error('network');};f.context.mlKey=async()=> 'synthetic';
-  await assert.rejects(f.context.mlProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash'},'',Array.from({length:3},()=>({dataUrl:'data:image/png;base64,'+'A'.repeat(3000000)}))),e=>e.notSent && e.code==='BATCH_TOO_LARGE');assert.equal(network,0);
+  await assert.rejects(f.context.mlProviderCall({provider:'openrouter',model:'openai/gpt-6-luna'},'',Array.from({length:3},()=>({dataUrl:'data:image/png;base64,'+'A'.repeat(3000000)}))),e=>e.notSent && e.code==='BATCH_TOO_LARGE');assert.equal(network,0);
 });
 test('removed OpenRouter models require a new choice; direct Gemini remains supported',()=>{
   const f=fixture();for(const model of ['google/gemini-2.5-flash-lite','google/gemini-3.1-flash-lite','deepseek/deepseek-v4.1-flash'])assert.throws(()=>f.context.MLProviders.settings({translationProvider:'openrouter',openrouterModel:model}),/desteklenmiyor/);
@@ -85,15 +85,15 @@ test('removed OpenRouter models require a new choice; direct Gemini remains supp
 });
 test('metadata uses the smallest documented endpoint capacity and cached public data; unknown metadata keeps 12/8192',async()=>{
   const f=fixture();let requests=0;f.context.fetch=async()=>{requests++;return {ok:true,json:async()=>({data:{endpoints:[{context_length:1048576,max_completion_tokens:32768,max_images:16},{context_length:262144,max_completion_tokens:16384,max_images:10}]}})};};
-  const caps=await f.actualCapabilities({provider:'openrouter',model:'qwen/qwen3.8-flash'});assert.equal(caps.maxRegions,10);assert.equal(caps.maxOutputTokens,16384);assert.equal(caps.contextLength,262144);
-  await f.actualCapabilities({provider:'openrouter',model:'qwen/qwen3.8-flash'});assert.equal(requests,1);
+  const caps=await f.actualCapabilities({provider:'openrouter',model:'openai/gpt-6-luna'});assert.equal(caps.maxRegions,10);assert.equal(caps.maxOutputTokens,16384);assert.equal(caps.contextLength,262144);
+  await f.actualCapabilities({provider:'openrouter',model:'openai/gpt-6-luna'});assert.equal(requests,1);
   f.context.fetch=async()=>{throw new Error('Unavailable public catalog');};const fallback=await f.actualCapabilities({provider:'openrouter',model:'other'});assert.equal(fallback.maxRegions,12);assert.equal(fallback.maxOutputTokens,8192);assert.equal(fallback.verified,false);
   f.context.fetch=async()=>({ok:true,json:async()=>({data:{endpoints:[{context_length:131072,max_completion_tokens:2048}]}})});
   const small=await f.actualCapabilities({provider:'openrouter',model:'small-output'});assert.equal(small.maxRegions,3);assert.equal(small.maxOutputTokens,2048);
 });
 test('in-flight budget refusal is distinct from an exhausted balance',async()=>{
   const f=fixture();f.context.mlKey=async()=> 'synthetic';f.context.fetch=async()=>new Response(JSON.stringify({error:{message:'In flight',metadata:{limit_source:'openrouter_in_flight_budget'}}}),{status:402,headers:{'Content-Type':'application/json'}});
-  await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash'},'',[]),e=>e.code==='PROVIDER_IN_FLIGHT_BUDGET'&&e.stopJob);
+  await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'openai/gpt-6-luna'},'',[]),e=>e.code==='PROVIDER_IN_FLIGHT_BUDGET'&&e.stopJob);
 });
 
 test('model metadata excludes JSON-incompatible and unavailable endpoints and ignores v1 cache',async()=>{
@@ -104,7 +104,7 @@ test('model metadata excludes JSON-incompatible and unavailable endpoints and ig
     {status:-5,context_length:1048576,max_completion_tokens:1000,supported_parameters:['max_tokens','reasoning','response_format','structured_outputs']},
     {status:0,context_length:1048576,max_completion_tokens:32768,supported_parameters:['max_tokens','reasoning','response_format','structured_outputs']}
   ]}})});
-  const caps=await f.actualCapabilities({provider:'openrouter',model:'qwen/qwen3.8-flash'});
+  const caps=await f.actualCapabilities({provider:'openrouter',model:'openai/gpt-6-luna'});
   assert.equal(caps.maxRegions,12);assert.equal(caps.maxOutputTokens,16384);
 });
 
@@ -121,10 +121,10 @@ test('stream reader preserves split UTF-8 and ignores reasoning while requiring 
   const value=await f.context.mlReadStream(new Response(stream));assert.equal(value.choices[0].message.content,'İŞĞ');
   await assert.rejects(f.context.mlReadStream(new Response('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n')),/eksik/);
 });
-test('Qwen watchdog is 90 seconds and timeout is never silently retried',async()=>{
+test('Luna watchdog is 90 seconds and timeout is never silently retried',async()=>{
   const f=fixture();let watchdog,limit,network=0;f.context.setTimeout=(fn,ms)=>{watchdog=fn;limit=ms;return 1;};f.context.clearTimeout=()=>{};f.context.mlKey=async()=> 'synthetic';
   f.context.fetch=async(url,options)=>{network++;return new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))));};
-  const promise=f.actualProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash'},'',[]);await flush();assert.equal(limit,90000);watchdog();await assert.rejects(promise,e=>e.code==='PROVIDER_TIMEOUT'&&e.stopJob);assert.equal(network,1);
+  const promise=f.actualProviderCall({provider:'openrouter',model:'openai/gpt-6-luna'},'',[]);await flush();assert.equal(limit,90000);watchdog();await assert.rejects(promise,e=>e.code==='PROVIDER_TIMEOUT'&&e.stopJob);assert.equal(network,1);
 });
 test('failed pending reservation prevents a provider call; successful results survive stats failure',async()=>{
   const f=fixture(),actual=f.context.mlOffscreen;f.context.mlOffscreen=async(cmd,p)=>{if(cmd==='writeMany')throw new Error('Disk full');return actual(cmd,p);};
@@ -164,8 +164,8 @@ test('known IDs with one malformed translation retain neighboring successes and 
   assert.equal((await f.context.mlTranslate(f.message(rs))).cached,true);assert.equal(f.calls.length,1);
 });
 
-test('Muse models keep a bounded 60 second deadline',async()=>{
-  for(const [model,ms] of [['meta/muse-spark-1.3',60000],['meta/muse-spark-1.3-contributor',60000]]){
+test('Muse contributor and Gemma keep a bounded 60 second deadline',async()=>{
+  for(const [model,ms] of [['meta/muse-spark-1.3-contributor',60000],['google/gemma-4-26b-a4b-it',60000]]){
     const f=fixture();let watchdog,limit,network=0;f.context.setTimeout=(fn,ms)=>{watchdog=fn;limit=ms;return 1;};f.context.clearTimeout=()=>{};f.context.mlKey=async()=> 'synthetic';
     f.context.fetch=async(url,options)=>{network++;return new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))));};
     const promise=f.actualProviderCall({provider:'openrouter',model},'',[]);await flush();assert.equal(limit,ms);watchdog();
@@ -176,19 +176,19 @@ test('Muse models keep a bounded 60 second deadline',async()=>{
 test('provider-origin 429 is model-scoped, survives restart, and blocks only unsent matching work',async()=>{
   const f=fixture();f.context.mlKey=async()=> 'synthetic';
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}', f.context);f.context.fetch=async()=>new Response(JSON.stringify({error:{message:'provider quota',metadata:{provider_name:'Anthropic'}}}),{status:429,headers:{'Retry-After':'60','Content-Type':'application/json'}});
-  await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'anthropic/claude-haiku-5.5'},'',[]),e=>e.code==='PROVIDER_RATE_LIMITED'&&e.cooldownScope==='model'&&e.retryAt>Date.now());
-  let sent=0;await assert.rejects(f.context.mlEnqueue({provider:'openrouter',model:'anthropic/claude-haiku-5.5'},async()=>++sent),e=>e.notSent&&e.code==='PROVIDER_COOLDOWN');
-  assert.equal(await f.context.mlEnqueue({provider:'openrouter',model:'meta/muse-spark-1.3'},async()=>++sent),1);
+  await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'openai/gpt-6-luna'},'',[]),e=>e.code==='PROVIDER_RATE_LIMITED'&&e.cooldownScope==='model'&&e.retryAt>Date.now());
+  let sent=0;await assert.rejects(f.context.mlEnqueue({provider:'openrouter',model:'openai/gpt-6-luna'},async()=>++sent),e=>e.notSent&&e.code==='PROVIDER_COOLDOWN');
+  assert.equal(await f.context.mlEnqueue({provider:'openrouter',model:'meta/muse-spark-1.3-contributor'},async()=>++sent),1);
   const restarted=fixture(undefined,f.stored);
-  await restarted.context.mlEnqueue({provider:'openrouter',model:'meta/muse-spark-1.3'},async()=>{});
-  assert.equal(restarted.context.mlCooldownError('anthropic/claude-haiku-5.5').notSent,true);assert.equal(sent,1);
+  await restarted.context.mlEnqueue({provider:'openrouter',model:'meta/muse-spark-1.3-contributor'},async()=>{});
+  assert.equal(restarted.context.mlCooldownError('openai/gpt-6-luna').notSent,true);assert.equal(sent,1);
 });
 
 test('unknown 429 remains account-wide and clearly identifies the source instead of blaming the next model',async()=>{
   const f=fixture();f.context.mlKey=async()=> 'synthetic';
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}', f.context);f.context.fetch=async()=>new Response(JSON.stringify({error:{message:'account quota'}}),{status:429,headers:{'Retry-After':'30','Content-Type':'application/json'}});
-  await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'anthropic/claude-haiku-5.5'},'',[]),e=>e.cooldownScope==='account');
-  let sent=0;await assert.rejects(f.context.mlEnqueue({provider:'openrouter',model:'meta/muse-spark-1.3'},async()=>++sent),e=>e.notSent&&e.message.includes('claude-haiku-5.5')&&e.message.includes('henüz gönderilmedi'));
+  await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'openai/gpt-6-luna'},'',[]),e=>e.cooldownScope==='account');
+  let sent=0;await assert.rejects(f.context.mlEnqueue({provider:'openrouter',model:'meta/muse-spark-1.3-contributor'},async()=>++sent),e=>e.notSent&&e.message.includes('gpt-6-luna')&&e.message.includes('henüz gönderilmedi'));
   assert.equal(sent,0);
 });
 
@@ -197,14 +197,14 @@ test('SSE 429 also honors Retry-After and records a model-scoped cooldown',async
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}', f.context);
   f.context.fetch=async()=>new Response('data: '+JSON.stringify({error:{code:429,message:'provider quota',metadata:{provider_name:'Alibaba'}}})+'\n\n',
     {headers:{'Retry-After':'45','Content-Type':'text/event-stream'}});
-  await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash',maxOutputTokens:16384},'',[]),e=>e.code==='PROVIDER_RATE_LIMITED'&&e.retryAt>Date.now()+40000);
-  assert.equal(f.context.mlCooldownError('qwen/qwen3.8-flash').cooldownScope,'model');
-  assert.equal(f.context.mlCooldownError('meta/muse-spark-1.3'),null);
+  await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'openai/gpt-6-luna',maxOutputTokens:16384},'',[]),e=>e.code==='PROVIDER_RATE_LIMITED'&&e.retryAt>Date.now()+40000);
+  assert.equal(f.context.mlCooldownError('openai/gpt-6-luna').cooldownScope,'model');
+  assert.equal(f.context.mlCooldownError('meta/muse-spark-1.3-contributor'),null);
 });
 
 test('model-specific crop limits preserve Muse throughput and constrain slower model batches',async()=>{
   const f=fixture();f.context.fetch=async()=>({ok:true,json:async()=>({data:{endpoints:[{status:0,context_length:1048576,max_completion_tokens:32768}]}})});
-  for(const [model,regions,pending] of [['qwen/qwen3.8-flash',12,4],['anthropic/claude-haiku-5.5',12,4],['meta/muse-spark-1.3',20,8]]){
+  for(const [model,regions,pending] of [['openai/gpt-6-luna',12,4],['google/gemma-4-26b-a4b-it',12,8],['meta/muse-spark-1.3-contributor',20,8]]){
     const caps=await f.actualCapabilities({provider:'openrouter',model});assert.equal(caps.maxRegions,regions);assert.equal(caps.maxPending,pending);
   }
 });
@@ -213,14 +213,14 @@ test('a provider timeout temporarily shrinks later groups until one succeeds',as
   const timers=[];f.context.setTimeout=(fn,ms)=>{timers.push({fn,ms});return timers.length;};f.context.clearTimeout=()=>{};
   f.context.fetch=async(url,options)=>new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))));
   const images=Array.from({length:8},(_,i)=>({regionId:'r'+i,dataUrl:'data:image/png;base64,AAAA'}));
-  const promise=f.actualProviderCall({provider:'openrouter',model:'meta/muse-spark-1.3'},'',images);
+  const promise=f.actualProviderCall({provider:'openrouter',model:'meta/muse-spark-1.3-contributor'},'',images);
   await flush();timers.at(-1).fn();
   await assert.rejects(promise,e=>e.code==='PROVIDER_TIMEOUT'&&e.message.includes('küçültüldü'));
   f.context.fetch=async()=>({ok:true,json:async()=>({data:{endpoints:[{status:0,context_length:1048576,max_completion_tokens:32768}]}})});
-  assert.equal((await f.actualCapabilities({provider:'openrouter',model:'meta/muse-spark-1.3'})).maxRegions,4);
-  const message={jobId:'job',owner:'1:job',config:f.context.MLProviders.settings({translationProvider:'openrouter',openrouterModel:'meta/muse-spark-1.3'}),regions:[f.region(1)],context:[]};
+  assert.equal((await f.actualCapabilities({provider:'openrouter',model:'meta/muse-spark-1.3-contributor'})).maxRegions,4);
+  const message={jobId:'job',owner:'1:job',config:f.context.MLProviders.settings({translationProvider:'openrouter',openrouterModel:'meta/muse-spark-1.3-contributor',contributorConsent:true}),regions:[f.region(1)],context:[]};
   await f.context.mlTranslate(message);
-  assert.equal((await f.actualCapabilities({provider:'openrouter',model:'meta/muse-spark-1.3'})).maxRegions,20);
+  assert.equal((await f.actualCapabilities({provider:'openrouter',model:'meta/muse-spark-1.3-contributor'})).maxRegions,20);
 });
 test('streaming groups use an idle watchdog with a doubled absolute deadline',async()=>{
   const hang=()=>{const f=fixture();f.context.mlKey=async()=>'synthetic';
@@ -228,12 +228,12 @@ test('streaming groups use an idle watchdog with a doubled absolute deadline',as
     f.context.fetch=async(url,options)=>new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))));
     return {f,timers};};
   { const {f,timers}=hang();
-    const promise=f.actualProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash',maxOutputTokens:16384},'',[{regionId:'r',dataUrl:'data:image/png;base64,AAAA'}]);
+    const promise=f.actualProviderCall({provider:'openrouter',model:'openai/gpt-6-luna',maxOutputTokens:16384},'',[{regionId:'r',dataUrl:'data:image/png;base64,AAAA'}]);
     await flush();assert.deepEqual(timers.map(t=>t.ms).sort((a,b)=>a-b),[90000,180000]);
     timers.find(t=>t.ms===180000).fn();
     await assert.rejects(promise,e=>e.code==='PROVIDER_TIMEOUT'&&e.message.includes('saniyede yanıt vermedi')); }
   { const {f,timers}=hang();
-    const promise=f.actualProviderCall({provider:'openrouter',model:'qwen/qwen3.8-flash',maxOutputTokens:16384},'',[{regionId:'r',dataUrl:'data:image/png;base64,AAAA'}]);
+    const promise=f.actualProviderCall({provider:'openrouter',model:'openai/gpt-6-luna',maxOutputTokens:16384},'',[{regionId:'r',dataUrl:'data:image/png;base64,AAAA'}]);
     await flush();timers.find(t=>t.ms===90000).fn();
     await assert.rejects(promise,e=>e.code==='PROVIDER_TIMEOUT'&&e.message.includes('ilerlemedi')); }
 });

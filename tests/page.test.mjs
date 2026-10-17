@@ -8,7 +8,7 @@ vm.runInContext(await readFile(new URL('../src/providers.js', import.meta.url), 
 const providers = context.MLProviders;
 test('providers preserve separate selected models and require explicit contributor consent', () => {
   assert.equal(providers.settings({}).provider, 'gemini');
-  assert.equal(providers.settings({ translationProvider: 'openrouter' }).model, 'qwen/qwen3.8-flash');
+  assert.equal(providers.settings({ translationProvider: 'openrouter' }).model, 'openai/gpt-6-luna');
   assert.throws(() => providers.settings({ translationProvider: 'openrouter', openrouterModel: 'anthropic/claude-haiku-4.5' }), /desteklenmiyor/);
   assert.throws(() => providers.settings({ translationProvider: 'openrouter', openrouterModel: 'meta/muse-spark-1.3-contributor' }), /onaylayın/);
   assert.equal(providers.settings({ translationProvider: 'openrouter', openrouterModel: 'meta/muse-spark-1.3-contributor', contributorConsent: true }).provider, 'openrouter');
@@ -17,7 +17,7 @@ test('ollama provider validates models and builds native chat bodies', () => {
   assert.equal(providers.settings({}).provider, 'gemini');
   assert.equal(providers.settings({ translationProvider: 'ollama' }).model, 'gemma4:31b');
   assert.equal(providers.settings({ translationProvider: 'ollama', ollamaModel: 'gemma4:31b' }).model, 'gemma4:31b');
-  assert.throws(() => providers.settings({ translationProvider: 'ollama', ollamaModel: 'qwen/qwen3.8-flash' }), /desteklenmiyor/);
+  assert.throws(() => providers.settings({ translationProvider: 'ollama', ollamaModel: 'openai/gpt-6-luna' }), /desteklenmiyor/);
   assert.equal(providers.providerModelKey('ollama'), 'ollamaModel');
   assert.equal(providers.providerModelKey('openrouter'), 'openrouterModel');
   assert.equal(providers.providerModelKey('gemini'), 'geminiModel');
@@ -28,14 +28,14 @@ test('ollama provider validates models and builds native chat bodies', () => {
   assert.equal(body.model, 'gemma4:31b'); assert.equal(body.stream, false); assert.equal(body.format, 'json');
   assert.equal(JSON.stringify(body.messages[0].images), JSON.stringify(['AAAA', 'BBBB']));
   assert.ok(body.messages[0].content.includes('regionId=r1') && body.messages[0].content.includes('regionId=r2'));
-  assert.throws(() => providers.ollamaBody('qwen/qwen3.8-flash', '', []), /Bilinmeyen Ollama/);
+  assert.throws(() => providers.ollamaBody('openai/gpt-6-luna', '', []), /Bilinmeyen Ollama/);
   const policy = providers.ollamaPolicy('gemma4:31b');
   assert.equal(policy.maxRegions, 12);  assert.ok(policy.timeoutMs >= 60000);
 });
 test('removed models migrate openly to the provider default', () => {
   const moved = what => { const m = providers.migrate(what); return [m.provider, m.model, m.migrated]; };
-  assert.deepEqual(moved({ translationProvider: 'openrouter', openrouterModel: 'qwen/qwen3.8-flash' }), ['openrouter', 'qwen/qwen3.8-flash', false]);
-  assert.deepEqual(moved({ translationProvider: 'openrouter', openrouterModel: 'deepseek/deepseek-v4.1-flash' }), ['openrouter', 'qwen/qwen3.8-flash', true]);
+  assert.deepEqual(moved({ translationProvider: 'openrouter', openrouterModel: 'openai/gpt-6-luna' }), ['openrouter', 'openai/gpt-6-luna', false]);
+  assert.deepEqual(moved({ translationProvider: 'openrouter', openrouterModel: 'deepseek/deepseek-v4.1-flash' }), ['openrouter', 'openai/gpt-6-luna', true]);
   assert.equal(providers.migrate({ translationProvider: 'openrouter', openrouterModel: 'meta/muse-spark-1.3-contributor' }).migrated, false);
   assert.deepEqual(moved({}), ['gemini', 'gemini-3.5-flash-lite', true]);
   assert.equal(providers.migrate({ translationProvider: 'gemini', geminiModel: 'gemma-4-26b-a4b-it' }).migrated, false);
@@ -81,13 +81,13 @@ test('partial batch mode never guesses missing or duplicate identities and null 
 
 test('schema is restricted to supported batch models; manual crop keeps its separate output contract',()=>{
   const images=[{regionId:'a',dataUrl:'data:image/png;base64,AAAA'}];
-  for(const model of ['qwen/qwen3.8-flash']){
+  for(const model of ['openai/gpt-6-luna']){
     const batch=providers.routerBody(model,'JSON',images,16384,true);
     assert.equal(batch.response_format.type,'json_schema');assert.equal(batch.response_format.json_schema.strict,true);
     assert.deepEqual(Array.from(batch.response_format.json_schema.schema.properties.regions.items.properties.regionId.enum),['a']);
     assert.equal(providers.routerBody(model,'JSON',images).response_format.type,'json_object');
   }
-  assert.equal(providers.routerBody('qwen/qwen3.7-flash','JSON',images,8192,true).response_format.type,'json_object');
+  assert.equal(providers.routerBody('google/gemma-4-26b-a4b-it','JSON',images,8192,true).response_format.type,'json_object');
 });
 test('independent uncovered lines remain reviewable; no guessed bubble assignment', () => {
   const result = fuseGroups({ regions: [], bubbles: [] }, { regions: [{ regionId: 'x', textBox: [1, 1, 10, 10] }] });
