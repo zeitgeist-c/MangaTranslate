@@ -1,24 +1,191 @@
-# MangaLens TR 3.9.4 — batched adaptive chapter translation
+# MangaLens TR — Turkish translation for manga pages
 
-[Türkçe kullanım kılavuzu](README.tr.md)
+> Türkçe: [README.tr.md](./README.tr.md)
 
-Manifest V3 extension for Brave/Chromium. Translates English manga, manhwa and manhua into Turkish through Gemini, OpenRouter or Ollama. Manual selection and quick translation remain available.
+**Read manga in Turkish. Select a region, or translate the whole chapter.**
 
-Full-chapter processing is a **preview**: complete coverage and the planned 98% quality target have not passed human-reviewed acceptance. Uncertain regions, unsafe backgrounds and text overflow remain available for review.
+MangaLens TR is a Brave/Chromium Manifest V3 extension that finds the English text in manga, manhwa and manhua pages, translates it to Turkish through Gemini, OpenRouter or Ollama, and paints the Turkish text back into the bubble.
 
-Extract `dist/MangaLensTR-3.9.4.zip`, load its folder through Developer mode in `brave://extensions`. For an existing unpacked installation, keep the same folder/extension identity and reload the extension, reader and settings tabs. To run live from source, load the `dist/` folder itself unpacked after `package.ps1` refreshes it. Start a new chapter job after this upgrade: processing version changed. The compact popup selects provider/model automatically and shows the active key label. Its gear opens settings with matching multi-key lists for Gemini/OpenRouter/Ollama. Existing keys remain intact.
+Text detection runs locally. Only the crops you choose are sent to the provider you selected.
 
-Key cards distinguish saved keys from explicitly checked connections. Checks use provider metadata endpoints without generating a translation; success does not confirm model access or age attestation. Keys remain masked, changing the active key affects subsequent requests, and deleting the last key disables translation for that provider. Requests rotate across saved keys (active key first), each key serving up to 5 concurrent sends; full keys are skipped, the order wraps, and a 429/quota key rests for a while. Collapsing the reader panel keeps processing; closing pauses it.
+![MangaLens TR · Popup](./docs/screenshots/01-popup-gemini.png)
 
-Only the selected model is called, except automatic Gemini fallback to the next listed model on 429/503 (rejected requests are not billed). No automatic retry of potentially billed requests. Completed results are cached by source, processing/profile version, model, glossary and context. Each job freezes its settings. Contributor models require explicit consent. Actual provider tests were declined by the owner; tests use synthetic translation replies.
+---
 
-Fast detection now uses PP-OCR text groups directly, with WebGPU where supported and verified-model CPU fallback. The heavy balloon detectors remain optional. Readable dark translation cards overlay source-pixel boxes without altering original image files or reconstructing backgrounds. PNG crop encoding avoids hidden-document idle throttling. OpenRouter now batches across chapter images and shares an adaptive 4→6→8 scheduler across tabs. Up to 20 crops/16384 output tokens when metadata verifies capacity, otherwise 12/8192; complete JSON bodies are capped at 8 MiB. Region caches survive regrouping and worker restarts. New cards appear as groups finish. Provider watchdogs are per model (Luna 90 seconds, Muse 60 seconds), and quota/budget/uncertain failures stop new dispatch without automatic paid retry. Transient provider overload (429/503/5xx) is retried up to 3 times with growing delays, then chains to the next Gemini model on 429/503, otherwise waits on a countdown with automatic resume. Both providers rotate requests across saved keys (active key first, up to 5 concurrent sends per key, wrapping around, resting 429/quota keys); direct Gemini additionally keeps 12 requests/minute/key with one lane per key (up to 4) and 2.5 s per-key spacing, plus automatic resume when the window frees; per-page request counts appear in the panel counter and diagnostics. Timings separate local detection, provider waits and drawing. [3.8.0 measurements and acceptance limits](docs/TOPLU-CEVIRI-3.8.0.md). OpenRouter Gemini 2.5/3.1 Lite entries were removed; direct Gemini is preserved. The OpenRouter catalog is now GPT-6 Luna (default), Gemma 4 26B and Muse Spark 1.3 Contributor; Qwen, Haiku, Nemotron, MiMo and GLM entries were removed after live checks (model errors or no translation). Blocked cooldown waits now resume automatically once the window expires. The local text path now uses DB quad postprocessing, dark-tile inversion and shifted seam checks. No live provider speed/quality claim is made.
+## Contents
 
-Keys stay in extension local storage and go only to their provider. Preferences use sync, glossaries/jobs use local storage, detection/translation caches use IndexedDB. No telemetry was added. The unchanged 3.1.7 checkpoint is documented in [recovery instructions](docs/GERI-DONUS-NOKTASI-2026-10-13.md). Preserve current source, storage and IndexedDB before future rollback.
+- [What it does](#what-it-does)
+- [Screens, one by one](#screens-one-by-one)
+  - [1. Popup — Gemini](#1-popup--gemini)
+  - [2. Popup — OpenRouter](#2-popup--openrouter)
+  - [3. Settings — API keys](#3-settings--api-keys)
+  - [4. Settings — Translation preferences](#4-settings--translation-preferences)
+  - [5. Settings — About](#5-settings--about)
+- [Install](#install)
+- [How a translation runs](#how-a-translation-runs)
+- [Providers and keys](#providers-and-keys)
+- [Where your data lives](#where-your-data-lives)
+- [Build from source](#build-from-source)
+- [Known limits](#known-limits)
+- [License](#license)
 
-```powershell
-node --test tests/*.test.js tests/*.test.mjs evaluation/tests/*.test.mjs
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\package.ps1
-```
+---
 
-Existing same-version packages are never overwritten. See [implementation/acceptance tracking](docs/UYGULAMA-TAKIBI-2026-10-13.md), [evaluation lab](evaluation/README.md) and [third-party licenses](src/page/licenses/). The overall project license is not yet specified.
+## What it does
+
+| Capability | Detail |
+|---|---|
+| **Region select** | drag a box over any text and get the Turkish version in place |
+| **Auto translate** | detect the page's text blocks and translate them in one pass |
+| **Whole chapter** | scan the reader page, translate every bubble, place the result inside the safe area |
+| **Three providers** | Gemini (direct), OpenRouter, or a local Ollama instance — per-provider key lists |
+| **Key rotation** | requests walk the saved keys in order; a key that returns 429 or hits its quota is rested and the next one is used |
+| **Provider failover** | on Gemini 429/503 the next model in the list is tried automatically; other transient errors chain only when you opt in |
+| **Term dictionary** | your own names and terms keep their Turkish spelling across pages |
+| **Translation cache** | repeated crops reuse the stored result instead of paying for it twice |
+| **Local detection** | text regions are found on your machine, no upload for detection |
+
+---
+
+## Screens, one by one
+
+### 1. Popup — Gemini
+
+![Popup · Gemini](./docs/screenshots/01-popup-gemini.png)
+
+The toolbar popup, 360 px wide.
+
+**Header** — logo and name, the on/off switch for the extension, and the gear that opens Settings.
+
+**Provider tabs** — `Gemini`, `OpenRouter`, `Ollama`. Each tab keeps its own model and key list; switching provider does not lose the others.
+
+**Translation model** — the model list for the selected provider, with the active choice highlighted. Under it, a key summary shows how many keys are registered and whether the active one is usable (`2 anahtar kayıtlı`).
+
+**Actions**
+- `Bölümün tamamını çevir` — the whole-chapter path: scan the page, translate every block, place the text.
+- `Alan Seç` — drag a box on the page and translate only that.
+- `Oto Çevir` — automatic detection and translation of the page's text blocks.
+
+The note under the buttons is deliberate: *"Tam bölüm önizleme · Belirsiz alanlar kontrol gerektirir."* Whole-chapter is a preview feature — text that could not be identified with confidence is left for you to check instead of being painted over.
+
+**Usage counters** — minute, today, total. They count requests actually sent; cache hits and skipped blocks do not inflate them.
+
+### 2. Popup — OpenRouter
+
+![Popup · OpenRouter](./docs/screenshots/02-popup-openrouter.png)
+
+The same popup with the OpenRouter tab active. The model list changes to OpenRouter's catalogue (`gpt-6-luna` default, with `gemma-4-26b` and `muse-spark-1.3` as alternatives), and the key summary reflects that provider's own keys.
+
+Each provider is independent: a Gemini key never appears under OpenRouter and vice versa.
+
+Ollama works the same way against a local endpoint — no cloud key, no request leaving the machine.
+
+### 3. Settings — API keys
+
+![Settings · API keys](./docs/screenshots/03-ayarlar-anahtarlar.png)
+
+Three sections in the left rail: **API Anahtarları**, **Çeviri Tercihleri**, **Hakkında**.
+
+Under API keys, one tab per provider, each with its own key ring:
+
+- **Add a key** — a label plus the key itself.
+- The first key added becomes active automatically; you choose which of the rest is active.
+- Keys are stored in this browser only.
+
+`Kontrol et` checks the connection without producing a translation. The note under it is honest about what that means: a successful check does not prove the model is enabled for the account or that any age verification is complete.
+
+### 4. Settings — Translation preferences
+
+![Settings · Translation preferences](./docs/screenshots/04-ceviri-tercihleri.png)
+
+**Reading and scanning**
+- **Content type** — `Otomatik / bilinmiyor`, `Manga`, `Manhwa`, `Manhua`. It tunes how bubbles are expected to look.
+- **Local scan mode** — `Hızlı yazı taraması (önerilen)`, `Alternatif balon taraması`, `Ayrıntılı balon taraması (yavaş)`. Fast is the default; detailed trades time for recall.
+- **Translation font size** — `Normal` or `Büyük`.
+- **Series name** — optional context that helps the model keep character and series names consistent.
+
+**Language and terms**
+- **Translation instruction** — your own style or tone direction.
+- **Name and term dictionary** — source term equals Turkish equivalent, applied across pages.
+
+**Provider behaviour**
+- *"Gemini 429/503'te her zaman sonraki modele otomatik geçer."* On these two codes the chain always moves on. When enabled, other transient errors (500/502/504) chain too; when disabled, the job stops on them instead of silently switching model.
+
+`Kaydet` writes the changes; `Değişiklik yok` shows when nothing is pending.
+
+### 5. Settings — About
+
+![Settings · About](./docs/screenshots/05-hakkinda.png)
+
+The version, what the extension does, and the honest note about whole-chapter being a preview whose text recall is not yet verified against human labels.
+
+It also states the data flow plainly:
+
+- detection runs locally,
+- only the crops you send go to your chosen provider,
+- keys and job records stay local, preferences live in browser sync storage, the translation cache lives in IndexedDB.
+
+`Model kataloğunu kontrol et` refreshes the model list from the provider.
+
+---
+
+## Install
+
+The extension is loaded unpacked from source:
+
+1. Open `brave://extensions` (or `chrome://extensions`).
+2. Enable **Developer mode**.
+3. `Load unpacked` and pick the repository folder (the one containing `manifest.json`).
+4. Open the popup, go to Settings, and add at least one API key.
+
+## How a translation runs
+
+1. **Detect** — the page's text regions are found locally.
+2. **Crop** — each region is cut out as an image.
+3. **Send** — the crops go to the selected provider with the model and your instruction.
+4. **Verify** — the response is checked; a block whose answer cannot be tied to a region is not painted.
+5. **Place** — the Turkish text is drawn inside the bubble's safe area, at the font size you chose.
+6. **Cache** — the result is stored so the same crop is not sent twice.
+
+Parallelism adapts: Gemini opens one lane per key (max 4) with 2.5 s spacing per key and 12 requests per key per minute; OpenRouter ramps 4 → 6 → 8 concurrent requests. When every key is exhausted the job waits for the window to end and continues automatically instead of failing.
+
+## Providers and keys
+
+| Provider | Needs | Notes |
+|---|---|---|
+| **Gemini** | a Google AI Studio key | direct path, no aggregator in between |
+| **OpenRouter** | an OpenRouter key | one key reaches many model families |
+| **Ollama** | a local Ollama server | nothing leaves the machine |
+
+Keys per provider are stored as a list. Requests walk the list in order, each key serving up to its concurrency limit, then wrap around. A key that returns 429 or burns its quota is rested for a while and skipped.
+
+## Where your data lives
+
+| What | Where |
+|---|---|
+| API keys | this browser only (extension local storage) |
+| Preferences | browser sync storage |
+| Term dictionaries, job records | local |
+| Translation cache | IndexedDB |
+
+No analytics, no account, no telemetry server. The only outbound traffic is the crop you send to the provider you chose — and with Ollama, nothing leaves the machine at all.
+
+## Build from source
+
+There is no build step: the extension is plain HTML/CSS/JS loaded unpacked. To work on it:
+
+1. Load the folder unpacked as above.
+2. Edit the files under `popup/`, `options/`, `content/` (or `page/`).
+3. Press the reload button on the extension card and refresh the manga page.
+
+## Known limits
+
+- **Whole-chapter is a preview.** Finding every text block and the ~98% quality target are not yet verified against human labels; uncertain regions are left for you to check.
+- Detection is local and fast, but it can miss stylised lettering, text over busy art, or vertical text.
+- A successful `Kontrol et` proves the key is accepted — not that the model is available to the account or that age verification is done.
+- Translation quality depends on the model; the extension does not post-edit the model's Turkish.
+- Free-tier keys hit rate limits; the rotation keeps working but a large chapter takes longer.
+
+## License
+
+MIT — see [LICENSE](./LICENSE).
