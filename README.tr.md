@@ -1,76 +1,191 @@
-# MangaLens TR 3.9.4 — OpenRouter listesi sadeleşti
+# MangaLens TR — manga sayfaları için Türkçe çeviri
 
-3.9.4: OpenRouter listesi canlı denemelerle sadeleşti: Qwen 3.7/3.8, Claude Haiku 5.5, Nemotron 3.5 Super VL, MiMo 2.6 Flash ve GLM 5.3 Flash çıkarıldı (model hataları veya çeviri üretmedi). Kalanlar: GPT-6 Luna (varsayılan), Gemma 4 26B ve Muse Spark 1.3 Contributor. Bekleme penceresi dolduğunda engellenen tarama artık otomatik devam ediyor.
+> English: [README.md](./README.md)
 
-3.9.3: Bölüm bitince kartsız bölgeler küçük gruplarla otomatik tekrar gönderiliyor (ikinci bakış); Ollama anahtar başına tek uçuşa alındı; ölü yedek dalı temizlendi.
+**Mangayı Türkçe oku. Bir alan seç, ya da bütün bölümü çevir.**
 
-3.9.2: Üçüncü sağlayıcı Ollama eklendi (Gemma 4 31B; Nano bulutta görüntü kabul etmediği için çıkarıldı). Anahtar listesi, pencere rotasyonu ve 429 atlaması diğerleriyle aynı.
+MangaLens TR, manga, manhwa ve manhua sayfalarındaki İngilizce yazıları bulan, Gemini, OpenRouter veya Ollama üzerinden Türkçeye çeviren ve Türkçe metni balonun içine geri çizen bir Brave/Chromium Manifest V3 uzantısıdır.
 
-3.9.1: Tarayıcı listesindeki sürüm yazısı sadeleşti (HeraAi düzeni); `version_name` kaldırıldı, yalnız ad + sürüm görünür.
+Yazı tespiti yerelde çalışır. Yalnız seçtiğin kırpmalar seçtiğin sağlayıcıya gönderilir.
 
-3.9.0: Gemini ve OpenRouter'da istekler kayıtlı anahtarlar arasında sıra sıra gider (önce aktif anahtar, her anahtar en fazla 5 eşzamanlı istek), liste bitince başa dönülür; 429/kota yiyen anahtar bir süre atlanır. Yeni iş rotasyonu sıfırlar, yeniden deneme kaldığı yerden devam eder.
+![MangaLens TR · Popup](./docs/screenshots/01-popup-gemini.png)
 
-3.8.6: Geçici sağlayıcı yoğunluğu (429/503/5xx) en fazla 3 kez artan beklemeyle otomatik deneniyor; tükenirse sayaçlı bekleme ve otomatik devam devreye giriyor. 503’te paralel şeritler geçici kısılıyor. Gemini yedeği açıksa susan modelden listedeki sonrakine geçiliyor (Ayarlar → Çeviri Tercihleri → Sağlayıcı davranışı).
+---
 
-3.8.5: Gemini kuyruğu anahtar sayısı kadar paralel şerit açıyor (en fazla 4), anahtar başına 2,5 sn aralık korunuyor. Tanılama özeti kontrol nedenlerini ve düşen grupları kod bazında döküyor.
+## İçindekiler
 
-3.8.4: Gemini tarafında her anahtar dakikada en fazla 12 istek kullanır, kayıtlı anahtarlar arasında dönüşümlü gidilir; tüm anahtarlar dolarsa pencere bitiminde otomatik devam edilir. Sayfa paneli yenilendi: Tarama/Çeviri/Yerleşim hapları, ilerleme çubuğu, sağlayıcı isteği sayacı ve saatli canlı akış. Önbellek ve gönderilmeyenler sayılmaz.
+- [Ne yapar](#ne-yapar)
+- [Ekranlar, tek tek](#ekranlar-tek-tek)
+  - [1. Popup — Gemini](#1-popup--gemini)
+  - [2. Popup — OpenRouter](#2-popup--openrouter)
+  - [3. Ayarlar — API anahtarları](#3-ayarlar--api-anahtarları)
+  - [4. Ayarlar — Çeviri tercihleri](#4-ayarlar--çeviri-tercihleri)
+  - [5. Ayarlar — Hakkında](#5-ayarlar--hakkında)
+- [Kurulum](#kurulum)
+- [Çeviri nasıl akar](#çeviri-nasıl-akar)
+- [Sağlayıcılar ve anahtarlar](#sağlayıcılar-ve-anahtarlar)
+- [Verin nerede durur](#verin-nerede-durur)
+- [Kaynaktan çalıştırma](#kaynaktan-çalıştırma)
+- [Bilinen sınırlar](#bilinen-sınırlar)
+- [Lisans](#lisans)
 
-3.8.3: DeepSeek V4.1 Flash OpenRouter listesinden çıkarıldı (5 model kaldı); kayıtlı modeli kaldırılana denk gelen kullanıcıya varsayılan model otomatik seçilip bilgi verilir. Zaman aşımı alan modelde sonraki gruplar geçici küçültülür, başarılı grup eski boyuta döndürür. Akan yanıtlarda parça geldikçe sıfırlanan sessizlik bekçisi ve iki katı mutlak tavan kullanılır; duran akış ayrı mesajla bildirilir. Otomatik ücretli tekrar yine yok.
+---
 
-3.8.2: Qwen/DeepSeek/Haiku için model başına 2 eşzamanlı istek; DeepSeek 8, Qwen/Haiku 12 kırpma. DeepSeek 120 sn, Qwen/Haiku 90 sn, Muse 60 sn watchdog kullanır. Eski iş hatası yeni işi durdurmaz. 429 kaynak modeli/geri sayımıyla gösterilir, worker restart'ta korunur. Kimliği belli tek bozuk yanıt alanı kontrol listesine ayrılır; diğer kartlar çizilir. Otomatik ücretli tekrar yok. [Ayrıntılar ve sınırlar](docs/KUYRUK-VE-YANIT-3.8.2.md).
+## Ne yapar
 
-3.8.1: Qwen 3.7/3.8 Flash ve DeepSeek V4.1 Flash çevirisinde varsayılan düşünme kapatıldı; OpenRouter yönlendirmesinde gerekli JSON/istek parametrelerinin desteklenmesi zorunlu. Altı model korundu. Haiku ve Muse Spark düşünme ayarları aynı; otomatik ücretli tekrar yok. [Model incelemesi ve doğrulama sınırları](docs/MODEL-UYUMLULUGU-3.8.1.md).
+| Yetenek | Ayrıntı |
+|---|---|
+| **Alan seç** | herhangi bir yazının üzerine kutu çiz, Türkçesi yerine gelsin |
+| **Oto çevir** | sayfanın yazı bloklarını bul, tek geçişte çevir |
+| **Tam bölüm** | okuyucu sayfasını tara, her balonu çevir, sonucu güvenli alana yerleştir |
+| **Üç sağlayıcı** | Gemini (doğrudan), OpenRouter veya yerel Ollama — sağlayıcı başına anahtar listesi |
+| **Anahtar rotasyonu** | istekler kayıtlı anahtarları sırayla gezer; 429 yiyen veya kotası dolan anahtar dinlenir, sıradaki kullanılır |
+| **Sağlayıcı yedekleme** | Gemini 429/503'te listedeki sonraki model otomatik denenir; diğer geçici hatalar yalnız sen açarsan zincirlenir |
+| **Terim sözlüğü** | kendi adların ve terimlerin sayfalar arasında aynı Türkçe karşılıkla kalır |
+| **Çeviri önbelleği** | aynı kırpma tekrar gönderilmez, saklanan sonuç kullanılır |
+| **Yerel tespit** | yazı bölgeleri kendi makinede bulunur, tespit için yükleme yapılmaz |
 
-[English](README.md)
+---
 
-Brave/Chromium Manifest V3 uzantısı. İngilizce manga/manhwa/manhua yazılarını Gemini, OpenRouter veya Ollama üzerinden Türkçeye çevirir. Alan Seç ve Oto Çevir korunur. Tam bölüm özelliği **önizlemedir**: bütün yazıların bulunması ve %98 kalite hedefi henüz insan etiketleriyle doğrulanmadı.
+## Ekranlar, tek tek
 
-3.8.0: OpenRouter gönderimleri 4→6→8 uyarlanabilir paralellik kullanır; belgelenmiş kapasiteye göre en fazla 20 kırpma/16384 çıktı token’ı, metadata bilinmiyorsa 12/8192. Tam gövde sınırı 8 MiB. Sonuçlar geldikçe kartlar yerleşir; 60 saniyelik watchdog ve bölge bazlı kayıt tekrar ücret riskini sınırlar. OpenRouter listesindeki iki Gemini modeli kaldırıldı; doğrudan Gemini sekmesi korundu. [Ölçümler, gereksinim takibi ve sınırlar](docs/TOPLU-CEVIRI-3.8.0.md). Canlı model hız garantisi verilmez.
+### 1. Popup — Gemini
 
-## Kullanım
+![Popup · Gemini](./docs/screenshots/01-popup-gemini.png)
 
-1. `dist/MangaLensTR-3.9.4.zip` dosyasını çıkar; `brave://extensions` → Geliştirici modu → Paketlenmemiş öğe yükle. Kaynaktan canlı çalıştırmak için `package.ps1` sonrası yenilenen `dist/` klasörünü doğrudan yükle. Mevcut proje klasöründen kullanıyorsan uzantıyı ve manga sekmesini yeniden yükle. Açık eski ayarlar pencerelerini de yenile. 3.7.0 ve daha eski işlere Devam et yerine popup’tan yeni bölüm taraması başlat; bölge gruplama sürümü değişti.
+Araç çubuğu popup'ı, 360 piksel geniş.
 
-   Güncellemede aynı yüklenmiş klasörü kullan: farklı klasörden ikinci bir uzantı eklemek ayrı uzantı kimliği oluşturabilir ve kayıtlı anahtarlarını yeni kimlikte göstermeyebilir. Mevcut uzantıyı kaldırmadan klasörünü güncelle ve **Yeniden yükle** kullan.
-2. Popup'taki dişliyle **Ayarlar → API Anahtarları** aç. Gemini/OpenRouter/Ollama için etiketli birden fazla anahtar ekleyebilirsin; **Aktif yap** ile seç. Eski Google listesi korunur, eski tek OpenRouter anahtarı otomatik aktarılır. Ana popup yalnız aktif anahtar etiketini gösterir.
-3. Popup'ta sağlayıcı ve modeli seç; otomatik kaydedilir. İçerik türü, seri adı, yönerge ve sözlük için **Ayarlar → Çeviri Tercihleri → Kaydet** kullan. Sözlük seri adına göre yerel saklanır.
-4. **Bölümün tamamını çevir** mevcut bölümün görsellerini yerel olarak tarar; komşu görsellerin yazılarını ortak gruplarda paralel çevirir; sonraki bölüme geçmez. Lazy-load taraması sınırlıdır ve kaydırma konumu geri getirilir.
-5. Sayfa panelinde duruma göre Duraklat/Devam et ve Hatalıları yeniden dene görünür. **Görünüm ve kontrol araçları** bölümünde Orijinal/çeviri, Kutular, Kontrol listesi ve Kapat bulunur. Paneli katlamak taramayı durdurmaz; Kapat duraklatır. Belirsiz alanlar/sığmayan metin otomatik kaplanmaz; Alan Seç ile düzeltilebilir.
+**Başlık** — logo ve ad, uzantıyı açıp kapatan anahtar, Ayarlar'ı açan çark.
 
-Anahtar kartındaki **Kayıtlı** ve **Bağlantı doğrulandı** farklıdır: Kontrol et çeviri üretmeden sağlayıcının anahtar/model-listesi uç noktasına bağlanır. Seçili model erişimini, kredinin yeterli olduğunu veya yaş onayını kanıtlamaz. Kontroller yalnız düğmeye basınca çalışır; anahtarlar her zaman maskelenir. Aktif anahtar silinirse ilk kalan seçilir; hiç kalmazsa bu sağlayıcıyla çeviri başlatılamaz. Anahtar değişimi sonraki çağrıları etkiler. İstekler kayıtlı anahtarlar arasında sıra sıra gider (önce aktif anahtar); her anahtar aynı anda en fazla 5 istek alır, dolu anahtar atlanır, liste bitince başa dönülür; 429/kota yiyen anahtar bir süre dinlenir.
+**Sağlayıcı sekmeleri** — `Gemini`, `OpenRouter`, `Ollama`. Her sekme kendi modelini ve anahtar listesini tutar; sağlayıcı değiştirmek diğerlerini kaybettirmez.
 
-Yalnız seçili model kullanılır; 429/503'te zincirdeki sonraki Gemini modeline otomatik geçilir. Hatalıları yeniden deneme yeni ücret oluşturabilir. Gönderilmiş bir isteğin cevabı kaybolursa otomatik tekrar yapılmaz. Tamamlanmış sonuçlar kaynak/model/profil/sözlük/bağlam cache'inden kullanılır. Başlamış iş ayarlarını sabitler; model değişimi yeni işleri etkiler.
+**Çeviri modeli** — seçili sağlayıcının model listesi, etkin seçim işaretli. Altında anahtar özeti kaç anahtar kayıtlı olduğunu ve etkin olanın kullanılabilir olup olmadığını gösterir (`2 anahtar kayıtlı`).
 
-3.5.1: Duraklat bekleyen yerel işlemi iptal eder; Devam et tek tıklamayla sürdürür. Yanıtsız adımlar süre sınırında hata olarak kaydedilir ve diğer görsellere geçilir. Gönderilmiş çeviri isteğinin geç cevabı önbelleğe alınabilir; devam ederken aynı çağrı paylaşılır. Sayfada zaten gösterilen tamamlanmış katmanlar yeniden işlenmez. Güncellemeden sonra uzantıyı ve manga sekmesini yeniden yükleyin.
+**Eylemler**
+- `Bölümün tamamını çevir` — tam bölüm yolu: sayfayı tara, her bloğu çevir, metni yerleştir.
+- `Alan Seç` — sayfada kutu çiz, yalnız onu çevir.
+- `Oto Çevir` — sayfanın yazı bloklarını otomatik bul ve çevir.
 
-## Modeller ve tespit
+Düğmelerin altındaki not bilerek orada: *"Tam bölüm önizleme · Belirsiz alanlar kontrol gerektirir."* Tam bölüm bir önizleme özelliğidir — güvenle tanımlanamayan yazı, üzerine boyanmak yerine kontrol etmen için bırakılır.
 
-3.5.2: OpenRouter 18+ yaş onayı istediğinde tarama ilk etkilenen görselde durur ve ayarlar bağlantısı gösterir. Bu onay uzantıdan verilemez. Hesabınızda gerekli onayı kendiniz tamamladıktan sonra **Hatalıları yeniden dene** kullanın. Başka modele geçmek için popup’tan modeli seçip yeni bölüm taraması başlatın. Eksik/geçersiz anahtar ve kredi hataları da kalan kuyruğu durdurur; içerik denetimi nedeniyle verilen diğer 403 hataları yaş onayı sayılmaz. 3.5.1’den kalan bilinen yaş onayı hataları açılışta anlaşılır mesaja dönüştürülür.
+**Kullanım sayaçları** — dakika, bugün, toplam. Gerçekten gönderilen istekleri sayar; önbellek isabetleri ve atlanan bloklar sayıyı şişirmez.
 
-Gemini: Gemini3.5 Flash Lite, Gemini3.1 Flash Lite, Gemma4 26B A4B.
+### 2. Popup — OpenRouter
 
-OpenRouter: GPT-6 Luna (varsayılan), Gemma 4 26B ve Muse Spark 1.3 Contributor. OpenRouter’daki Gemini2.5/3.1 Flash Lite kaldırıldı; doğrudan Gemini sekmesi korunur. Qwen, Haiku, Nemotron, MiMo ve GLM canlı denemelerden sonra çıkarıldı. Contributor veri paylaşımı nedeniyle ayrı açık seçime bağlıdır. Ollama: Gemma 4 31B (Nemotron 3 Nano bulutta görüntü kabul etmediği için çıkarıldı). Hesap erişimi/fiyat/çeviri kalitesini kullanıcı deneyecek; canlı API testleri kullanıcı isteğiyle yapılmadı.
+![Popup · OpenRouter](./docs/screenshots/02-popup-openrouter.png)
 
-**Hızlı yazı taraması (önerilen)** varsayılandır: yazı dedektörü satırları kaynak piksel konumunda gruplar; ağır balon modeli çalışmaz. Desteklenen GPU’da PP-OCR WebGPU, desteklenmeyen veya başarısız GPU’da aynı doğrulanmış model WASM/CPU ile çalışır. Önceki Standart seçimi hızlı yola eşlenir. Önceden küçük modeli seçtiysen **Ayarlar → Çeviri Tercihleri → Yerel tarama** bölümünden hızlı yolu seçip Kaydet. Alternatif/ayrıntılı balon modelleri isteğe bağlı ve daha yavaştır.
+Aynı popup, OpenRouter sekmesi etkin. Model listesi OpenRouter kataloğuna döner (`gpt-6-luna` varsayılan, alternatif olarak `gemma-4-26b` ve `muse-spark-1.3`) ve anahtar özeti o sağlayıcının kendi anahtarlarını yansıtır.
 
-Çeviri modeli koordinat üretmez: yerel kaynak-piksel kutuları ve sabit bölge kimlikleri kullanılır. Model yalnız kimlikli kırpmayı okur/çevirir. Çeviriler özgün görsel dosyası değiştirilmeden yazının üzerinde okunaklı koyu kartlarla gösterilir; zemin taklit edilmez. Sığmayan/çakışan kartlar ve çok küçük veya kesilmiş adaylar kontrol listesinde korunur. Süre özeti tarama, çeviri bekleme ve kart çizimini ayrı gösterir. Japonca/dikey yazı doğrulanmadı.
+Her sağlayıcı bağımsızdır: Gemini anahtarı OpenRouter altında asla görünmez, tersi de geçmez.
 
-OpenRouter grupları uzantı genelinde ortak 4→6→8 paralel kuyrukla, Google’a ait sabit 2,5 saniyelik beklemeye girmeden yapılır; Google’ın kota aralığı korunur. Gemini ve OpenRouter istekleri kayıtlı anahtarlar arasında sıra sıra gider (önce aktif anahtar, her anahtar en fazla 5 eşzamanlı istek, liste bitince başa dönüş); 429/kota yiyen anahtar bir süre atlanır. Gemini tarafında ayrıca her anahtar dakikada en fazla 12 istek kullanır; anahtar sayısı kadar paralel şerit açılır (en fazla 4), anahtar başına 2,5 sn aralık korunur; tüm anahtarlar dolarsa pencere bitimine kadar beklenip otomatik devam edilir. Sayfa başına istek sayısı sayaçta ve tanılama özetinde görünür. 429/eşzamanlı kredi bütçesi engelinde yeni gönderimler durur ve sağlayıcının bekleme süresi gözetilir; otomatik ücretli tekrar yapılmaz. Geçici sağlayıcı yoğunluğu (429/503/5xx) en fazla 3 kez artan beklemeyle otomatik denenir; 429/503'te zincirdeki sonraki Gemini modeline (3.5 → 3.1 → Gemma 4 26B) iş durmadan geçilir; yedek açıkken 500/502/504'te de zincirlenir, üçü de susarsa sayaçlı bekleme ve otomatik devam devreye girer. Veri politikası kaynaklı bilinen 404 hataları da taramayı durdurur. Zemin için ek bir AI çağrısı yoktur; daha fazla metin çevirmek sağlayıcı kullanımını artırabilir. Gerçek çeviri süresini seçtiğin model belirler. [Ölçüm ve sınırlar](docs/TOPLU-CEVIRI-3.8.0.md).
+Ollama aynı şekilde yerel bir uç noktaya karşı çalışır — bulut anahtarı yok, makineden istek çıkmaz.
 
-## Veri ve geri dönüş
+### 3. Ayarlar — API anahtarları
 
-Anahtarlar extension local storage'da tutulur; sayfaya verilmez ve yalnız kendi sağlayıcısına gönderilir. Tercihler sync, seri sözlükleri/iş kayıtları local storage, tespit/çeviri cache'i IndexedDB'dedir. Kırpmalar çeviri başlatıldığında seçilen sağlayıcıya gönderilir. Telemetri yoktur. unlimitedStorage izni büyük cache'in kota nedeniyle kaybolmaması içindir.
+![Ayarlar · API anahtarları](./docs/screenshots/03-ayarlar-anahtarlar.png)
 
-3.1.7 kaynak/Git ve şifreli Brave storage checkpoint'i korunur. [Geri dönüş](docs/GERI-DONUS-NOKTASI-2026-10-13.md) ve [uygulama/kabul takibi](docs/UYGULAMA-TAKIBI-2026-10-13.md). Gelecekte geri dönüşten önce yeni kaynak, local/sync verileri **ve IndexedDB** ayrı kurtarma yedeğine alınmalıdır.
+Sol çubukta üç bölüm: **API Anahtarları**, **Çeviri Tercihleri**, **Hakkında**.
 
-## Geliştirme ve paket
+API anahtarları altında sağlayıcı başına bir sekme, her birinin kendi anahtar halkası:
 
-```powershell
-node --test tests/*.test.js tests/*.test.mjs evaluation/tests/*.test.mjs
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\package.ps1
-```
+- **Anahtar ekle** — bir etiket ve anahtarın kendisi.
+- İlk eklenen anahtar otomatik etkin olur; geri kalanlardan hangisinin etkin olacağını sen seçersin.
+- Anahtarlar yalnız bu tarayıcıda saklanır.
 
-Paket betiği aynı sürüm ZIP'inin üzerine yazmaz. Yerel kaynak commit/tag ve paket ilişkisi ayrıca doğrulanır. [Laboratuvar](evaluation/README.md): dört seriden 101 yerel görsel, serileri ayrılmış 35 görsellik inceleme kuyruğu; model tahmini insan etiketi sayılmaz.
+`Kontrol et` çeviri üretmeden bağlantıyı denetler. Altındaki not bunun ne anlama geldiği konusunda dürüst: başarılı kontrol, modelin hesaba açık olduğunu veya yaş onayının tamamlandığını kanıtlamaz.
 
-src/page yerel çıkarım/şekil/cache; src/page-background.js sağlayıcı ve kalıcı kayıt; src/page-content.js kuyruk/katman; src/providers.js model/profil/kimlik sözleşmesi. [Üçüncü taraf lisanslar](src/page/licenses/). Projenin genel lisansı henüz belirlenmedi.
+### 4. Ayarlar — Çeviri tercihleri
+
+![Ayarlar · Çeviri tercihleri](./docs/screenshots/04-ceviri-tercihleri.png)
+
+**Okuma ve tarama**
+- **İçerik türü** — `Otomatik / bilinmiyor`, `Manga`, `Manhwa`, `Manhua`. Balonların nasıl görünmesi gerektiğini ayarlar.
+- **Yerel tarama** — `Hızlı yazı taraması (önerilen)`, `Alternatif balon taraması`, `Ayrıntılı balon taraması (yavaş)`. Hızlı varsayılandır; ayrıntılı, kapsama için hızdan feragat eder.
+- **Çeviri yazı boyutu** — `Normal` veya `Büyük`.
+- **Seri adı** — modelin karakter ve seri adlarını tutarlı tutmasına yardım eden isteğe bağlı bağlam.
+
+**Dil ve terimler**
+- **Çeviri yönergesi** — kendi üslup veya ton yönlendirmen.
+- **Ad ve terim sözlüğü** — kaynak terim eşittir Türkçe karşılık; sayfalar arasında uygulanır.
+
+**Sağlayıcı davranışı**
+- *"Gemini 429/503'te her zaman sonraki modele otomatik geçer."* Bu iki kodda zincir her zaman ilerler. Açıkken diğer geçici hatalar (500/502/504) da zincirlenir; kapalıyken iş bu hatalarda durur, sessizce model değiştirmez.
+
+`Kaydet` değişiklikleri yazar; `Değişiklik yok` bekleyen bir şey olmadığını gösterir.
+
+### 5. Ayarlar — Hakkında
+
+![Ayarlar · Hakkında](./docs/screenshots/05-hakkinda.png)
+
+Sürüm, uzantının ne yaptığı ve tam bölümün bir önizleme olduğu, yazı kapsamının henüz insan etiketleriyle doğrulanmadığı notu.
+
+Veri akışını da açıkça yazar:
+
+- tespit yerelde çalışır,
+- yalnız gönderdiğin kırpmalar seçtiğin sağlayıcıya gider,
+- anahtarlar ve iş kayıtları yerelde, tercihler tarayıcı eşitleme alanında, çeviri önbelleği IndexedDB'de durur.
+
+`Model kataloğunu kontrol et` model listesini sağlayıcıdan yeniler.
+
+---
+
+## Kurulum
+
+Uzantı kaynaktan paketsiz yüklenir:
+
+1. `brave://extensions` (veya `chrome://extensions`) adresini aç.
+2. **Geliştirici modu**nu aç.
+3. `Paketsiz yükle` ve `manifest.json` içeren klasörü seç.
+4. Popup'ı aç, Ayarlar'a git ve en az bir API anahtarı ekle.
+
+## Çeviri nasıl akar
+
+1. **Tespit** — sayfanın yazı bölgeleri yerelde bulunur.
+2. **Kırp** — her bölge görüntü olarak kesilir.
+3. **Gönder** — kırpmalar seçili sağlayıcıya, modelle ve senin yönergenle gider.
+4. **Doğrula** — yanıt kontrol edilir; bir bölgeye bağlanamayan cevap boyanmaz.
+5. **Yerleştir** — Türkçe metin balonun güvenli alanına, seçtiğin yazı boyutuyla çizilir.
+6. **Önbellekle** — sonuç saklanır, aynı kırpma ikinci kez gönderilmez.
+
+Paralellik uyarlanır: Gemini anahtar başına bir şerit açar (en fazla 4), anahtar başına 2,5 sn aralık ve dakikada 12 istek korunur; OpenRouter 4 → 6 → 8 eşzamanlı isteğe çıkar. Tüm anahtarlar tükendiğinde iş başarısız olmak yerine pencere bitimini bekler ve otomatik devam eder.
+
+## Sağlayıcılar ve anahtarlar
+
+| Sağlayıcı | Gereken | Not |
+|---|---|---|
+| **Gemini** | Google AI Studio anahtarı | doğrudan yol, arada aracı yok |
+| **OpenRouter** | OpenRouter anahtarı | tek anahtar birçok model ailesine ulaşır |
+| **Ollama** | yerel Ollama sunucusu | makineden hiçbir şey çıkmaz |
+
+Sağlayıcı başına anahtarlar liste olarak saklanır. İstekler listeyi sırayla gezer, her anahtar eşzamanlılık sınırına kadar hizmet eder, sonra başa dönülür. 429 yiyen veya kotası dolan anahtar bir süre dinlendirilir ve atlanır.
+
+## Verin nerede durur
+
+| Ne | Nerede |
+|---|---|
+| API anahtarları | yalnız bu tarayıcıda (uzantı yerel depolaması) |
+| Tercihler | tarayıcı eşitleme alanı |
+| Terim sözlükleri, iş kayıtları | yerel |
+| Çeviri önbelleği | IndexedDB |
+
+Analitik yok, hesap yok, telemetri sunucusu yok. Tek dış trafik seçtiğin sağlayıcıya gönderdiğin kırpmadır — Ollama ile makineden hiçbir şey çıkmaz.
+
+## Kaynaktan çalıştırma
+
+Derleme adımı yok: uzantı düz HTML/CSS/JS olarak paketsiz yüklenir. Üzerinde çalışmak için:
+
+1. Klasörü yukarıdaki gibi paketsiz yükle.
+2. `popup/`, `options/`, `content/` (veya `page/`) altındaki dosyaları düzenle.
+3. Uzantı kartındaki yenile düğmesine bas ve manga sayfasını yenile.
+
+## Bilinen sınırlar
+
+- **Tam bölüm bir önizlemedir.** Bütün yazı bloklarını bulmak ve ~%98 kalite hedefi henüz insan etiketleriyle doğrulanmadı; belirsiz bölgeler kontrol için bırakılır.
+- Tespit yerel ve hızlıdır, ama süslü yazıları, hareketli çizim üzerindeki metni veya dikey yazıyı kaçırabilir.
+- Başarılı `Kontrol et` anahtarın kabul edildiğini kanıtlar — modelin hesaba açık olduğunu veya yaş onayının yapıldığını değil.
+- Çeviri kalitesi modele bağlıdır; uzantı modelin Türkçesini ayrıca düzenlemez.
+- Ücretsiz anahtarlar hız sınırına takılır; rotasyon çalışmaya devam eder ama büyük bir bölüm daha uzun sürer.
+
+## Lisans
+
+MIT — bkz. [LICENSE](./LICENSE).
