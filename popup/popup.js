@@ -69,7 +69,7 @@ $('model').onchange = () => save({ [MLProviders.providerModelKey(saved.translati
 $('enabled-toggle').onchange = () => save({ enabled: $('enabled-toggle').checked }); $('contributor-consent').onchange = () => save({ contributorConsent: $('contributor-consent').checked });
 for (const id of ['settings', 'add-key']) $(id).onclick = () => MLUI.openSettings(saved?.translationProvider || 'gemini').catch(error => notice(error.message));
 $('btn-full-chapter').onclick = () => start('START_PAGE_TRANSLATION'); $('btn-translate-page').onclick = () => start('START_SELECTION_MODE'); $('btn-quick-translate').onclick = () => start(quick ? 'STOP_QUICK_TRANSLATE_MODE' : 'START_QUICK_TRANSLATE_MODE');
-chrome.storage.onChanged.addListener(() => { if (!saving) { refresh().catch(error => notice(error.message)); stats().catch(() => {}); } });
+chrome.storage.onChanged.addListener((changes, area) => { if (!saving) { refresh().catch(error => notice(error.message)); stats().catch(() => {}); } if (area === 'sync' && changes && changes[MLI18N.KEY]) { MLI18N.init().then(() => fillLanguageSelect($('ui-language'), MLI18N.lang)).catch(() => {}); } });
 
 /* Dil önce: statik metinler, seçici, ilk açılış adımı; sonra normal akış. */
 (async () => {

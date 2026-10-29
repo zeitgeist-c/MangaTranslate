@@ -40,7 +40,33 @@ globalThis.MLI18N = (() => {
   function set(code) {
     lang = resolve(code);
     try { chrome.storage.sync.set({ [KEY]: lang }); } catch { /* yoksay */ }
+    notify();
     return lang;
+  }
+
+  const listeners = new Set();
+  /** Dil degisince cagrilacak abone (her acik yuzey kendi UI'ini yeniler). */
+  function onChange(fn) {
+    if (typeof fn === 'function') listeners.add(fn);
+    return () => listeners.delete(fn);
+  }
+  function notify() {
+    for (const fn of [...listeners]) {
+      try { fn(lang); } catch { /* yoksay */ }
+    }
+  }
+
+  /** Storage'dan gelen dil degisimini ic dile uygula + abonelere bildir. */
+  function watchStorage() {
+    try {
+      if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) return;
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'sync' && changes && changes[KEY]) {
+          const next = resolve(changes[KEY].newValue);
+          if (next !== lang) { lang = next; notify(); }
+        }
+      });
+    } catch { /* yoksay */ }
   }
 
   function t(key, vars) {
@@ -69,7 +95,7 @@ globalThis.MLI18N = (() => {
   }
 
   const STRINGS = { en: {}, tr: {}, de: {}, es: {}, fr: {}, it: {}, 'pt-BR': {}, ru: {}, pl: {}, nl: {}, 'zh-CN': {}, ja: {}, ko: {} };
-  return { LANGUAGES, CODES, KEY, get, set, t, applyStatic, init, STRINGS,
+  return { LANGUAGES, CODES, KEY, get, set, t, applyStatic, init, onChange, watchStorage, STRINGS,
     /** Testler için senkron dil sabitleme (storage'suz vm ortamları). */
     __testLang(code) { if (CODES.has(code)) lang = code; return lang; },
     get lang() { return lang; } };
