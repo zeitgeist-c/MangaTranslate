@@ -131,6 +131,8 @@ It also states the data flow plainly:
 
 ## Install
 
+Release package: `MangaLensTR-3.9.5.zip`.
+
 The extension is loaded unpacked from source:
 
 1. Open `brave://extensions` (or `chrome://extensions`).

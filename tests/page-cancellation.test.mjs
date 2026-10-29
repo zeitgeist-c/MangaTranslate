@@ -12,6 +12,8 @@ test('background cancellation belongs to its tab and forwards correlated progres
       sendMessage: async message => { sent.push(message); if (message.command === 'prepare') return new Promise(resolve => { complete = resolve; }); return { ok: true }; }
     }, tabs: { sendMessage: async (id, message) => progress.push({ id, message }) } }
   });
+  for (const f of ['i18n.js','i18n-strings.js','i18n-strings-content.js']) vm.runInContext(await readFile(new URL('../src/'+f, import.meta.url), 'utf8'), context);
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext(await readFile(new URL('../src/page/queue.js', import.meta.url), 'utf8'), context);
   vm.runInContext(await readFile(new URL('../src/page-background.js', import.meta.url), 'utf8'), context);
   const invoke = (message, tab = 1) => new Promise(resolve => listener(message, { id: 'extension', tab: { id: tab } }, resolve));

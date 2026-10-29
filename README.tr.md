@@ -131,6 +131,8 @@ Veri akışını da açıkça yazar:
 
 ## Kurulum
 
+Sürüm paketi: `MangaLensTR-3.9.5.zip`.
+
 Uzantı kaynaktan paketsiz yüklenir:
 
 1. `brave://extensions` (veya `chrome://extensions`) adresini aç.

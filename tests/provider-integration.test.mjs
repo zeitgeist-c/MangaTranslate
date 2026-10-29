@@ -16,10 +16,11 @@ function fixture() {
   });
   return { context, calls };
 }
-const scripts = await Promise.all(['providers.js', 'page/queue.js', 'page-background.js'].map(file => readFile(new URL(`../src/${file}`, import.meta.url), 'utf8')));
+const scripts = await Promise.all(['i18n.js', 'i18n-strings.js', 'i18n-strings-content.js', 'providers.js', 'page/queue.js', 'page-background.js'].map(file => readFile(new URL(`../src/${file}`, import.meta.url), 'utf8')));
 
 test('age confirmation refusal has a Turkish actionable job-blocking error, without model fallback', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   context.fetch = async (url, options) => { calls.push({ url, options }); return { ok: false, status: 403,
     json: async () => ({ error: { message: 'This model requires you to complete the following before use: 18+ age confirmation. Confirm at https://openrouter.ai/settings/preferences.' } }) }; };
   await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'meta/muse-spark-1.3-contributor' }, '', []), error =>
@@ -29,6 +30,7 @@ test('age confirmation refusal has a Turkish actionable job-blocking error, with
 
 test('account authentication and credit errors block the job; content moderation does not', async () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   for (const [status, message, expected] of [[401, 'Invalid key', 'PROVIDER_AUTH_REQUIRED'], [402, 'Insufficient credits', 'PROVIDER_CREDIT_REQUIRED'], [403, 'Input flagged by moderation', undefined]]) {
     context.fetch = async () => ({ ok: false, status, json: async () => ({ error: { message } }) });
     await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'openai/gpt-6-luna' }, '', []), error => error.code === expected && Boolean(error.stopJob) === Boolean(expected));
@@ -37,6 +39,7 @@ test('account authentication and credit errors block the job; content moderation
 
 test('legacy cached age refusal is actionable without a call; explicit retry can recover', async () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   let value = { status: 'uncertain', error: 'openrouter/test: HTTP 403 — 18+ age confirmation. Confirm at https://openrouter.ai/settings/preferences.' }, attempts = 0;
   context.mlOffscreen = async (command, payload) => command === 'read' ? value : (value = payload.value);
   const imageId = 'b'.repeat(64), regionId = `${imageId}:r1`;
@@ -49,6 +52,7 @@ test('legacy cached age refusal is actionable without a call; explicit retry can
 
 test('a saved 3.5.1 job with age refusal restores as blocked while keeping page results', () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   const job = { config: { provider: 'openrouter', model: 'meta/muse-spark-1.3-contributor' }, state: 'finished', pages: [
     { state: 'review', translated: 2 }, { state: 'error', error: 'HTTP 403 — 18+ age confirmation.' }, { state: 'queued' }
   ] };
@@ -58,6 +62,7 @@ test('a saved 3.5.1 job with age refusal restores as blocked while keeping page 
 });
 test('all router adapters preserve exact chosen model and keep Google credentials separate', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   for (const [model] of context.MLProviders.catalog.openrouter) {
     const result = await context.mlProviderCall({ provider: 'openrouter', model }, 'Translate', [{ regionId: 'r', dataUrl: 'data:image/png;base64,AAAA' }]);
     assert.equal(result, 'OK');
@@ -69,6 +74,7 @@ test('all router adapters preserve exact chosen model and keep Google credential
 });
 test('gemini single key is paced to 12 sends per minute window', async () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext('mlGeminiGapMs = 5', context);
   const gemini = { provider: 'gemini', model: 'gemini-3.5-flash-lite' };
   for (let i = 0; i < 12; i++) assert.equal(await context.mlProviderCall(gemini, 'Hi', []), 'OK');
@@ -77,6 +83,7 @@ test('gemini single key is paced to 12 sends per minute window', async () => {
 });
 test('gemini keys rotate every request with 5 in flight each', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext('mlGeminiGapMs = 5', context);
   context.MLKeys = { active: async () => 'AAA', all: async () => [{ id: 'k1', key: 'AAA' }, { id: 'k2', key: 'BBB' }] };
   const gemini = { provider: 'gemini', model: 'gemini-3.5-flash-lite' };
@@ -88,6 +95,7 @@ test('gemini keys rotate every request with 5 in flight each', async () => {
 });
 test('openrouter rotates keys every request and wraps', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
   const config = { provider: 'openrouter', model: 'openai/gpt-6-luna' };
   for (let i = 0; i < 5; i++) await context.mlProviderCall(config, 'Hi', [], undefined, 'jobA');
@@ -95,6 +103,7 @@ test('openrouter rotates keys every request and wraps', async () => {
 });
 test('a 429 key is skipped within the same job', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
   context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
   context.fetch = async (url, options) => {
@@ -111,6 +120,7 @@ test('a 429 key is skipped within the same job', async () => {
 });
 test('each page job restarts key rotation from the active key', async () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
   assert.equal((await context.mlPickOpenrouterKey('jobC')).key, 'A');
   assert.equal((await context.mlPickOpenrouterKey('jobC')).key, 'B');
@@ -119,18 +129,21 @@ test('each page job restarts key rotation from the active key', async () => {
 });
 test('gemini budget frees slots older than one minute', async () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext('mlGeminiGapMs = 5', context);
   vm.runInContext(`mlGeminiBudget.set('google-private-key', Array(12).fill(${Date.now() - 61000}))`, context);
   assert.equal(await context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []), 'OK');
 });
 test('explicit key override skips gemini budget accounting', async () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext('mlGeminiGapMs = 5', context);
   const gemini = { provider: 'gemini', model: 'gemini-3.5-flash-lite' };
   for (let i = 0; i < 13; i++) assert.equal(await context.mlProviderCall(gemini, 'Hi', [], 'override-key'), 'OK');
 });
 test('all direct Google models use Google credentials; reasoning text never reaches translation', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   for (const [model] of context.MLProviders.catalog.gemini) {
     assert.equal(await context.mlProviderCall({ provider: 'gemini', model }, 'Translate', [{ regionId: 'r', dataUrl: 'data:image/png;base64,AAAA' }]), 'OK');
     assert.ok(calls.at(-1).url.includes(model)); assert.equal(calls.at(-1).headers['x-goog-api-key'], 'google-private-key');
@@ -140,6 +153,7 @@ test('all direct Google models use Google credentials; reasoning text never reac
 
 test('Luna disables default reasoning; mandatory Muse reasoning is untouched', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   for (const [model] of context.MLProviders.catalog.openrouter) {
     await context.mlProviderCall({ provider: 'openrouter', model }, 'Return JSON', []);
     const body = calls.at(-1).body;
@@ -154,6 +168,7 @@ test('Luna disables default reasoning; mandatory Muse reasoning is untouched', a
 
 test('upstream thinking/JSON rejection is actionable and never retried or routed to another model', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   context.fetch = async (url, options) => { calls.push({ url, options }); return { ok: false, status: 400,
     json: async () => ({ error: { message: 'Json mode response is not supported when enable_thinking is true' } }) }; };
   await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'openai/gpt-6-luna' }, '', []), e => e.code === 'MODEL_PARAMETER_REJECTED' && e.stopJob);
@@ -162,12 +177,14 @@ test('upstream thinking/JSON rejection is actionable and never retried or routed
 
 test('no matching JSON endpoint is distinguished from data policy and age restrictions', () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   const config = { provider: 'openrouter', model: 'openai/gpt-6-luna' };
   assert.equal(context.mlAccessError(config, 404, 'No endpoints found that support all requested parameters').code, 'MODEL_ENDPOINT_UNAVAILABLE');
   assert.equal(context.mlAccessError(config, 404, 'No endpoints matching your data policy').code, 'PROVIDER_DATA_POLICY_BLOCK');
 });
 test('ollama image refusal is actionable and stops the job', () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   const error = context.mlAccessError({ provider: 'ollama', model: 'gemma4:31b' }, 400, 'this model does not support image input');
   assert.equal(error.code, 'MODEL_VISION_UNSUPPORTED'); assert.equal(error.stopJob, true);
   assert.ok(error.message.includes('başka model'));
@@ -175,6 +192,7 @@ test('ollama image refusal is actionable and stops the job', () => {
 
 test('streamed upstream error preserves its explanation, redacts key and stops without a retry', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   context.fetch = async (url, options) => { calls.push({ url, options }); return new Response(
     'data: '+JSON.stringify({ error: { code: 400, message: 'response_format thinking rejected router-private-key' } })+'\n\n',
     { headers: { 'Content-Type': 'text/event-stream' } }); };
@@ -185,6 +203,7 @@ test('streamed upstream error preserves its explanation, redacts key and stops w
 
 test('reasoning-only output hitting the token limit is not accepted as translation', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   context.fetch = async (url, options) => { calls.push({ url, options }); return { ok: true,
     json: async () => ({ choices: [{ message: { content: '', reasoning: '{"regions":[]}' }, finish_reason: 'length' }] }) }; };
   await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'openai/gpt-6-luna' }, '', []), e => e.code === 'PROVIDER_OUTPUT_TRUNCATED');
@@ -193,6 +212,7 @@ test('reasoning-only output hitting the token limit is not accepted as translati
 
 test('stream messages redact the complete credential before applying length limits', async () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}', context);
   let calls = 0;
   context.fetch = async () => { calls++; return new Response('data: '+JSON.stringify({error:{code:502,message:'x'.repeat(470)+'router-private-key'+'y'.repeat(1200)}})+'\n\n',
@@ -210,6 +230,7 @@ test('overload halves model lane concurrency like quota failures',async()=>{
 });
 test('transient provider overload is retried then served',async()=>{
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
   let calls = 0;
   context.fetch = async () => (++calls < 3)
@@ -220,6 +241,7 @@ test('transient provider overload is retried then served',async()=>{
 });
 test('persistent overload chains through all gemini models then stops with a countdown',async()=>{
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
   let calls = 0;
   context.fetch = async () => { calls++; return { ok: false, status: 503, json: async () => ({ error: { message: 'high demand' } }) }; };
@@ -229,6 +251,7 @@ test('persistent overload chains through all gemini models then stops with a cou
 });
 test('unavailable statuses map distinctly; refusals never retry',async()=>{
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
   let calls = 0;
   context.fetch = async () => { calls++; return { ok: false, status: 500, json: async () => ({ error: { message: 'boom' } }) }; };
@@ -240,6 +263,7 @@ test('unavailable statuses map distinctly; refusals never retry',async()=>{
 });
 test('opt-in chains other retryable gemini failures; without it the job stops',async()=>{
   const mk = () => { const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
     vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context); return { context, calls }; };
   const failing = (url, options, calls) => { calls.push({ url, options });
     if (url.includes('gemini-3.5-flash-lite')) return { ok: false, status: 500, json: async () => ({ error: { message: 'backend error' } }) };
@@ -256,6 +280,7 @@ test('opt-in chains other retryable gemini failures; without it the job stops',a
 });
 test('full keys are skipped and freed slots are preferred',async()=>{
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
   const held = [];
   for (let i = 0; i < 10; i++) held.push(await context.mlPickOpenrouterKey('jobW'));
@@ -265,6 +290,7 @@ test('full keys are skipped and freed slots are preferred',async()=>{
 });
 test('expired key cooldowns are pruned while active ones survive',async()=>{
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
   vm.runInContext(`{ for (let i = 0; i < 600; i++) mlBatchCooldown.set('openrouter:jobP:stale' + i, 1);
     mlBatchCooldown.set('openrouter:jobP:b', Date.now() + 60000); }`, context);
@@ -275,6 +301,7 @@ test('expired key cooldowns are pruned while active ones survive',async()=>{
 });
 test('503 chains to the next gemini model automatically within one call',async()=>{
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
   context.fetch = async (url, options) => {
     calls.push({ url, options });
@@ -287,6 +314,7 @@ test('503 chains to the next gemini model automatically within one call',async()
 });
 test('gemma requests disable thinking and omit the JSON mime type',async()=>{
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext('mlGeminiGapMs = 5', context);
   assert.equal(await context.mlProviderCall({ provider: 'gemini', model: 'gemma-4-26b-a4b-it' }, 'Hi', [], undefined, 'gemma'), 'OK');
   const body = calls.at(-1).body;
@@ -296,6 +324,7 @@ test('gemma requests disable thinking and omit the JSON mime type',async()=>{
 });
 test('ollama sends native chat bodies and reads message content',async()=>{
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   context.MLKeys = { active: async () => 'O', all: async () => [{ id: 'o1', key: 'O' }] };
   context.fetch = async (url, options) => {
     calls.push({ url, options, body: JSON.parse(options.body) });
@@ -312,6 +341,7 @@ test('ollama sends native chat bodies and reads message content',async()=>{
 });
 test('ollama keys rotate and a 429 key is skipped',async()=>{
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
   context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
   const config = { provider: 'ollama', model: 'gemma4:31b' };
@@ -328,6 +358,7 @@ test('ollama keys rotate and a 429 key is skipped',async()=>{
 });
 test('ollama allows one in-flight request per key and waits for the slot',async()=>{
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   context.MLKeys = { active: async () => 'O', all: async () => [{ id: 'o1', key: 'O' }] };
   const first = await context.mlPickOllamaKey('jobS');
   const second = context.mlPickOllamaKey('jobS', { maxWaitMs: 5000 });
@@ -336,6 +367,7 @@ test('ollama allows one in-flight request per key and waits for the slot',async(
 });
 test('ollama overflow still goes out after the wait cap',async()=>{
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   context.MLKeys = { active: async () => 'O', all: async () => [{ id: 'o1', key: 'O' }] };
   await context.mlPickOllamaKey('jobT');
   const started = Date.now();
@@ -344,6 +376,7 @@ test('ollama overflow still goes out after the wait cap',async()=>{
 });
 test('string provider errors surface their real message',async()=>{
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   context.MLKeys = { active: async () => 'O', all: async () => [{ id: 'o1', key: 'O' }] };
   context.fetch = async (url, options) => { calls.push({ url, options });
     return { ok: false, status: 400, json: async () => ({ error: 'model requires vision input' }) }; };
@@ -356,6 +389,7 @@ test('string provider errors surface their real message',async()=>{
 });
 test('gemini overload halves parallel lanes until the cut expires',async()=>{
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
   context.MLKeys = { active: async () => 'A', all: async () => ['A', 'B', 'C', 'D'].map((key, i) => ({ id: 'k' + i, key })) };
   let calls = 0;
@@ -367,6 +401,7 @@ test('gemini overload halves parallel lanes until the cut expires',async()=>{
 });
 test('provider error never invokes another model and redacts echoed credentials', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   context.fetch = async (url, options) => { calls.push({ url, options }); return { ok: false, status: 401, json: async () => ({ error: { message: 'router-private-key invalid' } }) }; };
   await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'openai/gpt-6-luna' }, '', []), error => error.message.includes('401') && !error.message.includes('router-private-key'));
   assert.equal(calls.length, 1);
@@ -385,6 +420,7 @@ test('strict translation jobs never automatically retry potentially billed failu
 });
 test('same-key gemini sends serialize while different keys overlap', async () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   const order = [];
   const same1 = context.mlWithGeminiKeySlot('k1', 40, async () => { order.push('a-start'); await new Promise(r => setTimeout(r, 10)); order.push('a-end'); return 'a'; });
   const same2 = context.mlWithGeminiKeySlot('k1', 40, async () => { order.push('b'); return 'b'; });
@@ -422,6 +458,7 @@ test('gemini queue stays serial by default and overlaps across lanes', async () 
 
 test('resuming while a provider reply is pending reuses the same operation and caches its result', async () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   const cache = new Map(); let release, attempts = 0;
   context.mlOffscreen = async (command, payload) => command === 'read' ? cache.get(payload.key) : cache.set(payload.key, payload.value);
   context.mlProviderCall = async () => { attempts++; return new Promise(resolve => { release = resolve; }); };

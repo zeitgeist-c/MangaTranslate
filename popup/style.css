@@ -154,6 +154,11 @@ select,input[type=text],input[type=password],textarea {
   min-width:0}
 select {
   text-overflow:ellipsis}
+select.lang-select {
+  width:auto;
+  max-width:9.5rem;
+  padding:5px 6px;
+  font-size:12px}
 textarea {
   min-height:90px;
   resize:vertical}
