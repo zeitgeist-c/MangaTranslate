@@ -1,6 +1,6 @@
 # MangaLens TR — Turkish translation for manga pages
 
-> Türkçe: [README.tr.md](./README.tr.md)
+> Turkish: [README.tr.md](./README.tr.md)
 
 **Read manga in Turkish. Select a region, or translate the whole chapter.**
 
@@ -59,14 +59,14 @@ The toolbar popup, 360 px wide.
 
 **Provider tabs** — `Gemini`, `OpenRouter`, `Ollama`. Each tab keeps its own model and key list; switching provider does not lose the others.
 
-**Translation model** — the model list for the selected provider, with the active choice highlighted. Under it, a key summary shows how many keys are registered and whether the active one is usable (`2 anahtar kayıtlı`).
+**Translation model** — the model list for the selected provider, with the active choice highlighted. Under it, a key summary shows how many keys are registered and whether the active one is usable (`2 keys saved`).
 
 **Actions**
-- `Bölümün tamamını çevir` — the whole-chapter path: scan the page, translate every block, place the text.
-- `Alan Seç` — drag a box on the page and translate only that.
-- `Oto Çevir` — automatic detection and translation of the page's text blocks.
+- `Translate full chapter` — the whole-chapter path: scan the page, translate every block, place the text.
+- `Select area` — drag a box on the page and translate only that.
+- `Auto Translate` — automatic detection and translation of the page's text blocks.
 
-The note under the buttons is deliberate: *"Tam bölüm önizleme · Belirsiz alanlar kontrol gerektirir."* Whole-chapter is a preview feature — text that could not be identified with confidence is left for you to check instead of being painted over.
+The note under the buttons is deliberate: *"Full-chapter preview · Uncertain areas need review."* Whole-chapter is a preview feature — text that could not be identified with confidence is left for you to check instead of being painted over.
 
 **Usage counters** — minute, today, total. They count requests actually sent; cache hits and skipped blocks do not inflate them.
 
@@ -84,7 +84,7 @@ Ollama works the same way against a local endpoint — no cloud key, no request 
 
 ![Settings · API keys](./docs/screenshots/03-ayarlar-anahtarlar.png)
 
-Three sections in the left rail: **API Anahtarları**, **Çeviri Tercihleri**, **Hakkında**.
+Three sections in the left rail: **API Keys**, **Translation Preferences**, **About**.
 
 Under API keys, one tab per provider, each with its own key ring:
 
@@ -92,16 +92,16 @@ Under API keys, one tab per provider, each with its own key ring:
 - The first key added becomes active automatically; you choose which of the rest is active.
 - Keys are stored in this browser only.
 
-`Kontrol et` checks the connection without producing a translation. The note under it is honest about what that means: a successful check does not prove the model is enabled for the account or that any age verification is complete.
+`Check` verifies the connection without producing a translation. The note under it is honest about what that means: a successful check does not prove the model is enabled for the account or that any age verification is complete.
 
 ### 4. Settings — Translation preferences
 
 ![Settings · Translation preferences](./docs/screenshots/04-ceviri-tercihleri.png)
 
 **Reading and scanning**
-- **Content type** — `Otomatik / bilinmiyor`, `Manga`, `Manhwa`, `Manhua`. It tunes how bubbles are expected to look.
-- **Local scan mode** — `Hızlı yazı taraması (önerilen)`, `Alternatif balon taraması`, `Ayrıntılı balon taraması (yavaş)`. Fast is the default; detailed trades time for recall.
-- **Translation font size** — `Normal` or `Büyük`.
+- **Content type** — `Auto / unknown`, `Manga`, `Manhwa`, `Manhua`. It tunes how bubbles are expected to look.
+- **Local scan mode** — `Fast text detection (recommended)`, `Alternative bubble detection`, `Detailed bubble detection (slow)`. Fast is the default; detailed trades time for recall.
+- **Translation font size** — `Normal` or `Large`.
 - **Series name** — optional context that helps the model keep character and series names consistent.
 
 **Language and terms**
@@ -109,9 +109,9 @@ Under API keys, one tab per provider, each with its own key ring:
 - **Name and term dictionary** — source term equals Turkish equivalent, applied across pages.
 
 **Provider behaviour**
-- *"Gemini 429/503'te her zaman sonraki modele otomatik geçer."* On these two codes the chain always moves on. When enabled, other transient errors (500/502/504) chain too; when disabled, the job stops on them instead of silently switching model.
+- *"On Gemini 429/503, always move to the next model automatically."* On these two codes the chain always moves on. When enabled, other transient errors (500/502/504) chain too; when disabled, the job stops on them instead of silently switching model.
 
-`Kaydet` writes the changes; `Değişiklik yok` shows when nothing is pending.
+`Save` writes the changes; `No changes` shows when nothing is pending.
 
 ### 5. Settings — About
 
@@ -125,7 +125,7 @@ It also states the data flow plainly:
 - only the crops you send go to your chosen provider,
 - keys and job records stay local, preferences live in browser sync storage, the translation cache lives in IndexedDB.
 
-`Model kataloğunu kontrol et` refreshes the model list from the provider.
+`Check model catalog` refreshes the model list from the provider.
 
 ---
 
@@ -184,7 +184,7 @@ There is no build step: the extension is plain HTML/CSS/JS loaded unpacked. To w
 
 - **Whole-chapter is a preview.** Finding every text block and the ~98% quality target are not yet verified against human labels; uncertain regions are left for you to check.
 - Detection is local and fast, but it can miss stylised lettering, text over busy art, or vertical text.
-- A successful `Kontrol et` proves the key is accepted — not that the model is available to the account or that age verification is done.
+- A successful `Check` proves the key is accepted — not that the model is available to the account or that age verification is done.
 - Translation quality depends on the model; the extension does not post-edit the model's Turkish.
 - Free-tier keys hit rate limits; the rotation keeps working but a large chapter takes longer.
 
