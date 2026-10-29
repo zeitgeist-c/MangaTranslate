@@ -1,12 +1,13 @@
 'use strict';
 globalThis.MLKeys = (() => {
+  const T = (key, vars) => (globalThis.MLI18N ? globalThis.MLI18N.t(key, vars) : key);
   let serial = Promise.resolve();
   const names = { gemini: 'Google', openrouter: 'OpenRouter', ollama: 'Ollama' };
   const fields = provider => {
     if (provider === 'gemini') return ['googleApiKeys', 'activeGoogleApiKeyId'];
     if (provider === 'openrouter') return ['openrouterApiKeys', 'activeOpenrouterApiKeyId'];
     if (provider === 'ollama') return ['ollamaApiKeys', 'activeOllamaApiKeyId'];
-    throw new Error('Bilinmeyen sağlayıcı.');
+    throw new Error(T('err_unknown_provider'));
   };
   const queue = task => { const next = serial.then(task); serial = next.catch(() => {}); return next; };
   async function persist(provider, list, activeId) {
@@ -26,8 +27,8 @@ globalThis.MLKeys = (() => {
     return { list: data[listField], activeId: data[activeField] || null };
   }
   const mask = key => key?.length >= 12 ? key.slice(0, 6) + '…' + key.slice(-4) : '••••';
-  const safe = (list, activeId) => list.map(k => ({ id: k.id, label: k.label || 'Adsız anahtar', masked: mask(k.key), active: k.id === activeId,
-    status: k.connectionStatus || 'untested', message: k.connectionMessage || 'Bağlantı kontrol edilmedi.', testedAt: k.connectionTestedAt || null }));
+  const safe = (list, activeId) => list.map(k => ({ id: k.id, label: k.label || T('key_unnamed'), masked: mask(k.key), active: k.id === activeId,
+    status: k.connectionStatus || 'untested', message: k.connectionMessage || T('status_untested'), testedAt: k.connectionTestedAt || null }));
   async function check(provider, entry) {
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
     try {
@@ -38,16 +39,16 @@ globalThis.MLKeys = (() => {
       const response = await fetch(endpoint, { method: 'GET', signal: controller.signal, headers }), data = await response.json();
       const valid = provider === 'openrouter' ? data.data && typeof data.data === 'object' : Array.isArray(data.models);
       if (response.ok && !data.error && valid)
-        return { status: 'success', message: 'Bağlantı doğrulandı. Seçili model erişimi ve yaş onayı ayrıca değerlendirilir.' };
-      return { status: response.status === 401 ? 'invalid' : response.status === 429 ? 'rate_limited' : 'error', message: `Bağlantı doğrulanamadı (HTTP ${response.status}). Anahtarınızı ve sağlayıcı hesabınızı kontrol edin.` };
-    } catch { return { status: 'error', message: 'Bağlantı kontrolü tamamlanamadı. Ağ bağlantısını kontrol edip tekrar deneyin.' }; }
+        return { status: 'success', message: T('check_ok_detail') };
+      return { status: response.status === 401 ? 'invalid' : response.status === 429 ? 'rate_limited' : 'error', message: T('check_http', { status: response.status }) };
+    } catch { return { status: 'error', message: T('check_failed') }; }
     finally { clearTimeout(timer); }
   }
   async function action(m) {
     const provider = m.provider; fields(provider);
     if (m.type === 'ML_KEYS_CHECK') {
       const entry = await queue(async () => (await load(provider)).list.find(k => k.id === m.id));
-      if (!entry) throw new Error('Anahtar bulunamadı.'); const result = await check(provider, entry);
+      if (!entry) throw new Error(T('key_not_found')); const result = await check(provider, entry);
       return queue(async () => { const { list, activeId } = await load(provider), current = list.find(k => k.id === m.id);
         if (current) { Object.assign(current, { connectionStatus: result.status, connectionMessage: result.message, connectionTestedAt: Date.now() }); await persist(provider, list, activeId); }
         return safe(list, activeId); });
@@ -59,15 +60,15 @@ globalThis.MLKeys = (() => {
         case 'ML_KEYS_LIST': return safe(list, activeId);
         case 'ML_KEYS_ADD': {
           const key = String(m.key || '').trim();
-          if (key.length < 20 || key.length > 512 || /\s/.test(key)) throw new Error('Geçerli bir API anahtarı girin; anahtar boşluk içermemeli.');
-          if (list.some(k => k.key === key)) throw new Error('Bu API anahtarı zaten kayıtlı.');
-          const item = { id: crypto.randomUUID(), key, label: label() || `${names[provider]} API ${list.length + 1}`, createdAt: Date.now() };
+          if (key.length < 20 || key.length > 512 || /\s/.test(key)) throw new Error(T('key_invalid_format'));
+          if (list.some(k => k.key === key)) throw new Error(T('key_duplicate'));
+          const item = { id: crypto.randomUUID(), key, label: label() || T('key_default_label', { provider: names[provider], n: list.length + 1 }), createdAt: Date.now() };
           list = [...list, item]; if (!list.some(k => k.id === activeId)) activeId = item.id; break;
         }
-        case 'ML_KEYS_RENAME': if (!entry) throw new Error('Anahtar bulunamadı.'); entry.label = label() || 'Adsız anahtar'; break;
-        case 'ML_KEYS_ACTIVATE': if (!entry) throw new Error('Anahtar bulunamadı.'); activeId = entry.id; break;
+        case 'ML_KEYS_RENAME': if (!entry) throw new Error(T('key_not_found')); entry.label = label() || T('key_unnamed'); break;
+        case 'ML_KEYS_ACTIVATE': if (!entry) throw new Error(T('key_not_found')); activeId = entry.id; break;
         case 'ML_KEYS_DELETE': if (!entry) return safe(list, activeId); list = list.filter(k => k.id !== m.id); if (activeId === m.id) activeId = list[0]?.id || null; break;
-        default: throw new Error('Bilinmeyen anahtar işlemi.');
+        default: throw new Error(T('key_unknown_op'));
       }
       await persist(provider, list, activeId); return safe(list, activeId);
     });
@@ -78,7 +79,7 @@ globalThis.MLKeys = (() => {
   chrome.runtime.onMessage.addListener((m, sender, respond) => {
     if (!m?.type?.startsWith('ML_KEYS_')) return;
     const allowed = ['popup/popup.html', 'options/settings.html'].map(path => chrome.runtime.getURL(path));
-    if (sender.id !== chrome.runtime.id || !allowed.includes(sender.url?.split(/[?#]/)[0])) { respond({ ok: false, error: 'Anahtar yönetimi yalnız uzantı ayarlarından kullanılabilir.' }); return; }
+    if (sender.id !== chrome.runtime.id || !allowed.includes(sender.url?.split(/[?#]/)[0])) { respond({ ok: false, error: T('keys_only_settings') }); return; }
     action(m).then(value => respond({ ok: true, value })).catch(error => respond({ ok: false, error: error.message })); return true;
   });
   return { active, all, action };

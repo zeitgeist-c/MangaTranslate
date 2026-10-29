@@ -2,6 +2,8 @@
   'use strict';
   if (globalThis.__mlPageController) return;
   globalThis.__mlPageController = true;
+  const T = (key, vars) => (globalThis.MLI18N ? globalThis.MLI18N.t(key, vars) : key);
+  globalThis.MLI18N && globalThis.MLI18N.get().catch(() => {});
   let job, running = false, paused = false, epoch = 0, panel, statusNode, original = false, boxes = false;
   const layers = new Map();
   let controller, resumePending, actionLink, pauseButton, resumeButton, retryButton, counterNode, panelCollapsed = false;
@@ -15,7 +17,7 @@
       for (const entry of eventLog.slice(0, 8)) {
         const line = document.createElement('div');
         const time = document.createElement('time');
-        time.textContent = new Date(entry.at).toLocaleTimeString('tr-TR', { hour12: false }) + ' ';
+        time.textContent = new Date(entry.at).toLocaleTimeString(globalThis.MLI18N.lang, { hour12: false }) + ' ';
         line.append(time, document.createTextNode(entry.text));
         logNode.append(line);
       }
@@ -34,12 +36,12 @@
       clearTimeout(timer); signal?.removeEventListener('abort', abort); pendingRequests.delete(requestId);
       if (error) reject(error); else resolve(value);
     };
-    const abort = () => { cancelLocal(); finish(new DOMException('İş duraklatıldı', 'AbortError')); };
+    const abort = () => { cancelLocal(); finish(new DOMException(T('panel_paused_abort'), 'AbortError')); };
     const limit = type === 'ML_PREPARE' ? 180000 : type === 'ML_TRANSLATE' ? 300000 : type === 'ML_RENDER' ? 60000 : 15000;
     const timer = setTimeout(() => {
       cancelLocal(); finish(new Error(type === 'ML_TRANSLATE'
-        ? 'Çeviri yanıtı zamanında gelmedi. Otomatik ücretli tekrar yapılmadı; geç yanıt önbellekte korunabilir.'
-        : 'İşlem zamanında yanıt vermedi. Hatalıları yeniden dene düğmesiyle tekrar deneyebilirsiniz.'));
+        ? T('panel_translate_timeout')
+        : T('panel_op_timeout')));
     }, limit);
     if (signal?.aborted) { abort(); return; }
     signal?.addEventListener('abort', abort, { once: true }); pendingRequests.add(requestId);
@@ -48,7 +50,7 @@
       return chrome.runtime.sendMessage({ type, ...data, requestId });
     }).then(response => {
       if (settled) return;
-      if (!response?.ok) finish(Object.assign(new Error(response?.error || 'Uzantı bağlantısı kesildi; devam düğmesiyle yeniden deneyin.'),
+      if (!response?.ok) finish(Object.assign(new Error(response?.error || T('panel_conn_lost')),
         { code: response?.code, stopJob: response?.stopJob === true, actionUrl: response?.actionUrl, timing: response?.timing, notSent: response?.notSent, retryAt:response?.retryAt, cooldownScope:response?.cooldownScope }));
       else finish(null, response.value);
     }, error => finish(error));
@@ -61,9 +63,9 @@
     resumeButton.hidden = running && !paused && !blocked || finished;
     retryButton.hidden = !blocked && !(job?.pages || []).some(p => p.state === 'error');
     retryButton.disabled = Number(job?.blocked?.retryAt || 0) > Date.now();
-    const phase = job?.state === 'paused' ? 'Duraklatıldı' : blocked ? 'İşlem gerekli' : finished ? 'Bitti' :
-      ({ detecting: 'Tespit', translating: 'Çeviri', rendering: 'Yerleşim' })[(job?.pages || []).find(p => ['detecting', 'translating', 'rendering'].includes(p.state))?.state] || 'Çalışıyor';
-    counterNode.textContent = job ? `${phase} · ${job.pages.filter(p => ['done', 'review', 'error'].includes(p.state)).length}/${job.pages.length} · ${job.providerCalls || 0} istek` : 'Hazırlanıyor';
+    const phase = job?.state === 'paused' ? T('panel_phase_paused') : blocked ? T('panel_phase_action') : finished ? T('panel_phase_done') :
+      ({ detecting: T('panel_phase_detecting'), translating: T('panel_phase_translating'), rendering: T('panel_phase_rendering') })[((job?.pages || []).find(p => ['detecting', 'translating', 'rendering'].includes(p.state)) || {}).state] || T('panel_phase_running');
+    counterNode.textContent = job ? `${phase} · ${job.pages.filter(p => ['done', 'review', 'error'].includes(p.state)).length}/${job.pages.length} · ${T('panel_calls', { n: job.providerCalls || 0 })}` : T('panel_preparing');
     renderStages();
   }
   function renderStages() {
@@ -83,17 +85,17 @@
   }
   const status = text => { if (blockedTimer) { globalThis.clearInterval?.(blockedTimer); blockedTimer=null; } ensurePanel(); statusNode.textContent = text; actionLink.hidden = true; controls(); };
   const blockedStatus = error => {
-    status('Tarama durduruldu; kalan görseller işlenmedi.\n' + error.message);
+    status(T('panel_scan_stopped') + '\n' + error.message);
     const allowed = ['https://openrouter.ai/settings/preferences', 'https://openrouter.ai/settings/privacy'];
     actionLink.hidden = !allowed.includes(error.actionUrl); if (!actionLink.hidden) actionLink.href = error.actionUrl;
     if (error.retryAt > Date.now()) {
       const base=statusNode.textContent;
       const auto = ['GEMINI_BUDGET_EXHAUSTED', 'GEMINI_MODEL_FALLBACK', 'PROVIDER_OVERLOADED', 'PROVIDER_UNAVAILABLE', 'PROVIDER_RATE_LIMITED', 'PROVIDER_COOLDOWN'].includes(error.code);
       const tick=()=>{ const seconds=Math.max(0,Math.ceil((error.retryAt-Date.now())/1000));
-        statusNode.textContent=base+'\n'+(seconds ? `Yeniden deneme için kalan süre: ${seconds} sn.` : auto ? 'Süre doldu; otomatik devam ediliyor…' : 'Bekleme doldu; otomatik istek gönderilmedi.'); controls();
+        statusNode.textContent=base+'\n'+(seconds ? T('panel_retry_in', { seconds }) : auto ? T('panel_auto_continue') : T('panel_no_auto')); controls();
         if (!seconds && blockedTimer) { globalThis.clearInterval?.(blockedTimer); blockedTimer=null; }
       }; tick(); blockedTimer=globalThis.setInterval?.(tick,1000);
-      if (auto) { const token = epoch; logEvent('Limit bekleniyor; süre bitince otomatik devam edecek.');
+      if (auto) { const token = epoch; logEvent(T('panel_wait_limit'));
         setTimeout(() => { if (token === epoch && !paused && job?.state === 'blocked') start({ resume: true, retry: true }).catch(() => {}); }, Math.min(error.retryAt - Date.now(), 300000)); }
     }
   };
@@ -105,10 +107,10 @@
     const shadow = panel.attachShadow({ mode: 'closed' }), style = document.createElement('style');
     style.textContent = ':host{all:initial}[hidden]{display:none!important}section{font:13px/1.5 system-ui,Arial;color:#eef2fa;background:linear-gradient(180deg,#1e2431,#161b25);border:1px solid #3a465e;border-radius:14px;padding:12px;box-shadow:0 8px 28px #0008}header{display:flex;align-items:center;gap:8px}header strong{font-size:14px;flex:1;letter-spacing:.2px}header span{color:#9ba8be;font-size:11px;font-variant-numeric:tabular-nums}.stages{display:flex;gap:6px;margin:10px 0 6px}.stage{flex:1;font-size:11px;color:#8d99ae;background:#202839;border:1px solid #33405a;border-radius:8px;padding:5px 4px;text-align:center;white-space:nowrap;overflow:hidden}.stage b{display:block;font-size:11px;font-variant-numeric:tabular-nums}.stage.done{color:#7fe0a8;border-color:#2f6b4c;background:#1c2f26}.stage.active{color:#fff;border-color:#6b9cff;background:#25324d;box-shadow:0 0 0 1px #6b9cff55}.bar{height:6px;border-radius:4px;background:#242d40;overflow:hidden;margin:2px 0 4px}.bar i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#6b9cff,#57d998);transition:width .3s}.meta{font-size:11px;color:#9ba8be;margin:2px 0 0;font-variant-numeric:tabular-nums}button{font:12px system-ui,Arial;margin:3px;padding:7px 10px;color:#eef2fa;background:#222836;border:1px solid #3c4b65;border-radius:8px;cursor:pointer}button:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid #6b9cff;outline-offset:2px}button:hover{background:#304366}button:disabled{opacity:.45;cursor:default}p{max-height:120px;overflow:auto;overflow-wrap:anywhere;white-space:pre-wrap;margin:10px 0;color:#c4cfe1}.log{font:11px/1.6 ui-monospace,Consolas,monospace;color:#a9b6cc;background:#141924;border:1px solid #2b3549;border-radius:8px;padding:8px;max-height:132px;overflow:auto;white-space:pre-wrap;margin:6px 0}.log time{color:#66748c}details{border-top:1px solid #303849;margin-top:8px;padding-top:8px}summary{cursor:pointer;color:#9fb9e4}';
     const section = document.createElement('section'), title = document.createElement('strong'); title.textContent = 'MangaLens';
-    const header = document.createElement('header'), fold = document.createElement('button'); fold.textContent = '−'; fold.setAttribute('aria-label', 'Paneli katla'); fold.setAttribute('aria-expanded', 'true');
-    counterNode = document.createElement('span'); counterNode.textContent = 'Hazırlanıyor'; header.append(title, counterNode, fold);
+    const header = document.createElement('header'); const fold = document.createElement('button'); fold.textContent = '−'; fold.setAttribute('aria-label', T('panel_collapse')); fold.setAttribute('aria-expanded', 'true');
+    counterNode = document.createElement('span'); counterNode.textContent = T('panel_preparing'); header.append(title, counterNode, fold);
     const stageRow = document.createElement('div'); stageRow.className = 'stages'; stageNodes = [];
-    for (const label of ['Tarama', 'Çeviri', 'Yerleşim']) {
+    for (const label of [T('panel_tab_scan'), T('panel_tab_translate'), T('panel_tab_render')]) {
       const pill = document.createElement('div'); pill.className = 'stage';
       const name = document.createElement('span'); name.textContent = label;
       const count = document.createElement('b'); count.textContent = '–';
@@ -118,25 +120,25 @@
     metaNode = document.createElement('p'); metaNode.className = 'meta';
     statusNode = document.createElement('p'); statusNode.setAttribute('role', 'status');
     section.append(header, stageRow, bar, metaNode, statusNode);
-    actionLink = document.createElement('a'); actionLink.textContent = 'OpenRouter ayarlarını aç';
+    actionLink = document.createElement('a'); actionLink.textContent = T('panel_open_router_settings');
     actionLink.href = 'https://openrouter.ai/settings/preferences'; actionLink.target = '_blank'; actionLink.rel = 'noopener noreferrer';
     actionLink.style.cssText = 'color:#b7ccff;margin:8px 0'; actionLink.hidden = true; section.append(actionLink);
     const body = document.createElement('div'); section.append(body);
     const button = (text, action, parent = body) => { const b = document.createElement('button'); b.textContent = text; b.onclick = () => Promise.resolve().then(action).catch(e => status(e.message)); parent.append(b); return b; };
-    pauseButton = button('Duraklat', pause); resumeButton = button('Devam et', () => start({ resume: true })); retryButton = button('Hatalıları yeniden dene', () => start({ resume: true, retry: true }));
-    const stream = document.createElement('details'), streamSummary = document.createElement('summary'); streamSummary.textContent = 'Canlı akış';
-    logNode = document.createElement('div'); logNode.className = 'log'; logNode.textContent = 'Henüz işlem yok.';
+    pauseButton = button(T('panel_pause'), pause); resumeButton = button(T('panel_resume'), () => start({ resume: true })); retryButton = button(T('retry_failures'), () => start({ resume: true, retry: true }));
+    const stream = document.createElement('details'), streamSummary = document.createElement('summary'); streamSummary.textContent = T('panel_live');
+    logNode = document.createElement('div'); logNode.className = 'log'; logNode.textContent = T('panel_no_events');
     stream.append(streamSummary, logNode); body.append(stream);
-    const tools = document.createElement('details'), summary = document.createElement('summary'); summary.textContent = 'Görünüm ve kontrol araçları'; tools.append(summary); body.append(tools);
-    fold.onclick = () => { body.hidden = !body.hidden; panelCollapsed = body.hidden; controls(); fold.textContent = body.hidden ? '+' : '−'; fold.setAttribute('aria-expanded', String(!body.hidden)); fold.setAttribute('aria-label', body.hidden ? 'Paneli genişlet' : 'Paneli katla'); };
-    button('Orijinal / çeviri', () => { original = !original; synchronize(); }, tools);
-    button('Kutuları göster / gizle', () => { boxes = !boxes; synchronize(); }, tools);
-    button('Kontrol listesi', () => { status((job?.pages || []).flatMap((p, index) => [
-      p.timing ? `Görsel ${index + 1} süre: tarama ${((p.timing.totalMs || 0) / 1000).toFixed(2)} sn · kart ${((p.timing.renderMs || 0) / 1000).toFixed(2)} sn (çeviri süreleri Tanılama özeti içinde grup bazında)` : '',
-      p.error ? `Görsel ${index + 1}: ${p.error}` : '',
-      ...(p.issues || []).map(issue => `Görsel ${index + 1} · y=${Math.round(issue.textBox[1])}: ${issue.reason==='invalid_translation_result' ? 'Sağlayıcı bu alanı geçerli çeviri biçiminde döndürmedi; Alan Seç ile kontrol edin.' : issue.reason}${issue.translatedText ? '\n' + issue.translatedText : ''}`)
-    ]).filter(Boolean).join('\n') || 'Kontrol gerektiren alan yok.'); }, tools);
-    button('Tanılama özeti', async () => {
+    const tools = document.createElement('details'), summary = document.createElement('summary'); summary.textContent = T('panel_tools'); tools.append(summary); body.append(tools);
+    fold.onclick = () => { body.hidden = !body.hidden; panelCollapsed = body.hidden; controls(); fold.textContent = body.hidden ? '+' : '−'; fold.setAttribute('aria-expanded', String(!body.hidden)); fold.setAttribute('aria-label', body.hidden ? T('panel_expand') : T('panel_collapse')); };
+    button(T('panel_toggle_original'), () => { original = !original; synchronize(); }, tools);
+    button(T('panel_toggle_boxes'), () => { boxes = !boxes; synchronize(); }, tools);
+    button(T('panel_checklist'), () => { status((job?.pages || []).flatMap((p, index) => [
+      p.timing ? T('panel_timing_line', { index: index + 1, scan: ((p.timing.totalMs || 0) / 1000).toFixed(2), card: ((p.timing.renderMs || 0) / 1000).toFixed(2) }) : '',
+      p.error ? T('panel_image_error_line', { index: index + 1, error: p.error }) : '',
+      ...(p.issues || []).map(issue => T('panel_issue_line', { index: index + 1, y: Math.round(issue.textBox[1]), reason: issue.reason === 'invalid_translation_result' ? T('panel_issue_invalid_format') : issue.reason }) + (issue.translatedText ? '\n' + issue.translatedText : ''))
+    ]).filter(Boolean).join('\n') || T('panel_no_issues')); }, tools);
+    button(T('panel_diag'), async () => {
       const groups = job?.metrics?.groups || [], summary = {
         model: job?.config?.model, provider: job?.config?.provider, providerCalls: job?.providerCalls || 0,
         issueReasons: {}, failedGroups: {}, elapsedMs: (job?.elapsedMs || 0) + (segmentClock ? performance.now() - segmentClock : 0),
@@ -144,8 +146,8 @@
         errors: (job?.pages || []).map((p,index)=>p.error ? {image:index+1,message:p.error} : null).filter(Boolean),
         groups: groups.map(g=>({groupId:g.groupId,regions:g.regions || g.regionCount,queueMs:g.queueMs,providerMs:g.providerMs,wallMs:g.wallMs,concurrency:g.concurrency,cached:g.cached,failed:g.failed,code:g.code}))
       };
-      for (const p of job?.pages || []) for (const issue of p.issues || []) summary.issueReasons[issue.reason || 'bilinmiyor'] = (summary.issueReasons[issue.reason || 'bilinmiyor'] || 0) + 1;
-      for (const g of groups) if (g.failed) summary.failedGroups[g.code || 'bilinmiyor'] = (summary.failedGroups[g.code || 'bilinmiyor'] || 0) + 1;
+      for (const p of job?.pages || []) for (const issue of p.issues || []) summary.issueReasons[issue.reason || T('panel_unknown')] = (summary.issueReasons[issue.reason || T('panel_unknown')] || 0) + 1;
+      for (const g of groups) if (g.failed) summary.failedGroups[g.code || T('panel_unknown')] = (summary.failedGroups[g.code || T('panel_unknown')] || 0) + 1;
       const text = JSON.stringify(summary, null, 2); status(text);
       try { await navigator.clipboard.writeText(text); } catch { /* Summary remains selectable in the panel. */ }
     }, tools);
@@ -154,14 +156,14 @@
   }
   async function save(signal = controller?.signal) { if (job) { job.updatedAt = Date.now(); const snapshot = structuredClone(job); snapshot.pages?.forEach(p => { delete p.translations; }); const task = saveChain.catch(() => {}).then(() => request('ML_JOB_SAVE', { job: snapshot }, signal)); saveChain = task; await task; } }
   function pause() {
-    logEvent('Duraklatıldı.');
+    logEvent(T('panel_paused_log'));
     if (job && segmentClock) { job.elapsedMs = (job.elapsedMs || 0) + performance.now() - segmentClock; segmentClock = 0; }
     paused = true; epoch++; resumePending = null; controller?.abort();
     if (job?.id) chrome.runtime.sendMessage({ type: 'ML_JOB_CONTROL', jobId: job.id, paused: true }).catch(() => {});
     if (job) { job.state = 'paused'; save(null).catch(() => {}); }
-    status('Duraklatıldı. Devam eden adımın geç sonucu sayfaya uygulanmayacak; tamamlanan çeviri önbellekte korunur.');
+    status(T('panel_paused_desc'));
   }
-  const alive = token => { if (paused || token !== epoch) throw new DOMException('İş duraklatıldı', 'AbortError'); };
+  const alive = token => { if (paused || token !== epoch) throw new DOMException(T('panel_paused_abort'), 'AbortError'); };
   function candidates() {
     return [...document.images].filter(img => !img.closest('[data-mangalens-ui]') && !img.dataset.mlPagePatch &&
       (img.naturalWidth >= 400 || img.getBoundingClientRect().width >= 350) &&
@@ -188,23 +190,23 @@
         if (!/^https?:/.test(source) || seen.has(source)) continue;
         seen.add(source); list.push({ source, state: 'queued' });
       }
-      if (!list.length) throw new Error('İşlenebilir manga görseli bulunamadı. Görselleri yükleyip tekrar deneyin.');
+      if (!list.length) throw new Error(T('panel_no_manga_images'));
       return list;
     } finally { window.scrollTo(initial.x, initial.y); }
   }
   function elementFor(source) { return [...document.images].find(img => (img.currentSrc || img.src) === source); }
   function synchronize() {
     for (const [source, entry] of layers) {
-      const warn = message => { entry.geometryError = message; if (entry.lastWarning !== message) { entry.lastWarning = message; status(message + ' Orijinal görsel korundu.'); } };
+      const warn = message => { entry.geometryError = message; if (entry.lastWarning !== message) { entry.lastWarning = message; status(message + T('panel_original_kept')); } };
       const img = elementFor(source);
       if (!img?.isConnected) { entry.root.hidden = true; continue; }
       const r = img.getBoundingClientRect(), css = getComputedStyle(img), matrix = css.transform;
       // Rotation/skew/perspective needs a matrix-aware fixture; refuse guessed alignment.
       const transform = matrix === 'none' ? null : new DOMMatrixReadOnly(matrix);
       if (transform && (!transform.is2D || Math.abs(transform.b) > .0001 || Math.abs(transform.c) > .0001 || transform.a <= 0 || transform.d <= 0)) {
-        entry.root.hidden = true; warn('Bu görselde dönme/eğilme dönüşümü desteklenmiyor.'); continue;
+        entry.root.hidden = true; warn(T('panel_geom_rotate')); continue;
       }
-      if (img.naturalWidth !== entry.width || img.naturalHeight !== entry.height) { entry.root.hidden = true; warn('Görsel boyutu değişti; eski çeviri gizlendi.'); continue; }
+      if (img.naturalWidth !== entry.width || img.naturalHeight !== entry.height) { entry.root.hidden = true; warn(T('panel_geom_resize')); continue; }
       const sx = r.width / (img.offsetWidth || r.width), sy = r.height / (img.offsetHeight || r.height);
       const insetLeft = (parseFloat(css.borderLeftWidth) + parseFloat(css.paddingLeft)) * sx;
       const insetTop = (parseFloat(css.borderTopWidth) + parseFloat(css.paddingTop)) * sy;
@@ -220,7 +222,7 @@
       const positions = css.objectPosition.split(/\s+/);
       const offset = (value, remaining) => value.endsWith('%') ? remaining * parseFloat(value) / 100 : value.endsWith('px') ? parseFloat(value) : null;
       const px = offset(positions[0], cw - width), py = offset(positions[1] || '50%', ch - height);
-      if (px === null || py === null) { entry.root.hidden = true; warn('Görselin özel konumlandırması desteklenmiyor.'); continue; }
+      if (px === null || py === null) { entry.root.hidden = true; warn(T('panel_geom_position')); continue; }
       entry.geometryError = null;
       entry.root.hidden = original;
       entry.root.style.cssText = `position:absolute!important;pointer-events:none!important;z-index:2147483000!important;overflow:hidden!important;left:${r.left + scrollX + insetLeft}px!important;top:${r.top + scrollY + insetTop}px!important;width:${cw}px!important;height:${ch}px!important;`;
@@ -255,7 +257,7 @@
         alive(token); const report = reports.get(item); if (!report) return;
         const translations = item.translations || [];
         const result = await request('ML_RENDER', { source: item.source, report, translations, minFont: 12, style: 'card' }); alive(token);
-        if (!elementFor(item.source)) throw new Error('Kaynak görsel sayfadan kaldırıldı.');
+        if (!elementFor(item.source)) throw new Error(T('panel_source_removed'));
         draw(item.source, report, result);
         if (layers.get(item.source)?.geometryError) throw new Error(layers.get(item.source).geometryError);
         if (!report.regions.length) result.issues.push({ regionId: null, textBox: [0, 0, report.width, report.height], reason: 'no_text_detected' });
@@ -270,7 +272,7 @@
       if (!buffer.length || stopError) return;
       while (pending.size >= (caps.maxPending || 8)) { await Promise.race(pending); alive(token); if (stopError) return; }
       const group = buffer; buffer = []; bytes = 65536;
-      logEvent(`Grup gönderildi: ${group.length} bölge → ${job.config.model}`);
+      logEvent(T('panel_group_sent', { n: group.length, model: job.config.model }));
       const imageIds = new Set(group.map(r => r.imageId));
       const affectedItems = () => job.pages.filter(p => imageIds.has(p.imageId) && reports.has(p));
       const started = performance.now();
@@ -278,7 +280,7 @@
         try {
           const result = await request('ML_TRANSLATE', { jobId: job.id, config: job.config, regions: group, context: job.fixedContext || [], retry }); alive(token);
           if (!result.cached) job.providerCalls = (job.providerCalls || 0) + 1;
-          logEvent(result.cached ? `Önbellek: ${group.length} bölge` : `Grup tamam: ${group.length} bölge · ${((result.timing?.providerMs || 0) / 1000).toFixed(1)} sn`);
+          logEvent(result.cached ? T('panel_group_cached', { n: group.length }) : T('panel_group_done', { n: group.length, seconds: ((result.timing?.providerMs || 0) / 1000).toFixed(1) }));
           job.metrics.groups.push({ groupId: result.groupId, ...result.timing, wallMs: performance.now() - started, cached: !!result.cached });
           for (const item of affectedItems()) {
             const fresh = result.regions.filter(r => group.some(g => g.regionId === r.regionId && g.imageId === item.imageId));
@@ -290,7 +292,7 @@
           alive(token);
           job.metrics.groups.push({ ...error.timing, failed: true, code: error.code, wallMs: performance.now() - started, regionCount: group.length });
           if (!error.timing?.notSent) job.providerCalls = (job.providerCalls || 0) + 1;
-          logEvent(`Grup hatası: ${error.code || 'bilinmiyor'} · ${group.length} bölge`);
+          logEvent(T('panel_group_error', { code: error.code || T('panel_unknown'), n: group.length }));
           for (const item of affectedItems()) { item.state = 'error'; item.error = error.message; item.errorCode = error.code; }
           if (error.stopJob) {
             if (!stopError || stopError.code === 'DISPATCH_STOPPED' && error.code !== 'DISPATCH_STOPPED') { stopError = error; job.blocked = { error: error.message, code: error.code, actionUrl: error.actionUrl, retryAt:error.retryAt, cooldownScope:error.cooldownScope }; }
@@ -315,8 +317,8 @@
           lacking.push({ ...region, imageId: report.imageId });
         }
       }
-      if (!lacking.length) { logEvent('İkinci bakış: eksik çeviri yok.'); return; }
-      logEvent(`İkinci bakış: ${lacking.length} eksik bölge küçük gruplarla yeniden gönderiliyor…`);
+      if (!lacking.length) { logEvent(T('panel_second_look_clean')); return; }
+      logEvent(T('panel_second_look_resend', { n: lacking.length }));
       let recovered = 0;
       const pendingLook = new Set();
       const sendLook = group => {
@@ -341,7 +343,7 @@
             if (error.name === 'AbortError') return;
             alive(token);
             job.metrics.groups.push({ ...error.timing, failed: true, secondLook: true, code: error.code, regionCount: group.length });
-            logEvent(`İkinci bakış hatası: ${error.code || 'bilinmiyor'} · ${group.length} bölge`);
+            logEvent(T('panel_second_look_fail', { code: error.code || T('panel_unknown'), n: group.length }));
           }
         })();
         pendingLook.add(operation); operation.finally(() => pendingLook.delete(operation)).catch(() => {});
@@ -357,7 +359,7 @@
       while (pendingLook.size) { await Promise.race(pendingLook); alive(token); if (stopError) break; }
       await Promise.allSettled([...pendingLook]); alive(token);
       await Promise.allSettled([...rendering.values()]); alive(token);
-      logEvent(`İkinci bakış bitti: ${recovered}/${lacking.length} bölge kurtarıldı.`);
+      logEvent(T('panel_second_look_done', { recovered, total: lacking.length }));
     };
     for (const item of job.pages) {
       alive(token); if (stopError) break;
@@ -369,7 +371,7 @@
         const img = elementFor(item.source);
         if (img && !img.naturalWidth) {
           let timer; const loading = img.getAttribute('loading'); img.loading = 'eager';
-          try { await Promise.race([img.decode(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Sayfadaki görsel yüklenemedi.')), 15000); })]); }
+          try { await Promise.race([img.decode(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(T('panel_image_load_fail'))), 15000); })]); }
           finally { clearTimeout(timer); if (loading === null) img.removeAttribute('loading'); else img.setAttribute('loading', loading); }
         }
         detecting = new AbortController(); const abortDetection = () => detecting?.abort();
@@ -379,7 +381,7 @@
         finally { controller.signal.removeEventListener('abort', abortDetection); detecting = null; }
         alive(token);
         const image = elementFor(item.source);
-        if (!image || image.naturalWidth !== report.width || image.naturalHeight !== report.height) throw new Error('Görsel kaynağı/boyutu değişti; sonuç uygulanmadı.');
+        if (!image || image.naturalWidth !== report.width || image.naturalHeight !== report.height) throw new Error(T('panel_image_changed'));
         reports.set(item, report); item.imageId = report.imageId; item.regions = report.regions.length;
         item.timing = { ...report.timing, renderMs: 0 }; item.backend = report.backend;
         const sibling = job.pages.find(p => p !== item && p.imageId === report.imageId && p.translations?.length);
@@ -391,7 +393,7 @@
           alive(token); if (stopError) break;
           if (seenRegions.has(region.regionId)) continue; seenRegions.add(region.regionId);
           const value = { ...region, imageId: report.imageId }, size = new TextEncoder().encode(JSON.stringify(value)).length + 1024;
-          if (size + 65536 > 8 * 1024 * 1024) throw new Error('Tek kırpma gönderim boyutu sınırını aşıyor.');
+          if (size + 65536 > 8 * 1024 * 1024) throw new Error(T('panel_crop_too_big'));
           if (buffer.length && (buffer.length >= caps.maxRegions || bytes + size > 8 * 1024 * 1024)) await dispatch();
           if (stopError) break; buffer.push(value); bytes += size;
           if (buffer.length >= caps.maxRegions) await dispatch();
@@ -412,30 +414,30 @@
   async function start({ resume = false, retry = false } = {}) {
     ensurePanel();
     if (running) {
-      if (paused) { resumePending = { resume, retry }; status('Duraklatma tamamlanınca tarama otomatik devam edecek…'); }
+      if (paused) { resumePending = { resume, retry }; status(T('panel_resume_pending')); }
       return;
     }
     running = true; paused = false; controller = new AbortController(); const token = ++epoch, segmentStarted = performance.now(); segmentClock = segmentStarted;
-    if (!resume) { eventLog.length = 0; if (logNode) logNode.textContent = 'Henüz işlem yok.'; }
+    if (!resume) { eventLog.length = 0; if (logNode) logNode.textContent = T('panel_no_events'); }
     try {
       const settings = await chrome.storage.sync.get({ enabled: true });
       alive(token);
-      if (!settings.enabled) throw new Error('Uzantı kapalı.');
+      if (!settings.enabled) throw new Error(T('panel_ext_off'));
       if (resume) job = job || await request('ML_JOB_GET');
       if (resume && job) {
         const current = await request('ML_CONFIG');
-        if (job.config.processingVersion !== current.processingVersion) throw new Error('İşleme sürümü değişti. Popup üzerinden yeni bölüm taraması başlatın; eski iş otomatik tekrar ücretlendirilmedi.');
+        if (job.config.processingVersion !== current.processingVersion) throw new Error(T('panel_version_changed'));
         if (job.blocked && !retry) { blockedStatus({ ...job.blocked, message: job.blocked.error }); return; }
       }
       if (!resume || !job) {
         const config = await request('ML_CONFIG');
-        status('Bölüm görselleri yükleniyor; kaydırma konumun korunacak…');
+        status(T('panel_loading_images'));
         const pages = await discover(token); alive(token);
         job = { id: crypto.randomUUID(), url: location.href, config, pages, context: [], fixedContext: [], elapsedMs: 0, createdAt: Date.now(), state: 'running' };
       }
       alive(token); delete job.blocked; job.state = 'running'; await save(); alive(token);
       job.id ||= crypto.randomUUID();
-      logEvent(resume ? `Devam ediliyor: ${job.pages.length} görsel · ${job.config.model}` : `Tarama başladı: ${job.pages.length} görsel · ${job.config.model}`);
+      logEvent(resume ? T('panel_resumed', { n: job.pages.length, model: job.config.model }) : T('panel_started', { n: job.pages.length, model: job.config.model }));
       const control=await request('ML_JOB_CONTROL', { jobId: job.id, paused: false, retry, config:job.config }); alive(token);
       if (control?.batching) { job.config.batching=control.batching; await save(); alive(token); }
       if (!await processChapter(token, retry)) return;
@@ -445,7 +447,7 @@
       const elapsed = ((job.elapsedMs || 0) + performance.now() - segmentStarted) / 1000;
       const groups = job.metrics?.groups || [];
       const seconds = name => (job.pages.reduce((n, p) => n + (p.timing?.[name] || 0), 0) / 1000).toFixed(1);
-      status(`Tarama bitti: ${cards} çeviri gösterildi, ${done + review}/${job.pages.length} görsel işlendi, ${issues} alan kontrol gerekli, ${errors} hata.\n${job.config.provider} / ${job.config.model} · sağlayıcı isteği: ${job.providerCalls || 0}\nGeçen süre: ${elapsed.toFixed(1)} sn · tarama ${seconds('totalMs')} sn · kart ${seconds('renderMs')} sn.\nGruplar: ${groups.filter(g => !g.cached && !g.failed).length} başarılı, ${groups.filter(g => g.failed).length} hata, ${groups.filter(g => g.cached).length} önbellek. Toplam istek süresi (paralel): ${(groups.reduce((n,g) => n + (g.providerMs || 0),0)/1000).toFixed(1)} sn.\nÇeviriler sade kart olarak gösterilir; özgün görsel dosyası korunur. Bütün yazıların bulunduğu henüz doğrulanmadı.${errors ? '\nİlk hata: ' + job.pages.find(p => p.error)?.error : ''}`);
+      status(T('panel_report', { cards, done: done + review, total: job.pages.length, issues, errors, provider: job.config.provider, model: job.config.model, calls: job.providerCalls || 0, elapsed: elapsed.toFixed(1), scan: seconds('totalMs'), render: seconds('renderMs'), ok: groups.filter(g => !g.cached && !g.failed).length, failed: groups.filter(g => g.failed).length, cached: groups.filter(g => g.cached).length, parallel: (groups.reduce((n,g) => n + (g.providerMs || 0),0)/1000).toFixed(1) }) + (errors ? T('panel_report_first_error', { error: job.pages.find(p => p.error)?.error }) : ''));
     } catch (error) {
       if (error.name !== 'AbortError' && token === epoch) status(error.message);
     } finally {

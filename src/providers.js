@@ -1,6 +1,7 @@
 'use strict';
 // Shared by the popup and service worker. Never exposed to the web page.
 globalThis.MLProviders = (() => {
+  const T = (key, vars) => (globalThis.MLI18N ? globalThis.MLI18N.t(key, vars) : key);
   const version = 'manga-tr-v1', processingVersion = 'page-v6';
   const google = [
     ['gemini-3.5-flash-lite', 'Gemini 3.5 Flash Lite'],
@@ -12,7 +13,7 @@ globalThis.MLProviders = (() => {
     // GLM 5.3 Flash removed after the owner's live test produced no translation.
     ['openai/gpt-6-luna', 'GPT-6 Luna'],
     ['google/gemma-4-26b-a4b-it', 'Gemma 4 26B'],
-    ['meta/muse-spark-1.3-contributor', 'Muse Spark 1.3 Contributor · veri paylaşımı'],
+    ['meta/muse-spark-1.3-contributor', 'Muse Spark 1.3 Contributor'],
   ];
   const ollama = [
     ['gemma4:31b', 'Gemma 4 31B'],
@@ -40,8 +41,8 @@ globalThis.MLProviders = (() => {
     const provider = ['openrouter', 'ollama'].includes(raw.translationProvider) ? raw.translationProvider : 'gemini';
     const fallback = provider === 'gemini' ? google[0][0] : provider === 'openrouter' ? 'openai/gpt-6-luna' : 'gemma4:31b';
     const model = raw[providerModelKey(provider)] || fallback;
-    if (!catalog[provider].some(([id]) => id === model)) throw new Error('Seçili model desteklenmiyor; ayarlardan yeniden seçin.');
-    if (model.endsWith('-contributor') && raw.contributorConsent !== true) throw new Error('Contributor modeli için veri paylaşımı seçeneğini onaylayın.');
+    if (!catalog[provider].some(([id]) => id === model)) throw new Error(T('err_model_unsupported'));
+    if (model.endsWith('-contributor') && raw.contributorConsent !== true) throw new Error(T('err_contributor_consent'));
     return { provider, model, profileVersion: version, processingVersion, geminiFallback: raw.geminiFallback === true, contentType: ['manga', 'manhwa', 'manhua'].includes(raw.contentType) ? raw.contentType : 'auto',
       localDetector: ['small', 'detailed'].includes(raw.localDetector) ? raw.localDetector : 'fast',
       series: String(raw.seriesName || '').slice(0, 200), instructions: String(raw.translationInstructions || '').slice(0, 1500),
@@ -80,10 +81,10 @@ REGION ORDER: ${JSON.stringify(regions.map(r => r.regionId))}`;
     const cleaned = String(raw).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
       .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
     const data = JSON.parse(cleaned);
-    if (!data || !Array.isArray(data.regions) || data.regions.length !== expected.length) throw new Error('Çeviri bölge sayısı uyuşmuyor.');
+    if (!data || !Array.isArray(data.regions) || data.regions.length !== expected.length) throw new Error(T('err_region_mismatch'));
     const allowed = new Set(expected), seen = new Set();
     for (const r of data.regions) {
-      if (!r || !allowed.has(r.regionId) || seen.has(r.regionId)) throw new Error('Çeviri kimlikleri uyuşmuyor.');
+      if (!r || !allowed.has(r.regionId) || seen.has(r.regionId)) throw new Error(T('err_id_mismatch'));
       seen.add(r.regionId);
       delete r.validationError;
       if (typeof r.status === 'string') r.status = r.status.trim().toLowerCase();
@@ -91,7 +92,7 @@ REGION ORDER: ${JSON.stringify(regions.map(r => r.regionId))}`;
       if (!['translated', 'unreadable'].includes(r.status) || typeof r.translatedText !== 'string' || typeof r.sourceText !== 'string' || r.sourceText.length > 10000 ||
           r.translatedText.length > 10000 || (r.status === 'translated' && (!r.translatedText.trim() || !r.sourceText.trim())) ||
           (r.status === 'unreadable' && r.translatedText !== '')) {
-        if (!partial) throw new Error('Geçersiz çeviri sonucu.');
+        if (!partial) throw new Error(T('err_invalid_result'));
         // Identity is validated above. Never draw or invent malformed field values.
         r.sourceText = ''; r.translatedText = ''; r.status = 'unreadable'; r.validationError = 'invalid_translation_result';
       }

@@ -3,7 +3,11 @@
 
 'use strict';
 
-if (typeof importScripts === 'function') importScripts('providers.js', 'keys.js', 'page/queue.js', 'page-background.js');
+if (typeof importScripts === 'function') importScripts('i18n.js', 'i18n-strings.js', 'providers.js', 'keys.js', 'page/queue.js', 'page-background.js');
+else { /* non-worker context: i18n dosyaları ayrıca yüklenir */ }
+
+const T = (key, vars) => (globalThis.MLI18N ? globalThis.MLI18N.t(key, vars) : key);
+if (globalThis.MLI18N && typeof chrome !== 'undefined' && chrome.storage) globalThis.MLI18N.get().catch(() => {});
 
 const GEMINI_MODELS = Object.freeze({
   DEFAULT: 'gemini-3.5-flash-lite',
@@ -326,14 +330,14 @@ async function callGemini({ apiKey, model, prompt, imageBase64, responseMimeType
   if (candidates.length === 0) {
     const blockReason = json?.promptFeedback?.blockReason;
     if (blockReason) {
-      throw new Error('Gemini istegi bloklandi. (blockReason: ' + blockReason + ')');
+      throw new Error(T('err_gemini_blocked', { reason: blockReason }));
     }
-    throw new Error('Gemini candidates bos döndü. (safety block?)');
+    throw new Error(T('err_gemini_empty'));
   }
 
   const finishReason = candidates[0]?.finishReason;
   if (finishReason === 'SAFETY' || finishReason === 'BLOCKLIST') {
-    throw new Error('Gemini response safety tarafindan bloklandi.');
+    throw new Error(T('err_gemini_safety'));
   }
 
   // v2.7: Tum parts arrayini birlestir (sadece ilk degil)
@@ -386,16 +390,16 @@ function normalizeGeminiError(status, body) {
 function normalizeFetchError(err) {
   const msg = String(err && err.message || err || '');
   if (err && err.name === 'AbortError') {
-    const e = new Error('Gemini istegi zaman asimina ugradi. Baglanti yavas veya API yanit vermiyor.');
+    const e = new Error(T('err_gemini_timeout'));
     e.status = 'timeout';
     return e;
   }
   if (/failed to fetch|networkerror|load failed/i.test(msg)) {
-    const e = new Error('Gemini baglantisi kurulamadı. Internet/VPN/proxy veya generativelanguage.googleapis.com erisimi engellenmis olabilir.');
+    const e = new Error(T('err_gemini_conn'));
     e.status = 'network';
     return e;
   }
-  const e = new Error('Gemini ag hatasi: ' + (msg || 'Bilinmeyen fetch hatasi'));
+  const e = new Error(T('err_gemini_net', { msg: msg || T('err_unknown_fetch') }));
   e.status = 'network';
   return e;
 }
@@ -444,7 +448,7 @@ async function executeWithModelFallback(selectedModel, operation) {
       console.warn('[MangaLens-bg] Model failed:', model, errors[model]);
     }
   }
-  const error = new Error('Tüm modeller başarısız oldu. ' + chain
+  const error = new Error(T('err_all_models') + chain
     .map(model => GEMINI_MODEL_LABELS[model] + ': ' + errors[model]).join(' | '));
   error.status = 'error';
   error.fallbackAttempted = true;

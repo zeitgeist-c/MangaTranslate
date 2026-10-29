@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import { webcrypto } from 'node:crypto';
+const i18nSources = await Promise.all(['i18n.js','i18n-strings.js','i18n-strings-content.js'].map(x=>readFile(new URL('../src/'+x,import.meta.url),'utf8')));
 const source = await readFile(new URL('../src/keys.js', import.meta.url), 'utf8');
 const routerKey = 'sk-or-synthetic-12345678901234567890', googleKey = 'AIza-synthetic-12345678901234567890';
 function fixture(initial = {}) {
@@ -13,7 +14,9 @@ function fixture(initial = {}) {
       storage: { local: { get: async keys => Object.fromEntries((keys || Object.keys(data)).filter(k => Object.hasOwn(data, k)).map(k => [k, structuredClone(data[k])])),
         set: async patch => { if (failWrite) throw new Error('Storage unavailable'); Object.assign(data, structuredClone(patch)); } } } }
   });
+  i18nSources.forEach(s=>vm.runInContext(s,context));
   vm.runInContext(source, context);
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   return { data, requests, keys: context.MLKeys, restart() { vm.runInContext(source, context); this.keys = context.MLKeys; },
     fail(value) { failWrite = value; }, fetch(fn) { fetchImpl = fn; },
     invoke(message, sender) { return new Promise(resolve => listeners.at(-1)(message, sender, resolve)); } };

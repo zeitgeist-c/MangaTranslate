@@ -6,6 +6,9 @@ globalThis.__mlManualController = true;
 
 'use strict';
 
+const T = (key, vars) => (globalThis.MLI18N ? globalThis.MLI18N.t(key, vars) : key);
+if (globalThis.MLI18N && typeof chrome !== 'undefined' && chrome.storage) globalThis.MLI18N.get().catch(() => {});
+
 
 
 
@@ -186,12 +189,12 @@ function createSelectionControls() {
     'gap:6px!important;z-index:2147483647!important;font-family:system-ui,sans-serif!important;' +
     'box-shadow:0 14px 40px rgba(0,0,0,0.34)!important;';
   sm_controls.innerHTML =
-    '<span id="ml-selection-count" style="font-size:12px;font-weight:700;white-space:nowrap;flex:0 0 auto;line-height:1.2;">Seçili: 0/' + MAX_SELECTIONS + '</span>' +
+    '<span id="ml-selection-count" style="font-size:12px;font-weight:700;white-space:nowrap;flex:0 0 auto;line-height:1.2;">' + T('sel_count', { done: 0, total: MAX_SELECTIONS }) + '</span>' +
     '<span id="ml-selection-msg" style="font-size:12px;color:#a7f3d0;flex:1 1 auto;min-width:64px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2;"></span>' +
-    '<button id="ml-undo" type="button" style="' + selectionControlButtonStyle(false) + '">Geri Al</button>' +
-    '<button id="ml-clear" type="button" style="' + selectionControlButtonStyle(false) + '">Temizle</button>' +
-    '<button id="ml-cancel" type="button" style="' + selectionControlButtonStyle(false) + '">İptal (Esc)</button>' +
-    '<button id="ml-confirm" type="button" style="' + selectionControlButtonStyle(true) + '">Çevir (Enter)</button>';
+    '<button id="ml-undo" type="button" style="' + selectionControlButtonStyle(false) + '">' + T('undo') + '</button>' +
+    '<button id="ml-clear" type="button" style="' + selectionControlButtonStyle(false) + '">' + T('clear') + '</button>' +
+    '<button id="ml-cancel" type="button" style="' + selectionControlButtonStyle(false) + '">' + T('cancel_esc') + '</button>' +
+    '<button id="ml-confirm" type="button" style="' + selectionControlButtonStyle(true) + '">' + T('translate_enter') + '</button>';
   document.body.appendChild(sm_controls);
   document.getElementById('ml-undo').addEventListener('click', undoLastSelection);
   document.getElementById('ml-clear').addEventListener('click', clearSelections);
@@ -213,7 +216,7 @@ function selectionControlButtonStyle(primary) {
 
 function updateSelectionControls(message) {
   var count = document.getElementById('ml-selection-count');
-  if (count) count.textContent = 'Seçili: ' + selectionMode.selections.length + '/' + MAX_SELECTIONS;
+  if (count) count.textContent = T('sel_count', { done: selectionMode.selections.length, total: MAX_SELECTIONS });
   if (message) setSelectionMessage(message);
 }
 
@@ -236,17 +239,17 @@ function onSmStart(e) {
   if (e.target.closest('#ml-selection-controls')) return;
   if (e.button !== 0) return;
   if (manualCaptureInFlight > 0) {
-    updateSelectionControls('Alan hazırlanıyor...');
+    updateSelectionControls(T('area_preparing'));
     return;
   }
   if (selectionMode.selections.length >= MAX_SELECTIONS) {
-    updateSelectionControls('En fazla ' + MAX_SELECTIONS + ' alan');
+    updateSelectionControls(T('max_areas', { total: MAX_SELECTIONS }));
     return;
   }
 
   var page = findMangaPageAtPoint(e.clientX, e.clientY);
   if (!page) {
-    updateSelectionControls('Bu noktada çevrilebilir görsel bulunamadı');
+    updateSelectionControls(T('area_no_image'));
     return;
   }
   e.preventDefault();
@@ -256,7 +259,7 @@ function onSmStart(e) {
   var local = clientToImageLocal(page.el, e.clientX, e.clientY);
   var layer = ensureSelectionLayer(page.el, page.pageId);
   if (!layer) {
-    updateSelectionControls('Görsel hazır değil');
+    updateSelectionControls(T('image_not_ready'));
     return;
   }
   var draft = {
@@ -310,7 +313,7 @@ function onSmEnd(e) {
   selectionMode.drawing = null;
   if (s.width < MIN_SELECTION_SIZE || s.height < MIN_SELECTION_SIZE) {
     if (s.boxEl) s.boxEl.remove();
-    updateSelectionControls('Alan çok küçük');
+    updateSelectionControls(T('area_too_small'));
     return;
   }
   s.boxEl.classList.remove('ml-selection-draft');
@@ -477,11 +480,11 @@ function createSelectionBox(s, isDraft) {
     'box-shadow:0 0 0 1px rgba(0,0,0,0.25),0 8px 24px rgba(0,0,0,0.24)!important;' +
     'pointer-events:auto!important;cursor:move!important;border-radius:4px!important;';
   box.innerHTML =
-    '<button type="button" class="ml-selection-retry" title="Alternatif çeviri üret" aria-label="Alternatif çeviri üret" style="' +
+    '<button type="button" class="ml-selection-retry" title="' + T('alt_retry') + '" aria-label="' + T('alt_retry') + '" style="' +
     'display:none;position:absolute!important;right:31px!important;top:3px!important;width:22px!important;height:22px!important;z-index:4!important;' +
     'border:none!important;border-radius:999px!important;background:#2563eb!important;color:white!important;' +
     'font-size:16px!important;line-height:20px!important;font-weight:800!important;cursor:pointer!important;padding:0!important;pointer-events:auto!important;">↻</button>' +
-    '<button type="button" class="ml-selection-delete" title="Kapat" aria-label="Bu çeviri sonucunu kapat" style="' +
+    '<button type="button" class="ml-selection-delete" title="' + T('close_result') + '" aria-label="' + T('close_result_aria') + '" style="' +
     'position:absolute!important;right:3px!important;top:3px!important;width:22px!important;height:22px!important;z-index:4!important;' +
     'border:none!important;border-radius:999px!important;background:#ef4444!important;color:white!important;' +
     'font-size:16px!important;line-height:20px!important;font-weight:800!important;cursor:pointer!important;padding:0!important;pointer-events:auto!important;">×</button>' +
@@ -554,7 +557,7 @@ function installSelectionBoxHandlers(s) {
 }
 function startSelectionInteraction(s, type, clientX, clientY) {
   if (manualCaptureInFlight > 0) {
-    updateSelectionControls('Alan hazırlanıyor...');
+    updateSelectionControls(T('area_preparing'));
     return;
   }
   invalidateManualSelectionCapture(s);
@@ -736,7 +739,7 @@ function prepareManualSelectionCapture(selection) {
     hiddenUi.push({ el: el, visibility: el.style.visibility });
   });
   manualCaptureInFlight += 1;
-  setSelectionBoxState(selection, 'preparing', 'Alan hazırlanıyor...');
+  setSelectionBoxState(selection, 'preparing', T('area_preparing'));
 
   var capturePromise = (async function() {
     try {
@@ -745,7 +748,7 @@ function prepareManualSelectionCapture(selection) {
       var canvas = await captureVisibleRect(getManualSelectionViewportRect(selection));
       var scaled = maybeUpscale(canvas, MIN_CELL_SIZE);
       var dataUrl = scaled.canvas.toDataURL('image/jpeg', 0.86);
-      if (!dataUrl) throw new Error('Seçili alan kırpılamadı');
+      if (!dataUrl) throw new Error(T('sel_crop_failed'));
       if (selection.captureDisposed || selection.captureVersion !== version) return false;
       selection.captureDataUrl = dataUrl;
       selection.captureWidth = scaled.canvas.width;
@@ -758,7 +761,7 @@ function prepareManualSelectionCapture(selection) {
       if (!selection.captureDisposed && selection.captureVersion === version) {
         selection.captureError = error;
         selection.captureDirty = true;
-        setSelectionBoxState(selection, 'error', 'Alan görüntüsü alınamadı');
+        setSelectionBoxState(selection, 'error', T('area_capture_failed'));
       }
       return false;
     } finally {
@@ -810,8 +813,8 @@ function createQuickControls() {
     'gap:6px!important;z-index:2147483647!important;font-family:system-ui,sans-serif!important;' +
     'box-shadow:0 14px 40px rgba(0,0,0,0.34)!important;';
   ml_quick_controls.innerHTML =
-    '<span style="font-size:12px;font-weight:700;white-space:nowrap;line-height:1.2;">Oto Çevir aktif</span>' +
-    '<button id="ml-quick-stop" type="button" style="' + selectionControlButtonStyle(false) + '">Durdur (Esc)</button>';
+    '<span style="font-size:12px;font-weight:700;white-space:nowrap;line-height:1.2;">' + T('quick_active') + '</span>' +
+    '<button id="ml-quick-stop" type="button" style="' + selectionControlButtonStyle(false) + '">' + T('stop_esc') + '</button>';
   document.body.appendChild(ml_quick_controls);
   document.getElementById('ml-quick-stop').addEventListener('click', function() { stopQuickTranslateMode(); });
 }
@@ -891,7 +894,7 @@ function onQuickStart(e) {
     hPct: 0,
     timeoutId: null,
   };
-  draft.boxEl = createQuickJobBox(draft, 'Seçiliyor...');
+  draft.boxEl = createQuickJobBox(draft, T('selecting'));
   layer.appendChild(draft.boxEl);
   quickTranslateMode.drawing = draft;
   draft.timeoutId = setTimeout(function() {
@@ -963,11 +966,11 @@ function createQuickJobBox(job, text) {
     'box-shadow:0 8px 24px rgba(0,0,0,0.22)!important;' +
     'pointer-events:none!important;border-radius:4px!important;overflow:hidden!important;';
   box.innerHTML =
-    '<button type="button" class="ml-quick-retry" title="Alternatif çeviri üret" aria-label="Alternatif çeviri üret" style="' +
+    '<button type="button" class="ml-quick-retry" title="' + T('alt_retry') + '" aria-label="' + T('alt_retry') + '" style="' +
     'display:none;position:absolute!important;right:31px!important;top:3px!important;width:22px!important;height:22px!important;z-index:4!important;' +
     'border:none!important;border-radius:999px!important;background:#2563eb!important;color:white!important;' +
     'font-size:16px!important;line-height:20px!important;font-weight:800!important;cursor:pointer!important;padding:0!important;pointer-events:auto!important;">↻</button>' +
-    '<button type="button" class="ml-quick-close" title="Kapat" aria-label="Bu çeviri sonucunu kapat" style="' +
+    '<button type="button" class="ml-quick-close" title="' + T('close_result') + '" aria-label="' + T('close_result_aria') + '" style="' +
     'position:absolute!important;right:3px!important;top:3px!important;width:22px!important;height:22px!important;z-index:4!important;' +
     'border:none!important;border-radius:999px!important;background:#ef4444!important;color:white!important;' +
     'font-size:16px!important;line-height:20px!important;font-weight:800!important;cursor:pointer!important;padding:0!important;pointer-events:auto!important;">×</button>' +
@@ -1045,11 +1048,11 @@ function syncQuickJobLayers() {
 async function translateQuickJob(job, translationMode, alternativeAttempt) {
   if (!job || job.inFlight) return;
   job.inFlight = true;
-  updateQuickJobState(job, 'processing', translationMode === 'alternative' ? 'Alternatif çeviri üretiliyor...' : 'Çeviriliyor...');
+  updateQuickJobState(job, 'processing', translationMode === 'alternative' ? T('alt_generating') : T('translating'));
   try {
     await translateQuickJobFromViewport(job, translationMode, alternativeAttempt);
   } catch (e) {
-    updateQuickJobState(job, 'error', e.message || 'Çeviri hatası');
+    updateQuickJobState(job, 'error', e.message || T('err_generic'));
     console.warn('[MangaLens] Quick translate error', e.message);
   } finally {
     job.inFlight = false;
@@ -1074,7 +1077,7 @@ async function translateQuickJobFromViewport(job, translationMode, alternativeAt
 
   var scaled = maybeUpscale(canvas, MIN_CELL_SIZE);
   var dataUrl = scaled.canvas.toDataURL('image/jpeg', 0.86);
-  if (!dataUrl) throw new Error('Seçili alan kırpılamadı');
+  if (!dataUrl) throw new Error(T('sel_crop_failed'));
 
   var waitMs = await getTranslationTimeoutMs();
   var aiResp = await sendRuntimeMessageWithTimeout(
@@ -1087,16 +1090,16 @@ async function translateQuickJobFromViewport(job, translationMode, alternativeAt
       alternativeAttempt: alternativeAttempt || 0,
     },
     waitMs,
-    'Gemini zaman aşımı'
+    T('ov_gemini_timeout')
   );
 
   if (!aiResp || !aiResp.success) {
-    throw new Error((aiResp && aiResp.error) || 'Gemini yanıt vermedi');
+    throw new Error((aiResp && aiResp.error) || T('ov_gemini_noresponse'));
   }
 
   var bubbles = aiResp.bubbles || [];
   if (!bubbles.length) {
-    updateQuickJobState(job, 'empty', 'Metin bulunamadı');
+    updateQuickJobState(job, 'empty', T('text_not_found'));
     return;
   }
 
@@ -1104,7 +1107,7 @@ async function translateQuickJobFromViewport(job, translationMode, alternativeAt
     .map(function(b) { return (b.translation || b.text || '').trim(); })
     .filter(Boolean)
     .join('\n');
-  updateQuickJobState(job, 'done', translatedText || 'Çeviri boş', aiResp);
+  updateQuickJobState(job, 'done', translatedText || T('translation_empty'), aiResp);
 }
 
 function hideQuickJobForCapture(job) {
@@ -1124,22 +1127,22 @@ async function captureVisibleRect(rect) {
   var right = Math.min(viewportW, rect.right);
   var bottom = Math.min(viewportH, rect.bottom);
   if (right - left < 10 || bottom - top < 10) {
-    throw new Error('Seçili alan ekranda görünür olmalı');
+    throw new Error(T('err_area_invisible'));
   }
 
   var resp = await sendRuntimeMessageWithTimeout(
     { type: 'CAPTURE_TAB' },
     QUICK_CAPTURE_TIMEOUT_MS,
-    'Ekran görüntüsü zaman aşımı'
+    T('err_screenshot_timeout')
   );
   if (!resp || !resp.dataUrl) {
-    throw new Error((resp && resp.error) || 'Ekran görüntüsü alınamadı');
+    throw new Error((resp && resp.error) || T('err_screenshot_failed'));
   }
 
   var screenshot = new Image();
   await new Promise(function(resolve, reject) {
     screenshot.onload = resolve;
-    screenshot.onerror = function() { reject(new Error('Ekran görüntüsü okunamadı')); };
+    screenshot.onerror = function() { reject(new Error(T('err_screenshot_unreadable'))); };
     screenshot.src = resp.dataUrl;
   });
 
@@ -1149,7 +1152,7 @@ async function captureVisibleRect(rect) {
   var cropY = clampInt(Math.round(top * scaleY), 0, screenshot.naturalHeight - 1);
   var cropW = clampInt(Math.round((right - left) * scaleX), 1, screenshot.naturalWidth - cropX);
   var cropH = clampInt(Math.round((bottom - top) * scaleY), 1, screenshot.naturalHeight - cropY);
-  if (cropW < 10 || cropH < 10) throw new Error('Seçili alan çok küçük');
+  if (cropW < 10 || cropH < 10) throw new Error(T('err_area_too_small'));
 
   var canvas = document.createElement('canvas');
   canvas.width = cropW;
@@ -1347,22 +1350,22 @@ async function translateOneSelection(selection, index, total, translationMode, a
   selection.inFlight = true;
   try {
     if (selection.capturePromise) {
-      setSelectionBoxState(selection, 'preparing', 'Alan hazırlanıyor...');
+      setSelectionBoxState(selection, 'preparing', T('area_preparing'));
       await selection.capturePromise;
     }
     if (!selection.captureDataUrl || selection.captureDirty) {
-      setSelectionBoxState(selection, 'preparing', 'Alan hazırlanıyor...');
+      setSelectionBoxState(selection, 'preparing', T('area_preparing'));
       await prepareManualSelectionCapture(selection);
     }
     if (!selection.captureDataUrl || !selection.captureWidth || !selection.captureHeight) {
-      setSelectionBoxState(selection, 'error', 'Alan görüntüsü alınamadı');
+      setSelectionBoxState(selection, 'error', T('area_capture_failed'));
       return;
     }
     if (selection.captureDisposed || !selection.boxEl) return;
 
     var statusText = translationMode === 'alternative'
-      ? 'Alternatif çeviri üretiliyor...'
-      : 'Çeviriliyor ' + index + '/' + total + '...';
+      ? T('alt_generating')
+      : T('translating_progress', { index: index, total: total });
     setSelectionBoxState(selection, 'processing', statusText);
 
     var waitMs = await getTranslationTimeoutMs();
@@ -1376,16 +1379,16 @@ async function translateOneSelection(selection, index, total, translationMode, a
         alternativeAttempt: alternativeAttempt || 0,
       },
       waitMs,
-      'Gemini zaman aşımı (kuyruk yoğunsa tekrar deneyin)'
+      T('ov_gemini_queue')
     );
 
     if (!aiResp || !aiResp.success) {
-      throw new Error((aiResp && aiResp.error) || 'Gemini yanıt vermedi');
+      throw new Error((aiResp && aiResp.error) || T('ov_gemini_noresponse'));
     }
 
     var bubbles = aiResp.bubbles || [];
     if (!bubbles.length) {
-      setSelectionBoxState(selection, 'empty', 'Metin bulunamadı');
+      setSelectionBoxState(selection, 'empty', T('text_not_found'));
       return;
     }
 
@@ -1393,10 +1396,10 @@ async function translateOneSelection(selection, index, total, translationMode, a
       .map(function(b) { return (b.translation || b.text || '').trim(); })
       .filter(Boolean)
       .join('\n');
-    setSelectionBoxState(selection, 'done', translatedText || 'Çeviri boş', aiResp);
+    setSelectionBoxState(selection, 'done', translatedText || T('translation_empty'), aiResp);
   } catch (e) {
     console.warn('[MangaLens] selection translate failed:', e.message);
-    setSelectionBoxState(selection, 'error', e.message || 'Çeviri hatası');
+    setSelectionBoxState(selection, 'error', e.message || T('err_generic'));
   } finally {
     selection.inFlight = false;
   }

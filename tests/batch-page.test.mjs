@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import { webcrypto } from 'node:crypto';
-const sources = await Promise.all(['providers.js','page/queue.js','page-background.js'].map(x=>readFile(new URL('../src/'+x,import.meta.url),'utf8')));
+const sources = await Promise.all(['i18n.js','i18n-strings.js','i18n-strings-content.js','providers.js','page/queue.js','page-background.js'].map(x=>readFile(new URL('../src/'+x,import.meta.url),'utf8')));
 const flush = async()=>{for(let i=0;i<8;i++) await new Promise(r=>setImmediate(r));};
 function fixture(cache=new Map(),initialStored={}) {
   const stored={...initialStored}, calls=[];
@@ -11,6 +11,7 @@ function fixture(cache=new Map(),initialStored={}) {
     chrome:{runtime:{onMessage:{addListener(){}}},storage:{sync:{get:async()=>({contributorConsent:true})},local:{get:async key=>Array.isArray(key)?Object.fromEntries(key.map(k=>[k,stored[k]])):({[key]:stored[key]}),set:async x=>Object.assign(stored,x)}}},
     enqueueWithRateLimit:async fn=>fn(),incrementTranslationStats:async()=>{},fetch:async()=>{throw new Error('Real network forbidden');}});
   sources.forEach(s=>vm.runInContext(s,context));
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   const actualProviderCall = context.mlProviderCall, actualCapabilities = context.mlCapabilities;
   context.mlCapabilities=async()=>({maxRegions:20,maxOutputTokens:16384,contextLength:1048576,verified:true});
   context.mlOffscreen=async(cmd,p)=>{

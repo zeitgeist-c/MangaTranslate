@@ -20,7 +20,9 @@ test('cards fit Turkish text inside source bounds without shrinking below the re
   assert.equal(cardLayout(ctx, 'x'.repeat(1000), [0, 0, 50, 20], 100, 50, 12), null);
 });
 test('old standard setting moves to the fast path; detailed mode is explicit and jobs use a new processing version', async () => {
-  const context = vm.createContext({}); vm.runInContext(await readFile(new URL('../src/providers.js', import.meta.url), 'utf8'), context);
+  const context = vm.createContext({}); for (const f of ['i18n.js','i18n-strings.js','i18n-strings-content.js']) vm.runInContext(await readFile(new URL('../src/'+f, import.meta.url), 'utf8'), context);
+  vm.runInContext("MLI18N.__testLang('tr')", context);
+  vm.runInContext(await readFile(new URL('../src/providers.js', import.meta.url), 'utf8'), context);
   assert.equal(context.MLProviders.settings({ localDetector: 'standard' }).localDetector, 'fast');
   assert.equal(context.MLProviders.settings({ localDetector: 'detailed' }).localDetector, 'detailed');
   assert.equal(context.MLProviders.settings({}).processingVersion, 'page-v6');
@@ -28,6 +30,8 @@ test('old standard setting moves to the fast path; detailed mode is explicit and
 test('router queue starts concurrently without Google delay and keeps Google pacing intact', async () => {
   let googleCalls = 0;
   const context = vm.createContext({ chrome: { runtime: { onMessage: { addListener() {} } } }, enqueueWithRateLimit: async fn => { googleCalls++; return fn(); } });
+  for (const f of ['i18n.js','i18n-strings.js','i18n-strings-content.js']) vm.runInContext(await readFile(new URL('../src/'+f, import.meta.url), 'utf8'), context);
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext(await readFile(new URL('../src/providers.js', import.meta.url), 'utf8'), context);
   vm.runInContext(await readFile(new URL('../src/page/queue.js', import.meta.url), 'utf8'), context);
   vm.runInContext(await readFile(new URL('../src/page-background.js', import.meta.url), 'utf8'), context);
@@ -39,6 +43,8 @@ test('router queue starts concurrently without Google delay and keeps Google pac
 
 test('data-policy 404 and quota 429 stop the job; unrelated 404 is not misclassified', async () => {
   const context = vm.createContext({ chrome: { runtime: { onMessage: { addListener() {} } } } });
+  for (const f of ['i18n.js','i18n-strings.js','i18n-strings-content.js']) vm.runInContext(await readFile(new URL('../src/'+f, import.meta.url), 'utf8'), context);
+  vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext(await readFile(new URL('../src/page/queue.js', import.meta.url), 'utf8'), context);
   vm.runInContext(await readFile(new URL('../src/page-background.js', import.meta.url), 'utf8'), context);
   const config = { provider: 'openrouter', model: 'meta/muse-spark-1.3-contributor' };
