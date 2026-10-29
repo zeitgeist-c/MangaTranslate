@@ -89,7 +89,7 @@ $('refresh-models').onclick = async () => {
 };
 window.addEventListener('beforeunload', event => { if (dirty || adding) { event.preventDefault(); event.returnValue = ''; } });
 window.addEventListener('hashchange', applyRoute);
-chrome.storage.onChanged.addListener(() => { renderKeys().catch(error => notice(error.message)); loadPreferences().catch(error => notice(error.message)); });
+chrome.storage.onChanged.addListener((changes, area) => { renderKeys().catch(error => notice(error.message)); loadPreferences().catch(error => notice(error.message)); if (area === 'sync' && changes && changes[MLI18N.KEY]) { MLI18N.init().then(() => fillLanguageSelect($('ui-language'), MLI18N.lang)).catch(() => {}); } });
 $('version').textContent = 'v' + chrome.runtime.getManifest().version;
 function fillLanguageSelect(select, current) {
   select.replaceChildren();

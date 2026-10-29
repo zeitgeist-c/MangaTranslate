@@ -9,6 +9,28 @@ globalThis.__mlManualController = true;
 const T = (key, vars) => (globalThis.MLI18N ? globalThis.MLI18N.t(key, vars) : key);
 if (globalThis.MLI18N && typeof chrome !== 'undefined' && chrome.storage) globalThis.MLI18N.get().catch(() => {});
 
+/** Dil degisince acik content UI'ini yeniden cevir (secim/balon durumu korunur). */
+function retranslateOpenUI() {
+  try {
+    if (!globalThis.MLI18N) return;
+    MLI18N.applyStatic(document);
+    var pairs = [['ml-undo', 'undo'], ['ml-clear', 'clear'], ['ml-cancel', 'cancel_esc'], ['ml-confirm', 'translate_enter']];
+    for (var i = 0; i < pairs.length; i++) {
+      var el = document.getElementById(pairs[i][0]);
+      if (el) el.textContent = T(pairs[i][1]);
+    }
+    document.querySelectorAll('.ml-selection-retry, .ml-quick-retry').forEach(function(b) {
+      b.title = T('alt_retry'); b.setAttribute('aria-label', T('alt_retry'));
+    });
+    document.querySelectorAll('.ml-selection-delete').forEach(function(b) {
+      b.title = T('close_result'); b.setAttribute('aria-label', T('close_result_aria'));
+    });
+    if (typeof updateSelectionControls === 'function') updateSelectionControls();
+  } catch { /* yoksay */ }
+}
+if (globalThis.MLI18N && globalThis.MLI18N.onChange) globalThis.MLI18N.onChange(retranslateOpenUI);
+if (globalThis.MLI18N && globalThis.MLI18N.watchStorage) globalThis.MLI18N.watchStorage();
+
 
 
 
