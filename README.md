@@ -131,7 +131,7 @@ It also states the data flow plainly:
 
 ## Install
 
-Release package: `MangaLensTR-3.9.5.zip`.
+Release package: `MangaLensTR-3.9.7.zip`.
 
 The extension is loaded unpacked from source:
 
