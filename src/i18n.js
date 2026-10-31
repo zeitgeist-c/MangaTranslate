@@ -100,3 +100,8 @@ globalThis.MLI18N = (() => {
     __testLang(code) { if (CODES.has(code)) lang = code; return lang; },
     get lang() { return lang; } };
 })();
+
+/* Shared translate shortcut. Defined once here because i18n.js loads first in
+ * every scope (service worker importScripts, tests, pages); redeclaring it in
+ * an importing file breaks the whole scope with a SyntaxError. */
+const T = (key, vars) => (globalThis.MLI18N ? globalThis.MLI18N.t(key, vars) : key);
