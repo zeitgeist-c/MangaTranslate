@@ -4,7 +4,7 @@ const T = (key, vars) => (globalThis.MLI18N ? globalThis.MLI18N.t(key, vars) : k
 let saved, saving = false, generation = 0, quick = false;
 function notice(text) { $('notice').textContent = text; $('notice').hidden = !text; }
 
-/* Dil seçici + ilk açılış adımı: kayıt yoksa İngilizce varsayılanla sor. */
+/* Language picker + first-launch step: ask with the English default when unset. */
 function fillLanguageSelect(select, current) {
   select.replaceChildren();
   for (const { code, label } of globalThis.MLI18N.LANGUAGES) {
@@ -71,7 +71,7 @@ for (const id of ['settings', 'add-key']) $(id).onclick = () => MLUI.openSetting
 $('btn-full-chapter').onclick = () => start('START_PAGE_TRANSLATION'); $('btn-translate-page').onclick = () => start('START_SELECTION_MODE'); $('btn-quick-translate').onclick = () => start(quick ? 'STOP_QUICK_TRANSLATE_MODE' : 'START_QUICK_TRANSLATE_MODE');
 chrome.storage.onChanged.addListener((changes, area) => { if (!saving) { refresh().catch(error => notice(error.message)); stats().catch(() => {}); } if (area === 'sync' && changes && changes[MLI18N.KEY]) { MLI18N.init().then(() => fillLanguageSelect($('ui-language'), MLI18N.lang)).catch(() => {}); } });
 
-/* Dil önce: statik metinler, seçici, ilk açılış adımı; sonra normal akış. */
+/* Language first: static texts, picker, first-launch step; then normal flow. */
 (async () => {
   const had = (await chrome.storage.sync.get({ [MLI18N.KEY]: null }))[MLI18N.KEY];
   const lang = await MLI18N.init();

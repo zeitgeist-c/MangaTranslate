@@ -10,7 +10,7 @@ globalThis.MLQueue = class {
     this.paused.add(owner);
     this.waiting = this.waiting.filter(entry => {
       if (entry.owner !== owner) return true;
-      entry.reject(Object.assign(new Error('Gönderilmemiş grup duraklatıldı.'), { notSent: true, code: 'JOB_PAUSED' })); return false;
+      entry.reject(Object.assign(new Error('Unsent group paused.'), { notSent: true, code: 'JOB_PAUSED' })); return false;
     });
   }
   enqueue(owner, task, { lane = 'default', maxConcurrency = 8 } = {}) {
@@ -20,13 +20,13 @@ globalThis.MLQueue = class {
   pump() {
     this.waiting = this.waiting.filter(entry => {
       if (!this.isBlocked(entry.owner) && !this.paused.has(entry.owner)) return true;
-      entry.reject(Object.assign(new Error('Bu işin yeni gönderimleri durduruldu; açık yeniden deneme gerekli.'), { notSent: true, stopJob: true, code: 'DISPATCH_STOPPED' })); return false;
+      entry.reject(Object.assign(new Error('New submissions for this job stopped; an explicit retry is required.'), { notSent: true, stopJob: true, code: 'DISPATCH_STOPPED' })); return false;
     });
     while (this.active < this.limit && this.waiting.length) {
       const index = this.waiting.findIndex(entry => (this.lanes.get(entry.lane) || 0) < entry.maxConcurrency);
       if (index < 0) break;
       const [entry] = this.waiting.splice(index, 1); this.active++;
-      if (this.paused.has(entry.owner)) { this.active--; entry.reject(Object.assign(new Error('Gönderilmemiş grup duraklatıldı.'), { notSent: true, code: 'JOB_PAUSED' })); continue; }
+      if (this.paused.has(entry.owner)) { this.active--; entry.reject(Object.assign(new Error('Unsent group paused.'), { notSent: true, code: 'JOB_PAUSED' })); continue; }
       this.lanes.set(entry.lane, (this.lanes.get(entry.lane) || 0) + 1);
       Promise.resolve().then(() => entry.task({ queueMs: Date.now() - entry.queuedAt, concurrency: Math.min(this.limit, entry.maxConcurrency) })).then(value => {
         if (!this.isBlocked(entry.owner) && ++this.streak >= 4) { this.streak = 0; this.limit = Math.min(8, this.limit + 2); this.onLimit(this.limit); }

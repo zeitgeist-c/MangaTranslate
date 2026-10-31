@@ -1,10 +1,10 @@
 'use strict';
-/* MangaLens TR arayüz dili (UI) — 13 dil sözleşmesi.
- * - Kaynak dil İngilizce; her dil kendi sözlüğünde.
- * - Kayıt yoksa İngilizce; tarayıcı/OS dili varsayılanı ezmez.
- * - UI dili manga çeviri hedef dili değildir (çeviri hedefi ayrı ayardır).
- * - Kayıt: chrome.storage.sync 'uiLanguage'. Güncelleme tercihi sıfırlamaz.
- * - Eksik anahtar EN'e düşer (çalışır), ama release kapısında eksik = kırmızı.
+/* MangaLens TR interface language (UI) — 13-language contract.
+ * - Source language is English; each language keeps its own dictionary.
+ * - English when unset; the browser/OS language never overrides.
+ * - The UI language is not the manga translation target (a separate setting).
+ * - Stored in chrome.storage.sync 'uiLanguage'. Updates never reset it.
+ * - Missing keys fall back to EN (works), but the release gate fails on missing.
  */
 globalThis.MLI18N = (() => {
   const LANGUAGES = [
@@ -31,7 +31,7 @@ globalThis.MLI18N = (() => {
   async function get() {
     try {
       const s = await chrome.storage.sync.get({ [KEY]: null });
-      // Kayıt yoksa mevcut dil korunur (test kancası / erken varsayılan ezilmez).
+      // Without a record the current language is kept (test hook / early default untouched).
       if (s[KEY] != null) lang = resolve(s[KEY]);
     } catch { /* lang korunur */ }
     return lang;
@@ -96,7 +96,7 @@ globalThis.MLI18N = (() => {
 
   const STRINGS = { en: {}, tr: {}, de: {}, es: {}, fr: {}, it: {}, 'pt-BR': {}, ru: {}, pl: {}, nl: {}, 'zh-CN': {}, ja: {}, ko: {} };
   return { LANGUAGES, CODES, KEY, get, set, t, applyStatic, init, onChange, watchStorage, STRINGS,
-    /** Testler için senkron dil sabitleme (storage'suz vm ortamları). */
+    /** Synchronous language pinning for tests (storageless vm environments). */
     __testLang(code) { if (CODES.has(code)) lang = code; return lang; },
     get lang() { return lang; } };
 })();

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import { webcrypto } from 'node:crypto';
-const i18nSources = await Promise.all(['i18n.js','i18n-strings.js','i18n-strings-content.js'].map(x=>readFile(new URL('../src/'+x,import.meta.url),'utf8')));
+const i18nSources = await Promise.all(['i18n.js','i18n-strings-all.js'].map(x=>readFile(new URL('../src/'+x,import.meta.url),'utf8')));
 const source = await readFile(new URL('../src/page-content.js', import.meta.url), 'utf8');
 const flush = async () => { for (let i = 0; i < 200; i++) await Promise.resolve(); };
 function fixture({ blocked = false, oldVersion } = {}) {
