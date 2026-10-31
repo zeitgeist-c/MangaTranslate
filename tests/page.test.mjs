@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { interior, wrapText, fuseGroups, fitText } from '../src/page/layout.mjs';
 const context = vm.createContext({});
-for (const f of ['i18n.js','i18n-strings.js','i18n-strings-content.js','providers.js']) vm.runInContext(await readFile(new URL('../src/'+f, import.meta.url), 'utf8'), context);
+for (const f of ['i18n.js','i18n-strings-all.js','providers.js']) vm.runInContext(await readFile(new URL('../src/'+f, import.meta.url), 'utf8'), context);
 vm.runInContext("MLI18N.__testLang('tr')", context);
 const providers = context.MLProviders;
 test('providers preserve separate selected models and require explicit contributor consent', () => {

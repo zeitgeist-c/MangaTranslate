@@ -123,7 +123,7 @@ async function mlPickRoundRobin(provider, owner, opts = {}) {
   const keys = await mlListProviderKeys(provider);
   if (!keys.length) throw new Error(T('pg_provider_key_missing', { provider: provider === 'gemini' ? 'Gemini' : provider === 'openrouter' ? 'OpenRouter' : 'Ollama' }));
   const now = Date.now(), scope = mlBatchScope(provider, owner);
-  // Ollama bulutu anahtar başına tek isteğe izin verir: pencere dolar dolmaz beklenir, taşma yapılmaz.
+  // Ollama cloud allows one request per key: wait as soon as the window fills, never overflow.
   const limit = provider === 'ollama' ? 1 : ML_KEY_WINDOW;
   const state = mlBatchState.has(scope) ? mlBatchOrder(keys, scope) : mlBatchOrder(keys, scope, await mlBatchActiveId(provider, keys));
   let earliest = Infinity;
@@ -355,9 +355,9 @@ async function mlProviderCall(config, prompt, images, keyOverride, owner) {
           await new Promise(resolve => setTimeout(resolve, wait));
         }
       }
-      // 429/503 reddedildi demektir (ücret yok): zincirdeki sonraki Gemini modeliyle
-      // aynı iş içinde otomatik devam edilir. Opt-in açıksa diğer retryable
-      // hatalarda (500/502/504/408) da zincirlenir; kapalıysa iş durur.
+      // 429/503 means rejected (no charge): continue automatically with the next Gemini model in the chain
+      // within the same job. When opt-in is on, other retryable
+      // errors (500/502/504/408) chain too; otherwise the job stops.
       const chainable = current.provider === 'gemini' && (error.httpStatus === 429 || error.httpStatus === 503 ||
         (current.geminiFallback === true && error.retryableStatus === true));
       const next = chainable ? MLProviders.nextGeminiModel(current.model) : null;

@@ -3,8 +3,8 @@
 
 'use strict';
 
-if (typeof importScripts === 'function') importScripts('i18n.js', 'i18n-strings.js', 'providers.js', 'keys.js', 'page/queue.js', 'page-background.js');
-else { /* non-worker context: i18n dosyaları ayrıca yüklenir */ }
+if (typeof importScripts === 'function') importScripts('i18n.js', 'i18n-strings-all.js', 'providers.js', 'keys.js', 'page/queue.js', 'page-background.js');
+else { /* non-worker context: i18n files load separately */ }
 
 const T = (key, vars) => (globalThis.MLI18N ? globalThis.MLI18N.t(key, vars) : key);
 if (globalThis.MLI18N && typeof chrome !== 'undefined' && chrome.storage) globalThis.MLI18N.get().catch(() => {});
@@ -15,7 +15,7 @@ const GEMINI_MODELS = Object.freeze({
   GEMMA_FAST: 'gemma-4-26b-a4b-it',
 });
 // Sirasi = onem/yedek zincir sirasi. Secili modelden baslanir, listedeki sonrakiyle devam edilir.
-// Gemma 4 31B pratikte yanıt vermedigi icin (60sn zaman asimi, v3.1.5 olcumu) listede yok.
+// Gemma 4 31B is not listed: it never answers in practice (60s timeout, v3.1.5 measurement).
 const GEMINI_MODEL_VALUES = Object.freeze(Object.values(GEMINI_MODELS));
 const GEMINI_MODEL_LABELS = Object.freeze({
   [GEMINI_MODELS.DEFAULT]: 'Gemini 3.5 Flash Lite',
@@ -491,7 +491,7 @@ async function testApiKey(apiKey) {
   }
 }
 
-// v2.7: parseBubbleArray boş/geçersiz girişte hata fırlatır → cache yazılmaz
+// v2.7: parseBubbleArray throws on empty/invalid input → nothing cached
 function parseBubbleArray(raw, w, h) {
   if (!raw || !String(raw).trim()) {
     throw new Error('parseBubbleArray: bos giris');

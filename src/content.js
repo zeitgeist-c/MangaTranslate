@@ -1,4 +1,4 @@
-// MangaLens content script — Alan Seç, Oto Çevir ve sonuç araçları
+// MangaLens content script — Select Area, Auto Translate and result tools
 
 (() => {
 if (globalThis.__mlManualController) return;
@@ -1289,7 +1289,7 @@ function updateQuickJobState(job, state, text, info) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  v2: Otomatik Sayfa Çevirisi (Grid Tabanlı)
+//  v2: Automatic Page Translate (grid based)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const MIN_CELL_SIZE = 640; // px - upscale small cells for Gemini readability

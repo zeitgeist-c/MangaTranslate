@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import { webcrypto } from 'node:crypto';
-const i18nSources = await Promise.all(['i18n.js','i18n-strings.js','i18n-strings-content.js'].map(x=>readFile(new URL('../src/'+x,import.meta.url),'utf8')));
+const i18nSources = await Promise.all(['i18n.js','i18n-strings-all.js'].map(x=>readFile(new URL('../src/'+x,import.meta.url),'utf8')));
 const source = await readFile(new URL('../src/keys.js', import.meta.url), 'utf8');
 const routerKey = 'sk-or-synthetic-12345678901234567890', googleKey = 'AIza-synthetic-12345678901234567890';
 function fixture(initial = {}) {

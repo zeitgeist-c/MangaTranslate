@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 // AUD-MANGA-001: dil degisimi tum acik yuzeylere yayilmali.
 // MLI18N.onChange aboneligi + watchStorage storage senkronu.
 const sources = await Promise.all(
-  ['i18n.js', 'i18n-strings.js', 'i18n-strings-content.js'].map(x => readFile(new URL('../src/' + x, import.meta.url), 'utf8'))
+  ['i18n.js', 'i18n-strings-all.js'].map(x => readFile(new URL('../src/' + x, import.meta.url), 'utf8'))
 );
 
 function fixture() {

@@ -16,7 +16,7 @@ function fixture() {
   });
   return { context, calls };
 }
-const scripts = await Promise.all(['i18n.js', 'i18n-strings.js', 'i18n-strings-content.js', 'providers.js', 'page/queue.js', 'page-background.js'].map(file => readFile(new URL(`../src/${file}`, import.meta.url), 'utf8')));
+const scripts = await Promise.all(['i18n.js', 'i18n-strings-all.js', 'providers.js', 'page/queue.js', 'page-background.js'].map(file => readFile(new URL(`../src/${file}`, import.meta.url), 'utf8')));
 
 test('age confirmation refusal has a Turkish actionable job-blocking error, without model fallback', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
