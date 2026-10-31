@@ -1,5 +1,5 @@
 'use strict';
-const T = (key, vars) => (globalThis.MLI18N ? globalThis.MLI18N.t(key, vars) : key);
+/* T() is provided by the importing service-worker scope (background.js); do not redeclare here. */
 let mlOffscreenCreating;
 const mlCalls = new Map();
 const mlLocalRequests = new Map();

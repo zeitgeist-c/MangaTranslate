@@ -38,7 +38,7 @@ Text detection runs locally. Only the crops you choose are sent to the provider 
 | **Region select** | drag a box over any text and get the Turkish version in place |
 | **Auto translate** | detect the page's text blocks and translate them in one pass |
 | **Whole chapter** | scan the reader page, translate every bubble, place the result inside the safe area |
-| **Three providers** | Gemini (direct), OpenRouter, or a local Ollama instance — per-provider key lists |
+| **Three providers** | Gemini (direct), OpenRouter, or Ollama Cloud — per-provider key lists |
 | **Key rotation** | requests walk the saved keys in order; a key that returns 429 or hits its quota is rested and the next one is used |
 | **Provider failover** | on Gemini 429/503 the next model in the list is tried automatically; other transient errors chain only when you opt in |
 | **Term dictionary** | your own names and terms keep their Turkish spelling across pages |
@@ -78,7 +78,7 @@ The same popup with the OpenRouter tab active. The model list changes to OpenRou
 
 Each provider is independent: a Gemini key never appears under OpenRouter and vice versa.
 
-Ollama works the same way against a local endpoint — no cloud key, no request leaving the machine.
+Ollama uses Ollama Cloud (`https://ollama.com/api/chat`) with your own API key — crops are sent to Ollama's cloud like any other provider.
 
 ### 3. Settings — API keys
 
@@ -157,7 +157,7 @@ Parallelism adapts: Gemini opens one lane per key (max 4) with 2.5 s spacing per
 |---|---|---|
 | **Gemini** | a Google AI Studio key | direct path, no aggregator in between |
 | **OpenRouter** | an OpenRouter key | one key reaches many model families |
-| **Ollama** | a local Ollama server | nothing leaves the machine |
+| **Ollama** | Ollama Cloud API key | crops are sent to Ollama Cloud |
 
 Keys per provider are stored as a list. Requests walk the list in order, each key serving up to its concurrency limit, then wrap around. A key that returns 429 or burns its quota is rested for a while and skipped.
 
@@ -170,7 +170,7 @@ Keys per provider are stored as a list. Requests walk the list in order, each ke
 | Term dictionaries, job records | local |
 | Translation cache | IndexedDB |
 
-No analytics, no account, no telemetry server. The only outbound traffic is the crop you send to the provider you chose — and with Ollama, nothing leaves the machine at all.
+No analytics, no account, no telemetry server. The only outbound traffic is the crop you send to the provider you chose.
 
 ## Build from source
 

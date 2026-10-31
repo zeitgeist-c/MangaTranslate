@@ -6,7 +6,7 @@
 if (typeof importScripts === 'function') importScripts('i18n.js', 'i18n-strings-all.js', 'providers.js', 'keys.js', 'page/queue.js', 'page-background.js');
 else { /* non-worker context: i18n files load separately */ }
 
-const T = (key, vars) => (globalThis.MLI18N ? globalThis.MLI18N.t(key, vars) : key);
+/* T() comes from i18n.js (loaded first via importScripts); do not redeclare. */
 if (globalThis.MLI18N && typeof chrome !== 'undefined' && chrome.storage) globalThis.MLI18N.get().catch(() => {});
 
 const GEMINI_MODELS = Object.freeze({

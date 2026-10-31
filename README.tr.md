@@ -38,7 +38,7 @@ Yazı tespiti yerelde çalışır. Yalnız seçtiğin kırpmalar seçtiğin sağ
 | **Alan seç** | herhangi bir yazının üzerine kutu çiz, Türkçesi yerine gelsin |
 | **Oto çevir** | sayfanın yazı bloklarını bul, tek geçişte çevir |
 | **Tam bölüm** | okuyucu sayfasını tara, her balonu çevir, sonucu güvenli alana yerleştir |
-| **Üç sağlayıcı** | Gemini (doğrudan), OpenRouter veya yerel Ollama — sağlayıcı başına anahtar listesi |
+| **Üç sağlayıcı** | Gemini (doğrudan), OpenRouter veya Ollama Cloud — sağlayıcı başına anahtar listesi |
 | **Anahtar rotasyonu** | istekler kayıtlı anahtarları sırayla gezer; 429 yiyen veya kotası dolan anahtar dinlenir, sıradaki kullanılır |
 | **Sağlayıcı yedekleme** | Gemini 429/503'te listedeki sonraki model otomatik denenir; diğer geçici hatalar yalnız sen açarsan zincirlenir |
 | **Terim sözlüğü** | kendi adların ve terimlerin sayfalar arasında aynı Türkçe karşılıkla kalır |
@@ -78,7 +78,7 @@ Aynı popup, OpenRouter sekmesi etkin. Model listesi OpenRouter kataloğuna dön
 
 Her sağlayıcı bağımsızdır: Gemini anahtarı OpenRouter altında asla görünmez, tersi de geçmez.
 
-Ollama aynı şekilde yerel bir uç noktaya karşı çalışır — bulut anahtarı yok, makineden istek çıkmaz.
+Ollama, Ollama Cloud (`https://ollama.com/api/chat`) üzerinden kendi API anahtarınla çalışır — kırpmalar diğer sağlayıcılarda olduğu gibi Ollama bulutuna gönderilir.
 
 ### 3. Ayarlar — API anahtarları
 
@@ -157,7 +157,7 @@ Paralellik uyarlanır: Gemini anahtar başına bir şerit açar (en fazla 4), an
 |---|---|---|
 | **Gemini** | Google AI Studio anahtarı | doğrudan yol, arada aracı yok |
 | **OpenRouter** | OpenRouter anahtarı | tek anahtar birçok model ailesine ulaşır |
-| **Ollama** | yerel Ollama sunucusu | makineden hiçbir şey çıkmaz |
+| **Ollama** | Ollama Cloud API anahtarı | kırpmalar Ollama Cloud'a gönderilir |
 
 Sağlayıcı başına anahtarlar liste olarak saklanır. İstekler listeyi sırayla gezer, her anahtar eşzamanlılık sınırına kadar hizmet eder, sonra başa dönülür. 429 yiyen veya kotası dolan anahtar bir süre dinlendirilir ve atlanır.
 
@@ -170,7 +170,7 @@ Sağlayıcı başına anahtarlar liste olarak saklanır. İstekler listeyi sıra
 | Terim sözlükleri, iş kayıtları | yerel |
 | Çeviri önbelleği | IndexedDB |
 
-Analitik yok, hesap yok, telemetri sunucusu yok. Tek dış trafik seçtiğin sağlayıcıya gönderdiğin kırpmadır — Ollama ile makineden hiçbir şey çıkmaz.
+Analitik yok, hesap yok, telemetri sunucusu yok. Tek dış trafik seçtiğin sağlayıcıya gönderdiğin kırpmadır.
 
 ## Kaynaktan çalıştırma
 
