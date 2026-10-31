@@ -17,3 +17,7 @@ dist/
 
 # Private recovery data and locally downloaded evaluation assets
 .rollback/
+
+# dependencies
+node_modules/
+package-lock.json
