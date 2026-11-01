@@ -1,7 +1,11 @@
 'use strict';
 const $ = id => document.getElementById(id), prefs = ['content-type', 'local-detector', 'font-size', 'series-name', 'translation-instructions', 'translation-glossary', 'contributor-consent', 'gemini-fallback'];
-const T = (key, vars) => (globalThis.MLI18N ? globalThis.MLI18N.t(key, vars) : key);
+/* T() comes from i18n.js (loaded first in settings.html); do not redeclare. */
 let provider = 'gemini', section = 'keys', dirty = false, listing = 0, formSaving = false, adding = false;
+let modelListing = 0, modelCollapsed = { gemini: true };
+const modelFilter = {};
+const modelBusy = new Set();
+const MODEL_COLLAPSE_AFTER = 5;
 const checking = new Set();
 function notice(text) { $('notice').textContent = text; $('notice').hidden = !text; }
 function markDirty(value) { dirty = value; $('dirty-status').textContent = dirty ? T('unsaved') : T('no_changes'); }
@@ -40,6 +44,96 @@ async function renderKeys() {
   }
   $('router-help').hidden = provider !== 'openrouter';
 }
+/* Model management (Hera pattern, vanilla): fetch per provider, free/paid badges, on/off. */
+async function renderModels() {
+  const token = ++modelListing, parent = $('model-list');
+  const prefs = await MLProviders.modelPreferences().catch(() => MLProviders.defaultPrefs());
+  if (token !== modelListing) return;
+  const query = $('model-search').value || '';
+  const enabled = new Set(prefs.enabled || []);
+  parent.replaceChildren();
+  for (const name of ['gemini', 'openrouter', 'ollama']) {
+    const all = MLProviders.allModels(name, prefs);
+    const bucket = modelFilter[name] || 'all';
+    const visible = MLProviders.filterModels(all, query, bucket);
+    const freeCount = all.filter(m => MLProviders.isFreeModel(m)).length;
+    const collapsed = modelCollapsed[name] === true && !query && bucket === 'all';
+    const shown = collapsed ? visible.slice(0, MODEL_COLLAPSE_AFTER) : visible;
+    const onTotal = all.filter(m => enabled.has(`${name}:${m.modelId}`)).length;
+    const onVisible = visible.filter(m => enabled.has(`${name}:${m.modelId}`)).length;
+    const card = document.createElement('article'); card.className = 'card';
+    const head = document.createElement('div'); head.className = 'key-info';
+    const title = document.createElement('strong'); title.textContent = name[0].toUpperCase() + name.slice(1); head.append(title);
+    const count = document.createElement('span'); count.className = 'badge'; count.textContent = T('models_count', { count: all.length }); head.append(count);
+    if (name === 'openrouter' && freeCount > 0) { const fc = document.createElement('span'); fc.className = 'badge active'; fc.textContent = T('models_free_count', { count: freeCount }); head.append(fc); }
+    const stamp = prefs.refreshedAt && prefs.refreshedAt[name];
+    const state = document.createElement('span'); state.className = 'hint';
+    state.textContent = modelBusy.has(name) ? T('models_loading') : stamp ? T('models_updated', { date: new Date(stamp).toLocaleString(MLI18N.lang) }) : T('models_never');
+    head.append(state);
+    const actions = document.createElement('div'); actions.className = 'key-actions';
+    const refreshButton = document.createElement('button'); refreshButton.type = 'button'; refreshButton.textContent = T('models_refresh'); refreshButton.disabled = modelBusy.has(name);
+    refreshButton.onclick = async () => {
+      if (modelBusy.has(name)) return; modelBusy.add(name); await renderModels();
+      try { await MLUI.modelsRefresh(name); notice(''); }
+      catch (error) { notice(error.message); }
+      finally { modelBusy.delete(name); await renderModels().catch(err => notice(err.message)); }
+    };
+    actions.append(refreshButton); card.append(head, actions);
+    const tools = document.createElement('div'); tools.className = 'model-tools';
+    const seg = document.createElement('div'); seg.className = 'seg'; seg.setAttribute('role', 'group');
+    for (const b of ['all', 'free', 'paid']) {
+      const chip = document.createElement('button'); chip.type = 'button';
+      chip.textContent = b === 'all' ? T('models_all') : b === 'free' ? T('models_free') : T('models_paid');
+      chip.classList.toggle('on', bucket === b);
+      chip.onclick = () => { modelFilter[name] = b; renderModels().catch(error => notice(error.message)); };
+      seg.append(chip);
+    }
+    tools.append(seg);
+    const applyBulk = async on => {
+      const next = await MLProviders.modelPreferences().catch(() => MLProviders.defaultPrefs());
+      const set = new Set(next.enabled || []);
+      for (const m of visible) { const k = `${name}:${m.modelId}`; if (on) set.add(k); else set.delete(k); }
+      if (!set.size) { notice(T('models_keep_one')); return; }
+      next.enabled = [...set];
+      await MLProviders.saveModelPreferences(next); notice('');
+      await renderModels().catch(error => notice(error.message));
+    };
+    const selectAll = document.createElement('button'); selectAll.type = 'button'; selectAll.className = 'bulk'; selectAll.textContent = T('models_select_visible');
+    selectAll.onclick = () => applyBulk(true).catch(error => notice(error.message));
+    const clearAll = document.createElement('button'); clearAll.type = 'button'; clearAll.className = 'bulk ghost'; clearAll.textContent = T('models_clear_visible');
+    clearAll.onclick = () => applyBulk(false).catch(error => notice(error.message));
+    tools.append(selectAll, clearAll); card.append(tools);
+    for (const m of shown) {
+      const row = document.createElement('label'); row.className = 'model-pick';
+      const box = document.createElement('input'); box.type = 'checkbox'; box.checked = enabled.has(`${name}:${m.modelId}`);
+      box.onchange = async () => {
+        const next = await MLProviders.modelPreferences().catch(() => MLProviders.defaultPrefs());
+        const set = new Set(next.enabled || []), key = `${name}:${m.modelId}`;
+        if (box.checked) set.add(key); else set.delete(key);
+        if (!set.size) { notice(T('models_keep_one')); await renderModels().catch(() => {}); return; }
+        next.enabled = [...set];
+        await MLProviders.saveModelPreferences(next); notice('');
+        await renderModels().catch(error => notice(error.message));
+      };
+      const text = document.createElement('span');
+      const label = document.createElement('strong'); label.textContent = m.label; text.append(label);
+      const meta = document.createElement('div'); meta.className = 'hint';
+      meta.textContent = m.modelId + (MLProviders.isFreeModel(m) ? ` · ${T('models_free')}` : '') + (MLProviders.isPaidModel(m) ? ` · ${T('models_paid')}` : '');
+      text.append(meta); row.append(box, text); card.append(row);
+    }
+    if (!visible.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = T('models_empty'); card.append(empty); }
+    if (visible.length > MODEL_COLLAPSE_AFTER && !query && bucket === 'all') {
+      const more = document.createElement('button'); more.type = 'button'; more.className = 'text-button';
+      more.textContent = collapsed ? T('models_show_more', { count: visible.length - MODEL_COLLAPSE_AFTER }) : T('models_show_less');
+      more.onclick = () => { modelCollapsed[name] = !collapsed; renderModels().catch(error => notice(error.message)); };
+      card.append(more);
+    }
+    const counter = document.createElement('p'); counter.className = 'res-line';
+    counter.textContent = T('models_visible', { on: onVisible, shown: visible.length, totalOn: onTotal, total: all.length });
+    card.append(counter);
+    parent.append(card);
+  }
+}
 function applyRoute() {
   const [nextSection, nextProvider] = location.hash.slice(1).split('/');
   if (dirty && section === 'preferences' && nextSection !== 'preferences') {
@@ -47,10 +141,11 @@ function applyRoute() {
     markDirty(false); loadPreferences().catch(error => notice(error.message));
   }
   if (provider !== nextProvider && !adding) { $('new-key').value = ''; $('new-label').value = ''; }
-  section = ['keys', 'preferences', 'about'].includes(nextSection) ? nextSection : 'keys'; provider = ['gemini', 'openrouter', 'ollama'].includes(nextProvider) ? nextProvider : 'gemini';
-  for (const name of ['keys', 'preferences', 'about']) { $('section-' + name).hidden = section !== name; document.querySelector(`[data-section="${name}"]`).setAttribute('aria-selected', String(section === name)); }
+  section = ['keys', 'preferences', 'models', 'about'].includes(nextSection) ? nextSection : 'keys'; provider = ['gemini', 'openrouter', 'ollama'].includes(nextProvider) ? nextProvider : 'gemini';
+  for (const name of ['keys', 'preferences', 'models', 'about']) { $('section-' + name).hidden = section !== name; document.querySelector(`[data-section="${name}"]`).setAttribute('aria-selected', String(section === name)); }
   for (const name of ['gemini', 'openrouter', 'ollama']) $('keys-' + name).setAttribute('aria-pressed', String(provider === name));
   renderKeys().catch(error => notice(error.message));
+  renderModels().catch(error => notice(error.message));
 }
 function navigate(nextSection, nextProvider) {
   if (adding) return;
@@ -80,16 +175,10 @@ $('preferences-form').onsubmit = async event => {
   } catch (error) { notice(T('prefs_save_failed', { error: error.message })); }
   finally { formSaving = false; $('save-preferences').disabled = false; }
 };
-$('refresh-models').onclick = async () => {
-  $('refresh-models').disabled = true;
-  try { const response = await fetch('https://openrouter.ai/api/v1/models', { signal: AbortSignal.timeout(15000) }); if (!response.ok) throw new Error(T('catalog_http', { status: response.status }));
-    const { data } = await response.json(), available = MLProviders.catalog.openrouter.filter(([id]) => data.some(m => m.id === id && m.architecture?.input_modalities?.includes('image'))).length;
-    $('model-availability').textContent = T('catalog_ok', { available, total: MLProviders.catalog.openrouter.length });
-  } catch (error) { $('model-availability').textContent = error.message; } finally { $('refresh-models').disabled = false; }
-};
 window.addEventListener('beforeunload', event => { if (dirty || adding) { event.preventDefault(); event.returnValue = ''; } });
 window.addEventListener('hashchange', applyRoute);
-chrome.storage.onChanged.addListener((changes, area) => { renderKeys().catch(error => notice(error.message)); loadPreferences().catch(error => notice(error.message)); if (area === 'sync' && changes && changes[MLI18N.KEY]) { MLI18N.init().then(() => fillLanguageSelect($('ui-language'), MLI18N.lang)).catch(() => {}); } });
+chrome.storage.onChanged.addListener((changes, area) => { renderKeys().catch(error => notice(error.message)); renderModels().catch(error => notice(error.message)); loadPreferences().catch(error => notice(error.message)); if (area === 'sync' && changes && changes[MLI18N.KEY]) { MLI18N.init().then(() => fillLanguageSelect($('ui-language'), MLI18N.lang)).catch(() => {}); } });
+$('model-search').addEventListener('input', () => renderModels().catch(error => notice(error.message)));
 $('version').textContent = 'v' + chrome.runtime.getManifest().version;
 function fillLanguageSelect(select, current) {
   select.replaceChildren();

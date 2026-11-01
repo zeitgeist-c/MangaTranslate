@@ -17,7 +17,7 @@
       for (const entry of eventLog.slice(0, 8)) {
         const line = document.createElement('div');
         const time = document.createElement('time');
-        time.textContent = new Date(entry.at).toLocaleTimeString(globalThis.MLI18N.lang, { hour12: false }) + ' ';
+        time.textContent = new Date(entry.at).toLocaleTimeString(globalThis.MLI18N ? globalThis.MLI18N.lang : undefined, { hour12: false }) + ' ';
         line.append(time, document.createTextNode(entry.text));
         logNode.append(line);
       }

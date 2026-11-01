@@ -6,10 +6,10 @@ const root = new URL('../', import.meta.url);
 test('MV3 ships only local executable assets and declares the offscreen boundary', async () => {
   const manifest = JSON.parse(await readFile(new URL('manifest.json', root), 'utf8'));
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
-  // Varsa dagitim ZIP'i manifest ile ayni surumu tasimali.
+  // Varsa dagitim ZIP'i manifest ile ayni surumu tasimali (release/ klasorunde).
   const { readdir } = await import('node:fs/promises');
-  const distFiles = await readdir(new URL('dist/', root)).catch(() => []);
-  const zips = distFiles.filter((f) => /^MangaLensTR-\d+\.\d+\.\d+\.zip$/.test(f));
+  const releaseFiles = await readdir(new URL('release/', root)).catch(() => []);
+  const zips = releaseFiles.filter((f) => /^MangaLensTR-\d+\.\d+\.\d+\.zip$/.test(f));
   for (const z of zips) assert.ok(z.includes(manifest.version));
   assert.ok(manifest.permissions.includes('offscreen'));
   assert.ok(manifest.content_security_policy.extension_pages.includes("'wasm-unsafe-eval'"));
@@ -19,7 +19,7 @@ test('MV3 ships only local executable assets and declares the offscreen boundary
   assert.equal(manifest.options_ui.open_in_tab, true); await access(new URL(manifest.options_ui.page, root));
   for (const file of ['popup/ui.js', 'src/keys.js', 'options/settings.js']) await access(new URL(file, root));
   const packager = await readFile(new URL('package.ps1', root), 'utf8');
-  assert.ok(packager.includes("Join-Path $distDir $packageName"), 'paket dist/ altında üretilmeli');
+  assert.ok(packager.includes("Join-Path $releaseDir $packageName"), 'paket release/ altında üretilmeli');
   const offscreen = await readFile(new URL('src/page/offscreen.mjs', root), 'utf8');
   assert.ok(offscreen.includes("'./vendor/ort.all.bundle.min.mjs'"));
   assert.ok(!offscreen.includes('cdn.jsdelivr.net')); assert.ok(!offscreen.includes('apiKey'));

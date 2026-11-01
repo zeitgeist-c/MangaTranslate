@@ -25,7 +25,7 @@ with zipfile.ZipFile(source) as archive:
         restored.parent.mkdir(parents=True, exist_ok=True)
         restored.write_bytes(archive.read(record['path']))
         assert digest(restored.read_bytes()) == record['sha256']
-package = root/f'MangaLensTR-{version}.zip'
+package = root/'release'/f'MangaLensTR-{version}.zip'
 package_data = package.read_bytes()
 with zipfile.ZipFile(package) as archive:
     assert json.loads(archive.read('manifest.json'))['version'] == version

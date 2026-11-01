@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MangaLens TR",
-  "version": "3.9.7",
+  "version": "3.9.9",
   "description": "Translates English speech bubbles on manga, manhwa and manhua sites into Turkish with AI.",
   "icons": {
     "16": "assets/icon16.png",

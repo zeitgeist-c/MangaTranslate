@@ -11,9 +11,8 @@ Thumbs.db
 # Temp
 *.tmp
 *.log
-# Generated extension packages
+# Generated extension packages (zip'ler yerelde; sha256 izlenir)
 MangaLensTR-*.zip
-MangaLensTR-*.zip.sha256
 dist/
 
 # Private recovery data and locally downloaded evaluation assets

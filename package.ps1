@@ -35,19 +35,7 @@ $requiredFiles = @(
     'options\settings.html',
     'options\settings.js',
     'src\i18n.js',
-    'src\i18n-strings.js',
-    'src\i18n-strings-content.js',
-    'src\i18n-strings-de.js',
-    'src\i18n-strings-es.js',
-    'src\i18n-strings-fr.js',
-    'src\i18n-strings-it.js',
-    'src\i18n-strings-pt-BR.js',
-    'src\i18n-strings-ru.js',
-    'src\i18n-strings-pl.js',
-    'src\i18n-strings-nl.js',
-    'src\i18n-strings-zh-CN.js',
-    'src\i18n-strings-ja.js',
-    'src\i18n-strings-ko.js',
+    'src\i18n-strings-all.js',
     'src\keys.js',
     'popup\style.css',
     'src\background.js',
@@ -87,7 +75,7 @@ $node = Get-Command 'node.exe' -ErrorAction SilentlyContinue
 if (-not $node) {
     throw 'JavaScript sözdizimi doğrulaması için Node.js bulunamadı.'
 }
-foreach ($relativePath in @('src\i18n.js', 'src\i18n-strings.js', 'src\i18n-strings-content.js', 'src\i18n-strings-de.js', 'src\i18n-strings-es.js', 'src\i18n-strings-fr.js', 'src\i18n-strings-it.js', 'src\i18n-strings-pt-BR.js', 'src\i18n-strings-ru.js', 'src\i18n-strings-pl.js', 'src\i18n-strings-nl.js', 'src\i18n-strings-zh-CN.js', 'src\i18n-strings-ja.js', 'src\i18n-strings-ko.js', 'popup\popup.js', 'popup\ui.js', 'options\settings.js', 'src\keys.js', 'src\background.js', 'src\content.js', 'src\providers.js', 'src\page-background.js', 'src\page-content.js', 'src\page\offscreen.mjs', 'src\page\layout.mjs', 'src\page\queue.js', 'src\page\lib\db.mjs', 'src\page\lib\ppocr.mjs', 'src\page\store.mjs')) {
+foreach ($relativePath in @('src\i18n.js', 'src\i18n-strings-all.js', 'popup\popup.js', 'popup\ui.js', 'options\settings.js', 'src\keys.js', 'src\background.js', 'src\content.js', 'src\providers.js', 'src\page-background.js', 'src\page-content.js', 'src\page\offscreen.mjs', 'src\page\layout.mjs', 'src\page\queue.js', 'src\page\lib\db.mjs', 'src\page\lib\ppocr.mjs', 'src\page\store.mjs')) {
     & $node.Source --check (Join-Path $projectRoot $relativePath)
     if ($LASTEXITCODE -ne 0) {
         throw "JavaScript sözdizimi doğrulaması başarısız: $relativePath"
@@ -97,7 +85,9 @@ foreach ($relativePath in @('src\i18n.js', 'src\i18n-strings.js', 'src\i18n-stri
 $packageName = "MangaLensTR-$version.zip"
 $distDir = Join-Path $projectRoot 'dist'
 if (-not (Test-Path -LiteralPath $distDir)) { New-Item -ItemType Directory -Path $distDir | Out-Null; }
-$packagePath = Join-Path $distDir $packageName
+$releaseDir = Join-Path $projectRoot 'release'
+if (-not (Test-Path -LiteralPath $releaseDir)) { New-Item -ItemType Directory -Path $releaseDir | Out-Null; }
+$packagePath = Join-Path $releaseDir $packageName
 if (Test-Path -LiteralPath $packagePath) {
     throw "Önceki paket korunuyor; aynı sürümün üzerine yazılmaz: $packagePath"
 }
@@ -112,7 +102,7 @@ foreach ($readmePath in @('README.md', 'README.tr.md')) {
 & $node.Source --test (Get-ChildItem -LiteralPath (Join-Path $projectRoot 'tests') -File | Where-Object { $_.Name -match '\.test\.(js|mjs)$' } | ForEach-Object FullName)
 if ($LASTEXITCODE -ne 0) { throw 'Sürüm testleri başarısız; paket oluşturulmadı.' }
 
-# dist: canlı yüklenebilir paketlenmemiş kopya (zip'ler korunur, eski kopya yenilenir)
+# dist: canlı yüklenebilir paketlenmemiş kopya (eski kopya yenilenir; zip'ler release/'de durur)
 foreach ($stale in @('manifest.json', 'assets', 'popup', 'options', 'src')) {
     $stalePath = Join-Path $distDir $stale
     if (Test-Path -LiteralPath $stalePath) { Remove-Item -LiteralPath $stalePath -Recurse -Force }
@@ -148,5 +138,8 @@ try {
 finally {
     $archive.Dispose()
 }
+
+$shaPath = "$packagePath.sha256"
+(Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLower() + "  $packageName" | Set-Content -LiteralPath $shaPath -Encoding ASCII
 
 Write-Host "ZIP paketi oluşturuldu: $packagePath" -ForegroundColor Green

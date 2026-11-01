@@ -1,9 +1,9 @@
-# Mağaza alan paketi — MangaLens TR 3.8.6 (güncelleme yayını)
+# Mağaza alan paketi — MangaLens TR 3.9.9 (güncelleme yayını)
 
 Kayıt zaten açık; sıfırdan ürün açılmıyor. Sıra: Package → Store listing → Privacy → Distribution → Test instructions → Submit. Aşağıdaki metinler aynen yapıştırılabilir.
 
 ## 1) Package
-- `Package → Upload new package → MangaLensTR-3.8.6.zip` (proje kökünde).
+- `Package → Upload new package → release/MangaLensTR-3.9.9.zip`.
 - Kaynak yedeği veya şifreli profil yedeği yüklenmez. Hera AI kaydı seçilmez.
 
 ## 2) Store listing (mevcut değerleri koru, açıklamayı güncelle)
@@ -12,7 +12,7 @@ Kayıt zaten açık; sıfırdan ürün açılmıyor. Sıra: Package → Store li
 - İkon: `store/assets/icon128.png` (128x128, doğrulandı).
 - Ekran görüntüleri: `store/assets/settings.png`, `store/assets/preferences.png` (1280x800, doğrulandı; gerçek anahtar yok).
 - Küçük tanıtım: `store/assets/small-promo.png` (440x280, doğrulandı).
-- TAVSİYE (zorunlu değil): 3.8.6 kurulu bir Brave penceresinde ayarlar sayfasını 1280x800 açıp iki görüntüyü yenile; yeni "Sağlayıcı davranışı" kartı ve yeni sayfa paneli görünsün. Eski görüntülerle de gönderim yapılır, sonra güncellenir.
+- TAVSİYE (zorunlu değil): 3.9.9 kurulu bir Brave penceresinde ayarlar sayfasını 1280x800 açıp iki görüntüyü yenile; yeni "Sağlayıcı davranışı" kartı ve yeni sayfa paneli görünsün. Eski görüntülerle de gönderim yapılır, sonra güncellenir.
 
 ## 3) Privacy (gizlilik sekmeleri)
 - Single purpose: `Kullanıcının açtığı manga/manhwa/manhua görsellerindeki metinleri tespit edip seçtiği yapay zekâ sağlayıcısıyla Türkçe çeviriyi aynı sayfada göstermek.`
