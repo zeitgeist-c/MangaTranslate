@@ -203,7 +203,7 @@ async function mlRememberCooldown(config, response, data) {
 function mlEnqueue(config, task, owner) {
   if (config.provider === 'gemini') return enqueueWithRateLimit(task, { retry: false });
   if (owner === undefined) { owner = `manual:${++mlManualOwner}`; mlRouterQueue.begin(owner); }
-  const policy = config.provider === 'ollama' ? MLProviders.ollamaPolicy(config.model) : MLProviders.routerPolicy(config.model);
+  const policy = config.provider === 'ollama' ? MLProviders.ollamaPolicy(config.model, config.allowed?.ollama) : MLProviders.routerPolicy(config.model);
   return Promise.resolve(mlQueueReady).then(() => mlRouterQueue.enqueue(owner, timing => {
     const cooldown = mlCooldownError(config.model); if (cooldown) throw cooldown;
     return task(timing);
@@ -279,8 +279,47 @@ async function mlLocal(message, sender, command) {
 }
 async function mlConfig() {
   const [settings, local] = await Promise.all([chrome.storage.sync.get(null), chrome.storage.local.get('translationGlossary')]);
-  const config = MLProviders.settings({ ...settings, translationGlossary: local.translationGlossary ?? settings.translationGlossary });
+  const prefs = await MLProviders.modelPreferences();
+  const config = MLProviders.settings({ ...settings, translationGlossary: local.translationGlossary ?? settings.translationGlossary }, prefs);
+  config.allowed = {
+    openrouter: MLProviders.effectiveModels('openrouter', prefs).map(e => e.modelId),
+    ollama: MLProviders.effectiveModels('ollama', prefs).map(e => e.modelId),
+    gemini: MLProviders.effectiveModels('gemini', prefs).map(e => e.modelId),
+  };
   return { ...config, batching: await mlCapabilities(config) };
+}
+/* Model catalog refresh: runs in the service worker so raw keys never reach UI pages.
+ * Keeps the previous list when every key fails (open failure, like Hera). */
+async function mlRefreshModels(provider) {
+  if (!['gemini', 'openrouter', 'ollama'].includes(provider)) throw new Error(T('err_unknown_provider'));
+  const prefs = await MLProviders.modelPreferences();
+  let keys = [];
+  if (typeof MLKeys !== 'undefined' && typeof MLKeys.all === 'function') {
+    try { keys = await MLKeys.all(provider); } catch { /* fall through to the no-keys error */ }
+  }
+  if (!keys.length) throw new Error(T('models_no_keys', { provider }));
+  const merged = [], failed = [];
+  for (const k of keys) {
+    try { merged.push(...await MLProviders.discoverModels(provider, k.key, { sourceKeyId: k.id })); }
+    catch { failed.push(k.id); }
+  }
+  const previous = (prefs.models || []).filter(m => m.provider === provider);
+  if (!merged.length) {
+    return { ok: false, error: T('models_refresh_failed', { provider }), failed, kept: previous.length };
+  }
+  const seen = new Set(), models = [];
+  for (const m of [...merged, ...(prefs.models || []).filter(m => m.provider !== provider)]) {
+    const key = `${m.provider}:${m.modelId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const { sourceKeyId, ...safe } = m;
+    models.push(safe);
+  }
+  const enabled = new Set(prefs.enabled || []);
+  for (const m of merged) enabled.add(`${provider}:${m.modelId}`);
+  const next = { models, enabled: [...enabled], refreshedAt: { ...(prefs.refreshedAt || {}), [provider]: Date.now() } };
+  await MLProviders.saveModelPreferences(next);
+  return { ok: true, failed, added: merged.length, refreshedAt: next.refreshedAt[provider] };
 }
 async function mlKey(provider) {
   if (typeof MLKeys !== 'undefined') return MLKeys.active(provider);
@@ -360,7 +399,7 @@ async function mlProviderCall(config, prompt, images, keyOverride, owner) {
       // errors (500/502/504/408) chain too; otherwise the job stops.
       const chainable = current.provider === 'gemini' && (error.httpStatus === 429 || error.httpStatus === 503 ||
         (current.geminiFallback === true && error.retryableStatus === true));
-      const next = chainable ? MLProviders.nextGeminiModel(current.model) : null;
+      const next = chainable ? MLProviders.nextGeminiModel(current.model, await MLProviders.discoveredIds('gemini')) : null;
       if (!next) break;
       current = { ...current, model: next };
     }
@@ -398,8 +437,8 @@ async function mlProviderAttempt(config, prompt, images, keyOverride, owner) {
   let response;
   try {
     const router = config.provider === 'openrouter', cloud = config.provider === 'ollama';
-    const body = router ? MLProviders.routerBody(config.model, prompt, images, config.maxOutputTokens || 8192, config.regionsOutput === true)
-      : cloud ? MLProviders.ollamaBody(config.model, prompt, images) : {
+    const body = router ? MLProviders.routerBody(config.model, prompt, images, config.maxOutputTokens || 8192, config.regionsOutput === true, config.allowed?.openrouter)
+    : cloud ? MLProviders.ollamaBody(config.model, prompt, images, config.allowed?.ollama) : {
       contents: [{ role: 'user', parts: [{ text: prompt }, ...images.flatMap(image => {
         const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(image.dataUrl);
         if (!match) throw new Error(T('pg_invalid_crop'));
@@ -619,6 +658,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   }
   const action = async () => {
     if (message.type === 'ML_CONFIG') return mlConfig();
+    if (message.type === 'ML_MODELS_REFRESH') return mlRefreshModels(message.provider);
     if (!sender.tab?.id) throw new Error(T('pg_cmd_manga_only'));
     if (message.type === 'ML_JOB_CONTROL') {
       if (typeof message.jobId !== 'string' || message.jobId.length > 80) throw new Error(T('pg_invalid_job_id'));
@@ -626,7 +666,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       let batching;
       if (!message.paused && message.config) {
         const {provider,model}=message.config;
-        if (!MLProviders.catalog[provider]?.some(([id])=>id===model)) throw new Error(T('pg_invalid_job_model'));
+        if (!(await MLProviders.isModelAllowed(provider, model))) throw new Error(T('pg_invalid_job_model'));
         batching=await mlCapabilities({provider,model});
       }
       if (message.paused) mlRouterQueue.pause(owner);

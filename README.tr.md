@@ -131,13 +131,13 @@ Veri akışını da açıkça yazar:
 
 ## Kurulum
 
-Sürüm paketi: `MangaLensTR-3.9.5.zip`.
+Sürüm paketi: `release/MangaLensTR-3.9.9.zip`.
 
-Uzantı kaynaktan paketsiz yüklenir:
+Uzantı `dist/` klasöründen paketsiz yüklenir (canlı test kopyası):
 
 1. `brave://extensions` (veya `chrome://extensions`) adresini aç.
 2. **Geliştirici modu**nu aç.
-3. `Paketsiz yükle` ve `manifest.json` içeren klasörü seç.
+3. `Paketsiz yükle` ve `dist/` klasörünü seç (`manifest.json` içeren).
 4. Popup'ı aç, Ayarlar'a git ve en az bir API anahtarı ekle.
 
 ## Çeviri nasıl akar

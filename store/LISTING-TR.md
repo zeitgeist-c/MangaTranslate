@@ -1,6 +1,6 @@
 # MangaLens TR — mağaza metni taslağı
 
-Sürüm: 3.8.6. Dil: Türkçe. Dağıtım: **Unlisted** (bağlantıyı bilen herkes erişebilir).
+Sürüm: 3.9.9. Dil: Türkçe. Dağıtım: **Unlisted** (bağlantıyı bilen herkes erişebilir).
 İletişim: zeitgeist.geeker@gmail.com
 
 ## Açıklama

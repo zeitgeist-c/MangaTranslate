@@ -23,3 +23,36 @@ test('service worker scripts share one scope without redeclaration', async () =>
   const tDecls = [...combined.matchAll(/^(?:const|let)\s+T\s*=/gm)].length;
   assert.equal(tDecls, 1, `expected exactly one top-level T declaration, found ${tDecls}`);
 });
+
+async function combinedScope(urls, filename) {
+  const parts = [];
+  for (const u of urls) parts.push(await readFile(new URL(u, root), 'utf8'));
+  const combined = parts.join('\n;\n');
+  assert.doesNotThrow(
+    () => new vm.Script(combined, { filename }),
+    `${filename} must evaluate without SyntaxError (no duplicate lexical declarations)`,
+  );
+  const tDecls = [...combined.matchAll(/^(?:const|let)\s+T\s*=/gm)].length;
+  assert.equal(tDecls, 1, `${filename}: expected exactly one top-level T declaration, found ${tDecls}`);
+  return combined;
+}
+
+test('popup scripts share one scope without redeclaration (popup.html order)', async () => {
+  await combinedScope([
+    'src/i18n.js',
+    'src/i18n-strings-all.js',
+    'src/providers.js',
+    'popup/ui.js',
+    'popup/popup.js',
+  ], 'popup-scope');
+});
+
+test('settings scripts share one scope without redeclaration (settings.html order)', async () => {
+  await combinedScope([
+    'src/i18n.js',
+    'src/i18n-strings-all.js',
+    'src/providers.js',
+    'popup/ui.js',
+    'options/settings.js',
+  ], 'settings-scope');
+});

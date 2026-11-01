@@ -131,13 +131,13 @@ It also states the data flow plainly:
 
 ## Install
 
-Release package: `MangaLensTR-3.9.7.zip`.
+Release package: `release/MangaLensTR-3.9.9.zip`.
 
-The extension is loaded unpacked from source:
+The extension is loaded unpacked from `dist/` (live test copy):
 
 1. Open `brave://extensions` (or `chrome://extensions`).
 2. Enable **Developer mode**.
-3. `Load unpacked` and pick the repository folder (the one containing `manifest.json`).
+3. `Load unpacked` and pick the `dist/` folder (the one containing `manifest.json`).
 4. Open the popup, go to Settings, and add at least one API key.
 
 ## How a translation runs
