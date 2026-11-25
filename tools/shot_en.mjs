@@ -7,7 +7,7 @@ const STUB = () => {
         set: function(p) { Object.assign(this._s, p); return Promise.resolve(); },
         remove: function() { return Promise.resolve(); } },
       local: { get: (k) => Promise.resolve({}), set: () => Promise.resolve(), remove: () => Promise.resolve() } },
-    runtime: { sendMessage: (m) => Promise.resolve(m && String(m.type || '').startsWith('ML_KEYS') ? { ok: true, value: [] } : {}), getManifest: () => ({ version: '3.9.6' }), onMessage: { addListener: () => {} }, lastError: null },
+    runtime: { sendMessage: (m) => Promise.resolve(m && String(m.type || '').startsWith('ML_KEYS') ? { ok: true, value: [] } : {}), getManifest: () => ({ version: '3.9.10' }), onMessage: { addListener: () => {} }, lastError: null },
     tabs: { query: () => Promise.resolve([]) }, scripting: { executeScript: () => Promise.resolve() },
   };
 };

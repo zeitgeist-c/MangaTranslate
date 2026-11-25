@@ -6,7 +6,7 @@ const STUB = () => {
       set: function(p) { Object.assign(this._s, p); return Promise.resolve(); },
       remove: function() { return Promise.resolve(); } },
     local: { get: () => Promise.resolve({}), set: () => Promise.resolve() } },
-    runtime: { sendMessage: (m) => Promise.resolve(m && String(m.type || '').startsWith('ML_KEYS') ? { ok: true, value: [] } : {}), getManifest: () => ({ version: '3.9.6' }), onMessage: { addListener: () => {} } } };
+    runtime: { sendMessage: (m) => Promise.resolve(m && String(m.type || '').startsWith('ML_KEYS') ? { ok: true, value: [] } : {}), getManifest: () => ({ version: '3.9.10' }), onMessage: { addListener: () => {} } } };
 };
 const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', args: ['--no-sandbox', '--disable-gpu'] });
 const page = await browser.newPage({ viewport: { width: 900, height: 1400 } });
