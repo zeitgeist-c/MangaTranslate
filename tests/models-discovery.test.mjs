@@ -97,7 +97,7 @@ test('filterModels combines search and price buckets for bulk actions', () => {
 test('nextGeminiModel chains discovered ids after the static order', () => {
   assert.equal(P.nextGeminiModel('gemma-4-26b-a4b-it', ['gemini-9-new']), 'gemini-9-new');
   assert.equal(P.nextGeminiModel('gemini-9-new', ['gemini-9-new']), null);
-  assert.equal(P.nextGeminiModel('gemini-3.5-flash-lite'), 'gemini-3.1-flash-lite');
+  assert.equal(P.nextGeminiModel('gemini-3.5-flash-lite'), 'gemma-4-26b-a4b-it');
 });
 
 test('routerBody accepts an explicit allow-list', () => {

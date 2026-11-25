@@ -74,7 +74,7 @@ Düğmelerin altındaki not bilerek orada: *"Tam bölüm önizleme · Belirsiz a
 
 ![Popup · OpenRouter](./docs/screenshots/02-popup-openrouter.png)
 
-Aynı popup, OpenRouter sekmesi etkin. Model listesi OpenRouter kataloğuna döner (`gpt-6-luna` varsayılan, alternatif olarak `gemma-4-26b` ve `muse-spark-1.3`) ve anahtar özeti o sağlayıcının kendi anahtarlarını yansıtır.
+Aynı popup, OpenRouter sekmesi etkin. Model listesi OpenRouter kataloğuna döner (`gpt-6-luna` varsayılan, alternatif olarak `gemma-4-26b` ve `muse-ember`) ve anahtar özeti o sağlayıcının kendi anahtarlarını yansıtır.
 
 Her sağlayıcı bağımsızdır: Gemini anahtarı OpenRouter altında asla görünmez, tersi de geçmez.
 

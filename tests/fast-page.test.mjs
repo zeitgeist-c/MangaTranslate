@@ -47,7 +47,7 @@ test('data-policy 404 and quota 429 stop the job; unrelated 404 is not misclassi
   vm.runInContext("MLI18N.__testLang('tr')", context);
   vm.runInContext(await readFile(new URL('../src/page/queue.js', import.meta.url), 'utf8'), context);
   vm.runInContext(await readFile(new URL('../src/page-background.js', import.meta.url), 'utf8'), context);
-  const config = { provider: 'openrouter', model: 'meta/muse-spark-1.3-contributor' };
+  const config = { provider: 'openrouter', model: 'meta/muse-ember' };
   assert.equal(context.mlAccessError(config, 404, 'Paid model training violation (account settings)').code, 'PROVIDER_DATA_POLICY_BLOCK');
   assert.equal(context.mlAccessError(config, 429, 'Rate limit').stopJob, true);
   assert.equal(context.mlAccessError(config, 404, 'Model does not exist'), null);

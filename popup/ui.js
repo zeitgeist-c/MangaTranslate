@@ -20,8 +20,7 @@ globalThis.MLUI = (() => {
       const option = document.createElement('option');
       option.value = e.modelId;
       const badge = e.free === true ? ` · ${T('models_free')}` : e.free === false ? ` · ${T('models_paid')}` : '';
-      const tag = e.modelId === 'meta/muse-spark-1.3-contributor' ? ` · ${T('data_sharing_tag')}` : '';
-      option.textContent = e.label + badge + tag;
+      option.textContent = e.label + badge;
       select.append(option);
     }
     select.value = entries.some(e => e.modelId === value) ? value : '';

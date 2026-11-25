@@ -74,7 +74,7 @@ The note under the buttons is deliberate: *"Full-chapter preview · Uncertain ar
 
 ![Popup · OpenRouter](./docs/screenshots/02-popup-openrouter.png)
 
-The same popup with the OpenRouter tab active. The model list changes to OpenRouter's catalogue (`gpt-6-luna` default, with `gemma-4-26b` and `muse-spark-1.3` as alternatives), and the key summary reflects that provider's own keys.
+The same popup with the OpenRouter tab active. The model list changes to OpenRouter's catalogue (`gpt-6-luna` default, with `gemma-4-26b` and `muse-ember` as alternatives), and the key summary reflects that provider's own keys.
 
 Each provider is independent: a Gemini key never appears under OpenRouter and vice versa.
 

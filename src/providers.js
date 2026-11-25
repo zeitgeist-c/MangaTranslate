@@ -5,7 +5,6 @@ globalThis.MLProviders = (() => {
   const version = 'manga-tr-v1', processingVersion = 'page-v6';
   const google = [
     ['gemini-3.5-flash-lite', 'Gemini 3.5 Flash Lite'],
-    ['gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite'],
     ['gemma-4-26b-a4b-it', 'Gemma 4 26B A4B'],
   ];
   const router = [
@@ -13,12 +12,12 @@ globalThis.MLProviders = (() => {
     // GLM 5.3 Flash removed after the owner's live test produced no translation.
     ['openai/gpt-6-luna', 'GPT-6 Luna'],
     ['google/gemma-4-26b-a4b-it', 'Gemma 4 26B'],
-    ['meta/muse-spark-1.3-contributor', 'Muse Spark 1.3 Contributor'],
+    ['meta/muse-ember', 'Muse Ember'],
   ];
   const catalog = Object.freeze({ gemini: google, openrouter: router });
   // Translation needs visible JSON, not a provider's default reasoning budget.
   // GPT-6 Luna reasons by default; disable for cost/latency and use the strict
-  // region schema on batch sends. Muse Spark requires reasoning; leave its working policy untouched.
+  // region schema on batch sends. Muse Ember requires reasoning; leave its working policy untouched.
   function routerPolicy(model = '') {
     const disableReasoning = model === 'openai/gpt-6-luna';
     const structuredRegions = disableReasoning;

@@ -11,8 +11,11 @@ test('providers preserve separate selected models and require explicit contribut
   assert.equal(providers.settings({}).provider, 'gemini');
   assert.equal(providers.settings({ translationProvider: 'openrouter' }).model, 'openai/gpt-6-luna');
   assert.throws(() => providers.settings({ translationProvider: 'openrouter', openrouterModel: 'anthropic/claude-haiku-4.5' }), /desteklenmiyor/);
-  assert.throws(() => providers.settings({ translationProvider: 'openrouter', openrouterModel: 'meta/muse-spark-1.3-contributor' }), /onaylayın/);
-  assert.equal(providers.settings({ translationProvider: 'openrouter', openrouterModel: 'meta/muse-spark-1.3-contributor', contributorConsent: true }).provider, 'openrouter');
+  const contribPrefs = () => { const p = providers.defaultPrefs();
+    p.models.push({ provider: 'openrouter', modelId: 'x/contrib-test-contributor', label: 'Contrib', free: false, image: true });
+    p.enabled.push('openrouter:x/contrib-test-contributor'); return p; };
+  assert.throws(() => providers.settings({ translationProvider: 'openrouter', openrouterModel: 'x/contrib-test-contributor' }, contribPrefs()), /onaylayın/);
+  assert.equal(providers.settings({ translationProvider: 'openrouter', openrouterModel: 'x/contrib-test-contributor', contributorConsent: true }, contribPrefs()).provider, 'openrouter');
 });
 test('unknown providers fall back to gemini defaults', () => {
   assert.equal(providers.settings({ translationProvider: 'ollama' }).provider, 'gemini');
@@ -23,13 +26,12 @@ test('removed models migrate openly to the provider default', () => {
   const moved = what => { const m = providers.migrate(what); return [m.provider, m.model, m.migrated]; };
   assert.deepEqual(moved({ translationProvider: 'openrouter', openrouterModel: 'openai/gpt-6-luna' }), ['openrouter', 'openai/gpt-6-luna', false]);
   assert.deepEqual(moved({ translationProvider: 'openrouter', openrouterModel: 'deepseek/deepseek-v4.1-flash' }), ['openrouter', 'openai/gpt-6-luna', true]);
-  assert.equal(providers.migrate({ translationProvider: 'openrouter', openrouterModel: 'meta/muse-spark-1.3-contributor' }).migrated, false);
+  assert.equal(providers.migrate({ translationProvider: 'openrouter', openrouterModel: 'meta/muse-ember' }).migrated, false);
   assert.deepEqual(moved({}), ['gemini', 'gemini-3.5-flash-lite', true]);
   assert.equal(providers.migrate({ translationProvider: 'gemini', geminiModel: 'gemma-4-26b-a4b-it' }).migrated, false);
 });
 test('gemini fallback chain follows catalog order and stays opt-in', () => {
-  assert.equal(providers.nextGeminiModel('gemini-3.5-flash-lite'), 'gemini-3.1-flash-lite');
-  assert.equal(providers.nextGeminiModel('gemini-3.1-flash-lite'), 'gemma-4-26b-a4b-it');
+  assert.equal(providers.nextGeminiModel('gemini-3.5-flash-lite'), 'gemma-4-26b-a4b-it');
   assert.equal(providers.nextGeminiModel('gemma-4-26b-a4b-it'), null);
   assert.equal(providers.nextGeminiModel('unknown'), null);
   assert.equal(providers.settings({}).geminiFallback, false);

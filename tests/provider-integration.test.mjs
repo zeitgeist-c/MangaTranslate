@@ -23,7 +23,7 @@ test('age confirmation refusal has a Turkish actionable job-blocking error, with
   vm.runInContext("MLI18N.__testLang('tr')", context);
   context.fetch = async (url, options) => { calls.push({ url, options }); return { ok: false, status: 403,
     json: async () => ({ error: { message: 'This model requires you to complete the following before use: 18+ age confirmation. Confirm at https://openrouter.ai/settings/preferences.' } }) }; };
-  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'meta/muse-spark-1.3-contributor' }, '', []), error =>
+  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'openai/gpt-6-luna' }, '', []), error =>
     error.code === 'AGE_CONFIRMATION_REQUIRED' && error.stopJob === true && error.message.includes('yaş onayı') && error.actionUrl === 'https://openrouter.ai/settings/preferences');
   assert.equal(calls.length, 1);
 });
@@ -53,7 +53,7 @@ test('legacy cached age refusal is actionable without a call; explicit retry can
 test('a saved 3.5.1 job with age refusal restores as blocked while keeping page results', () => {
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   vm.runInContext("MLI18N.__testLang('tr')", context);
-  const job = { config: { provider: 'openrouter', model: 'meta/muse-spark-1.3-contributor' }, state: 'finished', pages: [
+  const job = { config: { provider: 'openrouter', model: 'openai/gpt-6-luna' }, state: 'finished', pages: [
     { state: 'review', translated: 2 }, { state: 'error', error: 'HTTP 403 — 18+ age confirmation.' }, { state: 'queued' }
   ] };
   const restored = context.mlRestoreJob(job);
@@ -151,7 +151,7 @@ test('all direct Google models use Google credentials; reasoning text never reac
   }
 });
 
-test('Luna disables default reasoning; mandatory Muse reasoning is untouched', async () => {
+test('Luna disables default reasoning; mandatory Muse Ember reasoning is untouched', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   vm.runInContext("MLI18N.__testLang('tr')", context);
   for (const [model] of context.MLProviders.catalog.openrouter) {
@@ -239,7 +239,7 @@ test('persistent overload chains through all gemini models then stops with a cou
   context.fetch = async () => { calls++; return { ok: false, status: 503, json: async () => ({ error: { message: 'high demand' } }) }; };
   await assert.rejects(context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []),
     e => e.code === 'PROVIDER_OVERLOADED' && e.retryAt > Date.now() && e.message.includes('3 deneme'));
-  assert.equal(calls, 9);
+  assert.equal(calls, 6);
 });
 test('unavailable statuses map distinctly; refusals never retry',async()=>{
   const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
@@ -263,7 +263,7 @@ test('opt-in chains other retryable gemini failures; without it the job stops',a
   { const { context, calls } = mk();
     context.fetch = async (url, options) => failing(url, options, calls);
     assert.equal(await context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite', geminiFallback: true }, 'Hi', []), 'OK');
-    assert.equal(calls.length, 4); assert.ok(calls.at(-1).url.includes('gemini-3.1-flash-lite')); }
+    assert.equal(calls.length, 4); assert.ok(calls.at(-1).url.includes('gemma-4-26b-a4b-it')); }
   { const { context, calls } = mk();
     context.fetch = async (url, options) => failing(url, options, calls);
     await assert.rejects(context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []),
@@ -302,7 +302,7 @@ test('503 chains to the next gemini model automatically within one call',async()
   };
   assert.equal(await context.mlProviderCall({ provider: 'gemini', model: 'gemini-3.5-flash-lite' }, 'Hi', []), 'OK');
   assert.equal(calls.length, 4);
-  assert.ok(calls.at(-1).url.includes('gemini-3.1-flash-lite'));
+  assert.ok(calls.at(-1).url.includes('gemma-4-26b-a4b-it'));
 });
 test('gemma requests disable thinking and omit the JSON mime type',async()=>{
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));

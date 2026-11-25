@@ -29,8 +29,8 @@ const values = vm.runInContext('GEMINI_MODEL_VALUES', context);
 (async () => {
   // ── Model listesi ve etiket butunlugu ──────────────────────────────────────
   assert.deepEqual([...values], [
-    'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemma-4-26b-a4b-it',
-  ], 'model zinciri onem sirasinda 3 model olmali (gemma-4-31b-it pratikte yanit vermiyor)');
+    'gemini-3.5-flash-lite', 'gemma-4-26b-a4b-it',
+  ], 'model zinciri onem sirasinda 2 model olmali (gemma-4-31b-it pratikte yanit vermiyor)');
   assert.ok(!values.includes('gemma-4-31b-it'), 'yavas model zincire geri sizmamali');
   const labels = vm.runInContext('GEMINI_MODEL_LABELS', context);
   for (const model of values) assert.ok(labels[model], `etiket eksik: ${model}`);
@@ -42,17 +42,17 @@ const values = vm.runInContext('GEMINI_MODEL_VALUES', context);
   assert.ok(popupHtml.includes('id="model"'), 'popup model secimi bulunmali');
   assert.ok(!popupHtml.includes('gemma-4-31b-it'), 'yavas model popup listesinde kalmamali');
 
-  // ── Yedek zincir: secili modelden baslar, 3 modeli de dolasir ───────────────
+  // ── Yedek zincir: secili modelden baslar, 2 modeli de dolasir ───────────────
   for (const selected of values) {
     const tried = [];
     const result = await context.executeWithModelFallback(selected, async model => {
       tried.push(model);
-      if (tried.length < 3) throw new Error('temporarily unavailable');
+      if (tried.length < 2) throw new Error('temporarily unavailable');
       return 'translated';
     });
     assert.equal(tried[0], selected, 'once secili model denenmeli');
-    assert.equal(new Set(tried).size, 3, 'zincir 3 modeli de kapsamali');
-    assert.equal(result.model, tried[2]);
+    assert.equal(new Set(tried).size, 2, 'zincir 2 modeli de kapsamali');
+    assert.equal(result.model, tried[1]);
     assert.equal(result.fallbackUsed, true);
   }
 

@@ -82,7 +82,7 @@ test('8 MiB serialized provider body guard rejects oversized requests without ne
 });
 test('removed OpenRouter models require a new choice; direct Gemini remains supported',()=>{
   const f=fixture();for(const model of ['google/gemini-2.5-flash-lite','google/gemini-3.1-flash-lite','deepseek/deepseek-v4.1-flash'])assert.throws(()=>f.context.MLProviders.settings({translationProvider:'openrouter',openrouterModel:model}),/desteklenmiyor/);
-  assert.equal(f.context.MLProviders.settings({geminiModel:'gemini-3.1-flash-lite'}).model,'gemini-3.1-flash-lite');
+  assert.equal(f.context.MLProviders.settings({geminiModel:'gemma-4-26b-a4b-it'}).model,'gemma-4-26b-a4b-it');
 });
 test('metadata uses the smallest documented endpoint capacity and cached public data; unknown metadata keeps 12/8192',async()=>{
   const f=fixture();let requests=0;f.context.fetch=async()=>{requests++;return {ok:true,json:async()=>({data:{endpoints:[{context_length:1048576,max_completion_tokens:32768,max_images:16},{context_length:262144,max_completion_tokens:16384,max_images:10}]}})};};
@@ -165,8 +165,8 @@ test('known IDs with one malformed translation retain neighboring successes and 
   assert.equal((await f.context.mlTranslate(f.message(rs))).cached,true);assert.equal(f.calls.length,1);
 });
 
-test('Muse contributor and Gemma keep a bounded 60 second deadline',async()=>{
-  for(const [model,ms] of [['meta/muse-spark-1.3-contributor',60000],['google/gemma-4-26b-a4b-it',60000]]){
+test('Muse Ember and Gemma keep a bounded 60 second deadline',async()=>{
+  for(const [model,ms] of [['meta/muse-ember',60000],['google/gemma-4-26b-a4b-it',60000]]){
     const f=fixture();let watchdog,limit,network=0;f.context.setTimeout=(fn,ms)=>{watchdog=fn;limit=ms;return 1;};f.context.clearTimeout=()=>{};f.context.mlKey=async()=> 'synthetic';
     f.context.fetch=async(url,options)=>{network++;return new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))));};
     const promise=f.actualProviderCall({provider:'openrouter',model},'',[]);await flush();assert.equal(limit,ms);watchdog();
@@ -179,9 +179,9 @@ test('provider-origin 429 is model-scoped, survives restart, and blocks only uns
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}', f.context);f.context.fetch=async()=>new Response(JSON.stringify({error:{message:'provider quota',metadata:{provider_name:'Anthropic'}}}),{status:429,headers:{'Retry-After':'60','Content-Type':'application/json'}});
   await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'openai/gpt-6-luna'},'',[]),e=>e.code==='PROVIDER_RATE_LIMITED'&&e.cooldownScope==='model'&&e.retryAt>Date.now());
   let sent=0;await assert.rejects(f.context.mlEnqueue({provider:'openrouter',model:'openai/gpt-6-luna'},async()=>++sent),e=>e.notSent&&e.code==='PROVIDER_COOLDOWN');
-  assert.equal(await f.context.mlEnqueue({provider:'openrouter',model:'meta/muse-spark-1.3-contributor'},async()=>++sent),1);
+  assert.equal(await f.context.mlEnqueue({provider:'openrouter',model:'meta/muse-ember'},async()=>++sent),1);
   const restarted=fixture(undefined,f.stored);
-  await restarted.context.mlEnqueue({provider:'openrouter',model:'meta/muse-spark-1.3-contributor'},async()=>{});
+  await restarted.context.mlEnqueue({provider:'openrouter',model:'meta/muse-ember'},async()=>{});
   assert.equal(restarted.context.mlCooldownError('openai/gpt-6-luna').notSent,true);assert.equal(sent,1);
 });
 
@@ -189,7 +189,7 @@ test('unknown 429 remains account-wide and clearly identifies the source instead
   const f=fixture();f.context.mlKey=async()=> 'synthetic';
   vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}', f.context);f.context.fetch=async()=>new Response(JSON.stringify({error:{message:'account quota'}}),{status:429,headers:{'Retry-After':'30','Content-Type':'application/json'}});
   await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'openai/gpt-6-luna'},'',[]),e=>e.cooldownScope==='account');
-  let sent=0;await assert.rejects(f.context.mlEnqueue({provider:'openrouter',model:'meta/muse-spark-1.3-contributor'},async()=>++sent),e=>e.notSent&&e.message.includes('gpt-6-luna')&&e.message.includes('henüz gönderilmedi'));
+  let sent=0;await assert.rejects(f.context.mlEnqueue({provider:'openrouter',model:'meta/muse-ember'},async()=>++sent),e=>e.notSent&&e.message.includes('gpt-6-luna')&&e.message.includes('henüz gönderilmedi'));
   assert.equal(sent,0);
 });
 
@@ -200,12 +200,12 @@ test('SSE 429 also honors Retry-After and records a model-scoped cooldown',async
     {headers:{'Retry-After':'45','Content-Type':'text/event-stream'}});
   await assert.rejects(f.actualProviderCall({provider:'openrouter',model:'openai/gpt-6-luna',maxOutputTokens:16384},'',[]),e=>e.code==='PROVIDER_RATE_LIMITED'&&e.retryAt>Date.now()+40000);
   assert.equal(f.context.mlCooldownError('openai/gpt-6-luna').cooldownScope,'model');
-  assert.equal(f.context.mlCooldownError('meta/muse-spark-1.3-contributor'),null);
+  assert.equal(f.context.mlCooldownError('meta/muse-ember'),null);
 });
 
 test('model-specific crop limits preserve Muse throughput and constrain slower model batches',async()=>{
   const f=fixture();f.context.fetch=async()=>({ok:true,json:async()=>({data:{endpoints:[{status:0,context_length:1048576,max_completion_tokens:32768}]}})});
-  for(const [model,regions,pending] of [['openai/gpt-6-luna',12,4],['google/gemma-4-26b-a4b-it',12,8],['meta/muse-spark-1.3-contributor',20,8]]){
+  for(const [model,regions,pending] of [['openai/gpt-6-luna',12,4],['google/gemma-4-26b-a4b-it',12,8],['meta/muse-ember',20,8]]){
     const caps=await f.actualCapabilities({provider:'openrouter',model});assert.equal(caps.maxRegions,regions);assert.equal(caps.maxPending,pending);
   }
 });
@@ -214,14 +214,14 @@ test('a provider timeout temporarily shrinks later groups until one succeeds',as
   const timers=[];f.context.setTimeout=(fn,ms)=>{timers.push({fn,ms});return timers.length;};f.context.clearTimeout=()=>{};
   f.context.fetch=async(url,options)=>new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))));
   const images=Array.from({length:8},(_,i)=>({regionId:'r'+i,dataUrl:'data:image/png;base64,AAAA'}));
-  const promise=f.actualProviderCall({provider:'openrouter',model:'meta/muse-spark-1.3-contributor'},'',images);
+  const promise=f.actualProviderCall({provider:'openrouter',model:'meta/muse-ember'},'',images);
   await flush();timers.at(-1).fn();
   await assert.rejects(promise,e=>e.code==='PROVIDER_TIMEOUT'&&e.message.includes('küçültüldü'));
   f.context.fetch=async()=>({ok:true,json:async()=>({data:{endpoints:[{status:0,context_length:1048576,max_completion_tokens:32768}]}})});
-  assert.equal((await f.actualCapabilities({provider:'openrouter',model:'meta/muse-spark-1.3-contributor'})).maxRegions,4);
-  const message={jobId:'job',owner:'1:job',config:f.context.MLProviders.settings({translationProvider:'openrouter',openrouterModel:'meta/muse-spark-1.3-contributor',contributorConsent:true}),regions:[f.region(1)],context:[]};
+  assert.equal((await f.actualCapabilities({provider:'openrouter',model:'meta/muse-ember'})).maxRegions,4);
+  const message={jobId:'job',owner:'1:job',config:f.context.MLProviders.settings({translationProvider:'openrouter',openrouterModel:'meta/muse-ember'}),regions:[f.region(1)],context:[]};
   await f.context.mlTranslate(message);
-  assert.equal((await f.actualCapabilities({provider:'openrouter',model:'meta/muse-spark-1.3-contributor'})).maxRegions,20);
+  assert.equal((await f.actualCapabilities({provider:'openrouter',model:'meta/muse-ember'})).maxRegions,20);
 });
 test('streaming groups use an idle watchdog with a doubled absolute deadline',async()=>{
   const hang=()=>{const f=fixture();f.context.mlKey=async()=>'synthetic';

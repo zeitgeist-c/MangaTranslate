@@ -11,7 +11,6 @@ if (globalThis.MLI18N && typeof chrome !== 'undefined' && chrome.storage) global
 
 const GEMINI_MODELS = Object.freeze({
   DEFAULT: 'gemini-3.5-flash-lite',
-  FALLBACK: 'gemini-3.1-flash-lite',
   GEMMA_FAST: 'gemma-4-26b-a4b-it',
 });
 // Sirasi = onem/yedek zincir sirasi. Secili modelden baslanir, listedeki sonrakiyle devam edilir.
@@ -19,7 +18,6 @@ const GEMINI_MODELS = Object.freeze({
 const GEMINI_MODEL_VALUES = Object.freeze(Object.values(GEMINI_MODELS));
 const GEMINI_MODEL_LABELS = Object.freeze({
   [GEMINI_MODELS.DEFAULT]: 'Gemini 3.5 Flash Lite',
-  [GEMINI_MODELS.FALLBACK]: 'Gemini 3.1 Flash Lite',
   [GEMINI_MODELS.GEMMA_FAST]: 'Gemma 4 26B A4B',
 });
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -261,7 +259,6 @@ async function callMultimodal(apiKey, model, dataUrl, w, h, translationMode, alt
   if (!m) throw new Error('Gecersiz dataUrl formati');
   const mime = m[1];
   const base64 = m[2];
-  const isAlternative = translationMode === 'alternative';
 
   const text = await callGemini({
     apiKey,
@@ -269,7 +266,6 @@ async function callMultimodal(apiKey, model, dataUrl, w, h, translationMode, alt
     prompt: buildTranslationPrompt(translationMode, alternativeAttempt) + '\n[Image: ' + w + 'x' + h + ']',
     imageBase64: { mime, base64 },
     responseMimeType: 'application/json',
-    temperature: model === GEMINI_MODELS.FALLBACK ? (isAlternative ? 0.65 : 0.2) : undefined,
   });
 
   return parseBubbleArray(text || '[]', w, h);
@@ -278,7 +274,7 @@ async function callMultimodal(apiKey, model, dataUrl, w, h, translationMode, alt
  * v2.7: Tek Gemini client helper.
  * Translation + test + response hardening (finishReason, candidates, empty).
  */
-async function callGemini({ apiKey, model, prompt, imageBase64, responseMimeType, temperature }) {
+async function callGemini({ apiKey, model, prompt, imageBase64, responseMimeType }) {
   if (!apiKey) throw new Error('API key eksik');
   const normalizedModel = normalizeGeminiModel(model);
 
@@ -292,7 +288,6 @@ async function callGemini({ apiKey, model, prompt, imageBase64, responseMimeType
     contents: [{ parts }],
     generationConfig: {
       maxOutputTokens: 8192,
-      ...(normalizedModel === GEMINI_MODELS.FALLBACK && typeof temperature === 'number' ? { temperature } : {}),
       ...(isGemma ? { thinkingConfig: { thinkingLevel: 'minimal' } } : {}),
       ...(!isGemma && responseMimeType ? { responseMimeType } : {}),
     },
