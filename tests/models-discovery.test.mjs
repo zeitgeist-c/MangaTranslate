@@ -30,12 +30,6 @@ test('openrouter discovery requires image input and marks free/paid from pricing
   assert.equal(P.normalizeDiscovered('openrouter', { id: 'x/y:free' }, 'k1').free, true);
 });
 
-test('ollama discovery passes names through', () => {
-  const m = P.normalizeDiscovered('ollama', { name: 'gemma4:31b' }, 'k1');
-  assert.equal(m.modelId, 'gemma4:31b');
-  assert.equal(P.normalizeDiscovered('ollama', {}, 'k1'), null);
-});
-
 test('discoverModels pages gemini, stops openrouter under a full page, rejects bad keys', async () => {
   const calls = [];
   const fetchFn = async (url) => {
@@ -53,7 +47,7 @@ test('discoverModels pages gemini, stops openrouter under a full page, rejects b
   const bad = async () => ({ ok: false, status: 429 });
   await assert.rejects(() => P.discoverModels('openrouter', 'KEY', { fetch: bad }), /429/);
   const malformed = async () => ({ ok: true, json: async () => ({}) });
-  await assert.rejects(() => P.discoverModels('ollama', 'KEY', { fetch: malformed }));
+  await assert.rejects(() => P.discoverModels('openrouter', 'KEY', { fetch: malformed }));
 });
 
 test('effectiveModels merges static and enabled discovered, drops disabled and duplicates', () => {
@@ -106,14 +100,9 @@ test('nextGeminiModel chains discovered ids after the static order', () => {
   assert.equal(P.nextGeminiModel('gemini-3.5-flash-lite'), 'gemini-3.1-flash-lite');
 });
 
-test('routerBody and ollamaBody accept an explicit allow-list', () => {
+test('routerBody accepts an explicit allow-list', () => {
   const imgs = [{ regionId: 'r1', dataUrl: 'data:image/png;base64,AAAA' }];
   const body = P.routerBody('x/new-free:free', 'p', imgs, 8192, false, ['x/new-free:free']);
   assert.equal(body.model, 'x/new-free:free');
   assert.throws(() => P.routerBody('x/new-free:free', 'p', imgs), /Bilinmeyen OpenRouter/);
-  const ob = P.ollamaBody('my-model', 'p', imgs, ['my-model']);
-  assert.equal(ob.model, 'my-model');
-  assert.throws(() => P.ollamaBody('my-model', 'p', imgs), /Bilinmeyen Ollama/);
-  assert.throws(() => P.ollamaPolicy('my-model', ['other']), /Bilinmeyen Ollama/);
-  assert.equal(P.ollamaPolicy('gemma4:31b').maxRegions, 12);
 });

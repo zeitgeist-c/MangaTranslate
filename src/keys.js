@@ -2,11 +2,10 @@
 globalThis.MLKeys = (() => {
   const T = (key, vars) => (globalThis.MLI18N ? globalThis.MLI18N.t(key, vars) : key);
   let serial = Promise.resolve();
-  const names = { gemini: 'Google', openrouter: 'OpenRouter', ollama: 'Ollama' };
+  const names = { gemini: 'Google', openrouter: 'OpenRouter' };
   const fields = provider => {
     if (provider === 'gemini') return ['googleApiKeys', 'activeGoogleApiKeyId'];
     if (provider === 'openrouter') return ['openrouterApiKeys', 'activeOpenrouterApiKeyId'];
-    if (provider === 'ollama') return ['ollamaApiKeys', 'activeOllamaApiKeyId'];
     throw new Error(T('err_unknown_provider'));
   };
   const queue = task => { const next = serial.then(task); serial = next.catch(() => {}); return next; };
@@ -14,13 +13,12 @@ globalThis.MLKeys = (() => {
     const [listField, activeField] = fields(provider), normalized = list.map(k => ({ ...k, isActive: k.id === activeId }));
     const patch = { [listField]: normalized, [activeField]: activeId };
     if (provider === 'openrouter') patch.openrouterApiKey = normalized.find(k => k.id === activeId)?.key || '';
-    if (provider === 'ollama') patch.ollamaApiKey = normalized.find(k => k.id === activeId)?.key || '';
     await chrome.storage.local.set(patch);
   }
   async function load(provider) {
-    const [listField, activeField] = fields(provider), data = await chrome.storage.local.get([listField, activeField, 'openrouterApiKey', 'ollamaApiKey', 'googleApiKey', 'apiKey', 'geminiApiKey']);
+    const [listField, activeField] = fields(provider), data = await chrome.storage.local.get([listField, activeField, 'openrouterApiKey', 'googleApiKey', 'apiKey', 'geminiApiKey']);
     if (!Array.isArray(data[listField])) {
-      const legacy = provider === 'openrouter' ? data.openrouterApiKey : provider === 'ollama' ? data.ollamaApiKey : data.googleApiKey || data.apiKey || data.geminiApiKey;
+      const legacy = provider === 'openrouter' ? data.openrouterApiKey : data.googleApiKey || data.apiKey || data.geminiApiKey;
       const list = legacy ? [{ id: crypto.randomUUID(), key: legacy, label: `${names[provider]} API 1`, createdAt: Date.now() }] : [];
       await persist(provider, list, list[0]?.id || null); return { list, activeId: list[0]?.id || null };
     }
@@ -33,7 +31,6 @@ globalThis.MLKeys = (() => {
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
     try {
       const endpoint = provider === 'openrouter' ? 'https://openrouter.ai/api/v1/key'
-        : provider === 'ollama' ? 'https://ollama.com/api/tags'
         : 'https://generativelanguage.googleapis.com/v1beta/models';
       const headers = provider === 'gemini' ? { 'x-goog-api-key': entry.key } : { Authorization: `Bearer ${entry.key}` };
       const response = await fetch(endpoint, { method: 'GET', signal: controller.signal, headers }), data = await response.json();

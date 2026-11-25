@@ -15,10 +15,7 @@ globalThis.MLProviders = (() => {
     ['google/gemma-4-26b-a4b-it', 'Gemma 4 26B'],
     ['meta/muse-spark-1.3-contributor', 'Muse Spark 1.3 Contributor'],
   ];
-  const ollama = [
-    ['gemma4:31b', 'Gemma 4 31B'],
-  ];
-  const catalog = Object.freeze({ gemini: google, openrouter: router, ollama });
+  const catalog = Object.freeze({ gemini: google, openrouter: router });
   // Translation needs visible JSON, not a provider's default reasoning budget.
   // GPT-6 Luna reasons by default; disable for cost/latency and use the strict
   // region schema on batch sends. Muse Spark requires reasoning; leave its working policy untouched.
@@ -37,11 +34,11 @@ globalThis.MLProviders = (() => {
     return at >= 0 && at + 1 < ids.length ? ids[at + 1] : null;
   }
   function providerModelKey(provider) {
-    return provider === 'openrouter' ? 'openrouterModel' : provider === 'ollama' ? 'ollamaModel' : 'geminiModel';
+    return provider === 'openrouter' ? 'openrouterModel' : 'geminiModel';
   }
   function settings(raw = {}, prefs) {
-    const provider = ['openrouter', 'ollama'].includes(raw.translationProvider) ? raw.translationProvider : 'gemini';
-    const fallback = provider === 'gemini' ? google[0][0] : provider === 'openrouter' ? 'openai/gpt-6-luna' : 'gemma4:31b';
+    const provider = raw.translationProvider === 'openrouter' ? 'openrouter' : 'gemini';
+    const fallback = provider === 'gemini' ? google[0][0] : 'openai/gpt-6-luna';
     const model = raw[providerModelKey(provider)] || fallback;
     if (!resolveModel(provider, model, prefs)) throw new Error(T('err_model_unsupported'));
     if (model.endsWith('-contributor') && raw.contributorConsent !== true) throw new Error(T('err_contributor_consent'));
@@ -52,8 +49,8 @@ globalThis.MLProviders = (() => {
   }
   // Removed models fall back to the provider default; callers migrate stored settings openly.
   function migrate(raw = {}, prefs) {
-    const provider = ['openrouter', 'ollama'].includes(raw.translationProvider) ? raw.translationProvider : 'gemini';
-    const fallback = provider === 'gemini' ? google[0][0] : provider === 'openrouter' ? 'openai/gpt-6-luna' : 'gemma4:31b';
+    const provider = raw.translationProvider === 'openrouter' ? 'openrouter' : 'gemini';
+    const fallback = provider === 'gemini' ? google[0][0] : 'openai/gpt-6-luna';
     const key = raw[providerModelKey(provider)];
     if (resolveModel(provider, key, prefs)) return { provider, model: key, migrated: false };
     return { provider, model: fallback, migrated: true };
@@ -117,19 +114,6 @@ REGION ORDER: ${JSON.stringify(regions.map(r => r.regionId))}`;
         { type: 'image_url', image_url: { url: image.dataUrl } }
       ])] }] };
   }
-  function ollamaPolicy(model = '', allowed) {
-    const ids = Array.isArray(allowed) ? allowed : ollama.map(([id]) => id);
-    if (!ids.includes(model)) throw new Error('Bilinmeyen Ollama modeli');
-    return { maxRegions: 12, maxConcurrency: 4, timeoutMs: 90000,
-      requiredParameters: ['max_tokens', 'response_format'] };
-  }
-  function ollamaBody(model, promptText, images, allowed) {
-    const ids = Array.isArray(allowed) ? allowed : ollama.map(([id]) => id);
-    if (!ids.includes(model)) throw new Error('Bilinmeyen Ollama modeli');
-    return { model, stream: false, format: 'json',
-      messages: [{ role: 'user', content: [promptText, ...images.map(image => `regionId=${image.regionId || 'manual'}`)].join('\n'),
-        images: images.map(image => String(image.dataUrl).replace(/^data:image\/\w+;base64,/, '')) }] };
-  }
   /* ---- Model discovery: static catalog + provider-fetched list ----
    * Static catalog stays the default (tests and offline use pin it).
    * Discovered models live in chrome.storage.local.modelPreferences:
@@ -140,7 +124,6 @@ REGION ORDER: ${JSON.stringify(regions.map(r => r.regionId))}`;
   const DISCOVERY_URLS = {
     gemini: 'https://generativelanguage.googleapis.com/v1beta/models',
     openrouter: 'https://openrouter.ai/api/v1/models',
-    ollama: 'https://ollama.com/api/tags',
   };
   function describeStatic(provider, id, label) {
     return { provider, modelId: id, label, source: 'static',
@@ -166,7 +149,7 @@ REGION ORDER: ${JSON.stringify(regions.map(r => r.regionId))}`;
     return prefs;
   }
   function normalizeDiscovered(provider, item, sourceKeyId) {
-    const raw = provider === 'gemini' ? item?.name : provider === 'openrouter' ? item?.id : item?.name || item?.model;
+    const raw = provider === 'gemini' ? item?.name : item?.id;
     const modelId = String(raw || '').replace(/^models\//, '');
     if (!/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$/.test(modelId)) return null;
     if (provider === 'openrouter' && (modelId === 'openrouter/free' || modelId === 'openrouter/auto')) return null;
@@ -210,7 +193,7 @@ REGION ORDER: ${JSON.stringify(regions.map(r => r.regionId))}`;
         const m = normalizeDiscovered(provider, item, opts.sourceKeyId || null);
         if (m) out.push(m);
       }
-      if (provider === 'ollama' || (provider === 'openrouter' && items.length < 100)) return out;
+      if (provider === 'openrouter' && items.length < 100) return out;
       if (provider === 'openrouter') { offset += items.length; continue; }
       pageToken = data.nextPageToken || '';
       if (!pageToken) return out;
@@ -287,6 +270,6 @@ REGION ORDER: ${JSON.stringify(regions.map(r => r.regionId))}`;
       .filter(m => m && m.provider === provider && enabled.has(`${provider}:${m.modelId}`))
       .map(m => m.modelId);
   }
-  return { catalog, settings, migrate, nextGeminiModel, providerModelKey, style, prompt, parse, routerBody, routerPolicy, ollamaBody, ollamaPolicy, version, processingVersion,
+  return { catalog, settings, migrate, nextGeminiModel, providerModelKey, style, prompt, parse, routerBody, routerPolicy, version, processingVersion,
     normalizeDiscovered, discoverModels, isFreeModel, isPaidModel, filterModels, defaultPrefs, modelPreferences, saveModelPreferences, effectiveModels, allModels, resolveModel, isModelAllowed, allowedIds, discoveredIds };
 })();

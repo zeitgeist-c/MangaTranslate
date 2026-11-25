@@ -4,7 +4,7 @@
 
 **Mangayı Türkçe oku. Bir alan seç, ya da bütün bölümü çevir.**
 
-MangaLens TR, manga, manhwa ve manhua sayfalarındaki İngilizce yazıları bulan, Gemini, OpenRouter veya Ollama üzerinden Türkçeye çeviren ve Türkçe metni balonun içine geri çizen bir Brave/Chromium Manifest V3 uzantısıdır.
+MangaLens TR, manga, manhwa ve manhua sayfalarındaki İngilizce yazıları bulan, Gemini veya OpenRouter üzerinden Türkçeye çeviren ve Türkçe metni balonun içine geri çizen bir Brave/Chromium Manifest V3 uzantısıdır.
 
 Yazı tespiti yerelde çalışır. Yalnız seçtiğin kırpmalar seçtiğin sağlayıcıya gönderilir.
 
@@ -38,7 +38,7 @@ Yazı tespiti yerelde çalışır. Yalnız seçtiğin kırpmalar seçtiğin sağ
 | **Alan seç** | herhangi bir yazının üzerine kutu çiz, Türkçesi yerine gelsin |
 | **Oto çevir** | sayfanın yazı bloklarını bul, tek geçişte çevir |
 | **Tam bölüm** | okuyucu sayfasını tara, her balonu çevir, sonucu güvenli alana yerleştir |
-| **Üç sağlayıcı** | Gemini (doğrudan), OpenRouter veya Ollama Cloud — sağlayıcı başına anahtar listesi |
+| **İki sağlayıcı** | Gemini (doğrudan) veya OpenRouter — sağlayıcı başına anahtar listesi |
 | **Anahtar rotasyonu** | istekler kayıtlı anahtarları sırayla gezer; 429 yiyen veya kotası dolan anahtar dinlenir, sıradaki kullanılır |
 | **Sağlayıcı yedekleme** | Gemini 429/503'te listedeki sonraki model otomatik denenir; diğer geçici hatalar yalnız sen açarsan zincirlenir |
 | **Terim sözlüğü** | kendi adların ve terimlerin sayfalar arasında aynı Türkçe karşılıkla kalır |
@@ -57,7 +57,7 @@ Araç çubuğu popup'ı, 360 piksel geniş.
 
 **Başlık** — logo ve ad, uzantıyı açıp kapatan anahtar, Ayarlar'ı açan çark.
 
-**Sağlayıcı sekmeleri** — `Gemini`, `OpenRouter`, `Ollama`. Her sekme kendi modelini ve anahtar listesini tutar; sağlayıcı değiştirmek diğerlerini kaybettirmez.
+**Sağlayıcı sekmeleri** — `Gemini`, `OpenRouter`. Her sekme kendi modelini ve anahtar listesini tutar; sağlayıcı değiştirmek diğerlerini kaybettirmez.
 
 **Çeviri modeli** — seçili sağlayıcının model listesi, etkin seçim işaretli. Altında anahtar özeti kaç anahtar kayıtlı olduğunu ve etkin olanın kullanılabilir olup olmadığını gösterir (`2 anahtar kayıtlı`).
 
@@ -78,7 +78,6 @@ Aynı popup, OpenRouter sekmesi etkin. Model listesi OpenRouter kataloğuna dön
 
 Her sağlayıcı bağımsızdır: Gemini anahtarı OpenRouter altında asla görünmez, tersi de geçmez.
 
-Ollama, Ollama Cloud (`https://ollama.com/api/chat`) üzerinden kendi API anahtarınla çalışır — kırpmalar diğer sağlayıcılarda olduğu gibi Ollama bulutuna gönderilir.
 
 ### 3. Ayarlar — API anahtarları
 
@@ -131,7 +130,7 @@ Veri akışını da açıkça yazar:
 
 ## Kurulum
 
-Sürüm paketi: `release/MangaLensTR-3.9.9.zip`.
+Sürüm paketi: `release/MangaLensTR-3.9.10.zip`.
 
 Uzantı `dist/` klasöründen paketsiz yüklenir (canlı test kopyası):
 
@@ -157,7 +156,6 @@ Paralellik uyarlanır: Gemini anahtar başına bir şerit açar (en fazla 4), an
 |---|---|---|
 | **Gemini** | Google AI Studio anahtarı | doğrudan yol, arada aracı yok |
 | **OpenRouter** | OpenRouter anahtarı | tek anahtar birçok model ailesine ulaşır |
-| **Ollama** | Ollama Cloud API anahtarı | kırpmalar Ollama Cloud'a gönderilir |
 
 Sağlayıcı başına anahtarlar liste olarak saklanır. İstekler listeyi sırayla gezer, her anahtar eşzamanlılık sınırına kadar hizmet eder, sonra başa dönülür. 429 yiyen veya kotası dolan anahtar bir süre dinlendirilir ve atlanır.
 

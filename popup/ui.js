@@ -1,9 +1,9 @@
 'use strict';
 globalThis.MLUI = (() => {
   const T = (key, vars) => (globalThis.MLI18N ? globalThis.MLI18N.t(key, vars) : key);
-  const defaults = { enabled: true, translationProvider: 'gemini', geminiModel: 'gemini-3.5-flash-lite', openrouterModel: 'openai/gpt-6-luna', ollamaModel: 'gemma4:31b', contributorConsent: false, geminiFallback: false,
+  const defaults = { enabled: true, translationProvider: 'gemini', geminiModel: 'gemini-3.5-flash-lite', openrouterModel: 'openai/gpt-6-luna', contributorConsent: false, geminiFallback: false,
     contentType: 'auto', localDetector: 'fast', seriesName: '', translationInstructions: '', translationGlossary: '', translationFontSize: 16 };
-  async function settings() { const [sync, local] = await Promise.all([chrome.storage.sync.get(defaults), chrome.storage.local.get('translationGlossary')]); return { ...sync, localDetector: ['small', 'detailed'].includes(sync.localDetector) ? sync.localDetector : 'fast', translationGlossary: local.translationGlossary ?? sync.translationGlossary }; }
+  async function settings() { const [sync, local] = await Promise.all([chrome.storage.sync.get(defaults), chrome.storage.local.get('translationGlossary')]); const translationProvider = sync.translationProvider === 'openrouter' ? 'openrouter' : 'gemini'; return { ...sync, translationProvider, localDetector: ['small', 'detailed'].includes(sync.localDetector) ? sync.localDetector : 'fast', translationGlossary: local.translationGlossary ?? sync.translationGlossary }; }
   async function keys(provider, type = 'LIST', data = {}) { const response = await chrome.runtime.sendMessage({ type: `ML_KEYS_${type}`, provider, ...data }); if (!response?.ok) throw new Error(response?.error || T('conn_failed')); return response.value; }
   async function openSettings(provider, section = 'keys') {
     const base = chrome.runtime.getURL('options/settings.html'), url = `${base}#${section}/${provider}`;

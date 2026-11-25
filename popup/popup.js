@@ -9,7 +9,7 @@ async function refresh() {
   const token = ++generation, config = await MLUI.settings(), keys = await MLUI.keys(config.translationProvider);
   if (token !== generation) return;
   saved = config; $('enabled-toggle').checked = config.enabled;
-  for (const p of ['gemini', 'openrouter', 'ollama']) $(`provider-${p}`).setAttribute('aria-pressed', String(p === config.translationProvider));
+  for (const p of ['gemini', 'openrouter']) $(`provider-${p}`).setAttribute('aria-pressed', String(p === config.translationProvider));
   const prefs = await MLProviders.modelPreferences();
   const provider = config.translationProvider;
   MLUI.models($('model'), provider, config[MLProviders.providerModelKey(provider)], MLProviders.effectiveModels(provider, prefs));
@@ -25,11 +25,11 @@ async function refresh() {
   $('key-dot').classList.toggle('ready', !!active); $('add-key').hidden = !!active;
   for (const id of ['btn-full-chapter', 'btn-translate-page', 'btn-quick-translate']) $(id).disabled = saving || !active || !config.enabled || !$('model').value;
   $('model').disabled = saving; $('enabled-toggle').disabled = saving; $('contributor-consent').disabled = saving;
-  for (const provider of ['gemini', 'openrouter', 'ollama']) $(`provider-${provider}`).disabled = saving;
+  for (const provider of ['gemini', 'openrouter']) $(`provider-${provider}`).disabled = saving;
 }
 async function save(patch) {
   if (saving) return; saving = true; generation++;
-  for (const id of ['enabled-toggle', 'model', 'contributor-consent', 'provider-gemini', 'provider-openrouter', 'provider-ollama', 'btn-full-chapter', 'btn-translate-page', 'btn-quick-translate']) $(id).disabled = true;
+  for (const id of ['enabled-toggle', 'model', 'contributor-consent', 'provider-gemini', 'provider-openrouter', 'btn-full-chapter', 'btn-translate-page', 'btn-quick-translate']) $(id).disabled = true;
   try { await chrome.storage.sync.set(patch); notice(''); }
   catch (error) { notice(T('settings_save_failed', { error: error.message })); }
   finally { saving = false; await refresh().catch(error => notice(error.message)); }
@@ -59,7 +59,7 @@ async function stats() {
   $('ml-stat-day').textContent = s.day?.bucket === day ? s.day.count || 0 : 0; $('ml-stat-lifetime').textContent = s.lifetime?.count || 0;
 }
 $('version').textContent = 'v' + chrome.runtime.getManifest().version;
-for (const provider of ['gemini', 'openrouter', 'ollama']) $(`provider-${provider}`).onclick = () => save({ translationProvider: provider });
+for (const provider of ['gemini', 'openrouter']) $(`provider-${provider}`).onclick = () => save({ translationProvider: provider });
 $('model').onchange = () => save({ [MLProviders.providerModelKey(saved.translationProvider)]: $('model').value });
 $('enabled-toggle').onchange = () => save({ enabled: $('enabled-toggle').checked }); $('contributor-consent').onchange = () => save({ contributorConsent: $('contributor-consent').checked });
 for (const id of ['settings', 'add-key']) $(id).onclick = () => MLUI.openSettings(saved?.translationProvider || 'gemini').catch(error => notice(error.message));

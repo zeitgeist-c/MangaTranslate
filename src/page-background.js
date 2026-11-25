@@ -121,10 +121,9 @@ async function mlPickGeminiKey(owner) {
 }
 async function mlPickRoundRobin(provider, owner, opts = {}) {
   const keys = await mlListProviderKeys(provider);
-  if (!keys.length) throw new Error(T('pg_provider_key_missing', { provider: provider === 'gemini' ? 'Gemini' : provider === 'openrouter' ? 'OpenRouter' : 'Ollama' }));
+  if (!keys.length) throw new Error(T('pg_provider_key_missing', { provider: provider === 'gemini' ? 'Gemini' : 'OpenRouter' }));
   const now = Date.now(), scope = mlBatchScope(provider, owner);
-  // Ollama cloud allows one request per key: wait as soon as the window fills, never overflow.
-  const limit = provider === 'ollama' ? 1 : ML_KEY_WINDOW;
+  const limit = ML_KEY_WINDOW;
   const state = mlBatchState.has(scope) ? mlBatchOrder(keys, scope) : mlBatchOrder(keys, scope, await mlBatchActiveId(provider, keys));
   let earliest = Infinity;
   const scan = (ignoreCooling, ignoreWindow) => {
@@ -142,22 +141,12 @@ async function mlPickRoundRobin(provider, owner, opts = {}) {
   };
   // Pass 0: free window; pass 1: overflow ignoring the window; pass 2: last resort ignoring cooldown (mid-retry).
   let picked = scan(false, false);
-  if (!picked && provider === 'ollama') {
-    const cap = Number.isFinite(opts.maxWaitMs) ? opts.maxWaitMs
-      : Number.isFinite(globalThis.mlOllamaSlotWaitMs) ? globalThis.mlOllamaSlotWaitMs : 300000;
-    const start = Date.now();
-    while (!picked && Date.now() - start < cap) {
-      await new Promise(resolve => setTimeout(resolve, 200));
-      picked = scan(false, false);
-    }
-  }
   picked = picked || scan(false, true) || scan(true, true);
   if (picked) return picked;
-  throw Object.assign(new Error(T('pg_keys_cooldown', { provider: provider === 'ollama' ? 'Ollama' : 'OpenRouter' })),
+  throw Object.assign(new Error(T('pg_keys_cooldown', { provider: 'OpenRouter' })),
     { notSent: true, stopJob: true, code: 'PROVIDER_COOLDOWN', retryAt: earliest === Infinity ? now + 30000 : earliest, cooldownScope: 'account' });
 }
 async function mlPickOpenrouterKey(owner) { return mlPickRoundRobin('openrouter', owner); }
-async function mlPickOllamaKey(owner, opts) { return mlPickRoundRobin('ollama', owner, opts); }
 function mlReserveGeminiKey(id) { mlPruneGeminiBudget(id).push(Date.now()); }
 const mlGeminiKeyLocks = new Map(), mlGeminiLastSend = new Map();
 async function mlWithGeminiKeySlot(id, gapMs, task) {
@@ -175,7 +164,7 @@ async function mlWithGeminiKeySlot(id, gapMs, task) {
 const mlQueueReady = chrome.storage?.local?.get(['mlParallelLimit', 'mlRouterCooldowns']).then(stored => {
   if (Number.isInteger(stored.mlParallelLimit)) mlRouterQueue.limit = Math.max(1, Math.min(8, stored.mlParallelLimit));
   for (const [scope, value] of Object.entries(stored.mlRouterCooldowns || {})) {
-    if ((scope === 'account' || MLProviders.catalog.openrouter.some(([id]) => id === scope) || MLProviders.catalog.ollama.some(([id]) => id === scope)) && Number.isFinite(value?.until) && value.until > Date.now() && value.until > (mlCooldowns.get(scope)?.until || 0)) mlCooldowns.set(scope, value);
+    if ((scope === 'account' || MLProviders.catalog.openrouter.some(([id]) => id === scope)) && Number.isFinite(value?.until) && value.until > Date.now() && value.until > (mlCooldowns.get(scope)?.until || 0)) mlCooldowns.set(scope, value);
   }
 }).catch(() => {});
 function mlCooldownError(model) {
@@ -203,7 +192,7 @@ async function mlRememberCooldown(config, response, data) {
 function mlEnqueue(config, task, owner) {
   if (config.provider === 'gemini') return enqueueWithRateLimit(task, { retry: false });
   if (owner === undefined) { owner = `manual:${++mlManualOwner}`; mlRouterQueue.begin(owner); }
-  const policy = config.provider === 'ollama' ? MLProviders.ollamaPolicy(config.model, config.allowed?.ollama) : MLProviders.routerPolicy(config.model);
+  const policy = MLProviders.routerPolicy(config.model);
   return Promise.resolve(mlQueueReady).then(() => mlRouterQueue.enqueue(owner, timing => {
     const cooldown = mlCooldownError(config.model); if (cooldown) throw cooldown;
     return task(timing);
@@ -283,7 +272,6 @@ async function mlConfig() {
   const config = MLProviders.settings({ ...settings, translationGlossary: local.translationGlossary ?? settings.translationGlossary }, prefs);
   config.allowed = {
     openrouter: MLProviders.effectiveModels('openrouter', prefs).map(e => e.modelId),
-    ollama: MLProviders.effectiveModels('ollama', prefs).map(e => e.modelId),
     gemini: MLProviders.effectiveModels('gemini', prefs).map(e => e.modelId),
   };
   return { ...config, batching: await mlCapabilities(config) };
@@ -291,7 +279,7 @@ async function mlConfig() {
 /* Model catalog refresh: runs in the service worker so raw keys never reach UI pages.
  * Keeps the previous list when every key fails (open failure, like Hera). */
 async function mlRefreshModels(provider) {
-  if (!['gemini', 'openrouter', 'ollama'].includes(provider)) throw new Error(T('err_unknown_provider'));
+  if (!['gemini', 'openrouter'].includes(provider)) throw new Error(T('err_unknown_provider'));
   const prefs = await MLProviders.modelPreferences();
   let keys = [];
   if (typeof MLKeys !== 'undefined' && typeof MLKeys.all === 'function') {
@@ -324,10 +312,6 @@ async function mlRefreshModels(provider) {
 async function mlKey(provider) {
   if (typeof MLKeys !== 'undefined') return MLKeys.active(provider);
   if (provider === 'gemini') return getActiveApiKey();
-  if (provider === 'ollama') {
-    const stored = await chrome.storage.local.get(['ollamaApiKey']);
-    return stored.ollamaApiKey || '';
-  }
   const stored = await chrome.storage.local.get(['openrouterApiKey']);
   return stored.openrouterApiKey || '';
 }
@@ -346,8 +330,6 @@ function mlAccessError(config, status, message) {
     actionUrl = 'https://openrouter.ai/settings/privacy';
   } else if (status === 429) {
     code = 'PROVIDER_RATE_LIMITED'; advice = T('pg_advice_rate');
-  } else if (config.provider === 'ollama' && status === 400 && /image input/i.test(message)) {
-    code = 'MODEL_VISION_UNSUPPORTED'; advice = T('pg_advice_vision');
   } else if (config.provider === 'openrouter' && status === 404 && /(?:no (?:available )?endpoints|no providers|parameters|routing)/i.test(message)) {
     code = 'MODEL_ENDPOINT_UNAVAILABLE'; advice = T('pg_advice_endpoint');
   } else if (config.provider === 'openrouter' && status === 400 && /(?:thinking|reasoning|response_format|json mode|unsupported.*parameter)/i.test(message)) {
@@ -418,14 +400,9 @@ async function mlProviderAttempt(config, prompt, images, keyOverride, owner) {
     const picked = await mlPickOpenrouterKey(owner);
     key = picked.key; routerKeyId = picked.id; release = picked.release;
   }
-  if (!key && config.provider === 'ollama') {
-    const picked = await mlPickOllamaKey(owner);
-    key = picked.key; routerKeyId = picked.id; release = picked.release;
-  }
   if (!key) key = await mlKey(config.provider);
-  if (!key) throw new Error(T('pg_provider_key_missing', { provider: config.provider === 'gemini' ? 'Gemini' : config.provider === 'openrouter' ? 'OpenRouter' : 'Ollama' }));
-  const timeoutMs = config.provider === 'openrouter' ? MLProviders.routerPolicy(config.model).timeoutMs
-    : config.provider === 'ollama' ? MLProviders.ollamaPolicy(config.model).timeoutMs : 60000;
+  if (!key) throw new Error(T('pg_provider_key_missing', { provider: config.provider === 'gemini' ? 'Gemini' : 'OpenRouter' }));
+  const timeoutMs = config.provider === 'openrouter' ? MLProviders.routerPolicy(config.model).timeoutMs : 60000;
   const streaming = config.provider === 'openrouter' && Boolean(config.maxOutputTokens);
   const controller = new AbortController();
   let timer = 0, idleTimer = 0, absoluteTimer = 0, idleFired = false, activity;
@@ -436,9 +413,9 @@ async function mlProviderAttempt(config, prompt, images, keyOverride, owner) {
   } else timer = setTimeout(() => controller.abort(), timeoutMs);
   let response;
   try {
-    const router = config.provider === 'openrouter', cloud = config.provider === 'ollama';
+    const router = config.provider === 'openrouter';
     const body = router ? MLProviders.routerBody(config.model, prompt, images, config.maxOutputTokens || 8192, config.regionsOutput === true, config.allowed?.openrouter)
-    : cloud ? MLProviders.ollamaBody(config.model, prompt, images, config.allowed?.ollama) : {
+    : {
       contents: [{ role: 'user', parts: [{ text: prompt }, ...images.flatMap(image => {
         const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(image.dataUrl);
         if (!match) throw new Error(T('pg_invalid_crop'));
@@ -450,10 +427,9 @@ async function mlProviderAttempt(config, prompt, images, keyOverride, owner) {
     if (new TextEncoder().encode(JSON.stringify(body)).length > 8 * 1024 * 1024) throw Object.assign(new Error(T('pg_batch_too_large')), { notSent: true, stopJob: true, code: 'BATCH_TOO_LARGE' });
     if (geminiKeyId) mlReserveGeminiKey(geminiKeyId);
     const endpoint = router ? 'https://openrouter.ai/api/v1/chat/completions'
-      : cloud ? 'https://ollama.com/api/chat'
       : `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.model)}:generateContent`;
     const send = () => fetch(endpoint, { method: 'POST', signal: controller.signal,
-      headers: { 'Content-Type': 'application/json', ...((router || cloud) ? { Authorization: `Bearer ${key}` } : { 'x-goog-api-key': key }) }, body: JSON.stringify(body) });
+      headers: { 'Content-Type': 'application/json', ...(router ? { Authorization: `Bearer ${key}` } : { 'x-goog-api-key': key }) }, body: JSON.stringify(body) });
     response = geminiKeyId ? await mlWithGeminiKeySlot(geminiKeyId, Number.isFinite(globalThis.mlGeminiGapMs) ? globalThis.mlGeminiGapMs : 2500, send) : await send();
     let data;
     try {
@@ -463,7 +439,7 @@ async function mlProviderAttempt(config, prompt, images, keyOverride, owner) {
       throw error;
     }
     if (!response.ok || data.error) {
-      const cooldown = (router || cloud) && response.status === 429 ? await mlRememberCooldown(config,response,data) : null;
+      const cooldown = router && response.status === 429 ? await mlRememberCooldown(config,response,data) : null;
       const rawDetail = typeof data.error === 'string' ? data.error : (data.error?.message || '');
       const detail = String(rawDetail || JSON.stringify(data)?.slice(0, 240) || T('pg_generic')).replaceAll(key, '[anahtar]');
       if (data.error?.metadata?.limit_source === 'openrouter_in_flight_budget') throw Object.assign(new Error(T('pg_in_flight_budget')), { stopJob: true, code: 'PROVIDER_IN_FLIGHT_BUDGET', httpStatus: response.status });
@@ -474,9 +450,8 @@ async function mlProviderAttempt(config, prompt, images, keyOverride, owner) {
       throw failure;
     }
     const text = router ? data.choices?.[0]?.message?.content
-      : cloud ? data.message?.content
       : data.candidates?.[0]?.content?.parts?.filter(p => !p.thought).map(p => p.text || '').join('');
-    const finish = router ? data.choices?.[0]?.finish_reason : cloud ? data.done_reason : data.candidates?.[0]?.finishReason;
+    const finish = router ? data.choices?.[0]?.finish_reason : data.candidates?.[0]?.finishReason;
     if (['length', 'MAX_TOKENS'].includes(finish)) throw Object.assign(new Error(T('pg_stream_cut', { finish })), { code: 'PROVIDER_OUTPUT_TRUNCATED', stopJob: true });
     if (['SAFETY', 'content_filter'].includes(finish)) throw new Error(T('pg_unfinished', { finish }));
     if (typeof text !== 'string' || !text.trim()) throw new Error(T('pg_empty_provider'));
@@ -539,7 +514,7 @@ async function mlReadStream(response, onActivity) {
 async function mlTranslate(message) {
   if (message.jobId) return mlTranslateGroup(message);
   const { config, regions, imageId, context = [] } = message;
-  const checked = MLProviders.settings({ translationProvider: config.provider, geminiModel: config.model, openrouterModel: config.model, ollamaModel: config.model,
+  const checked = MLProviders.settings({ translationProvider: config.provider, geminiModel: config.model, openrouterModel: config.model,
     geminiFallback: config.geminiFallback,
     contributorConsent: config.model.endsWith('-contributor') ? (await chrome.storage.sync.get('contributorConsent')).contributorConsent : false,
     contentType: config.contentType, localDetector: config.localDetector, seriesName: config.series, translationInstructions: config.instructions, translationGlossary: config.glossary });
@@ -580,7 +555,7 @@ async function mlDigest(value) {
 async function mlTranslateGroup(message) {
   const { regions, context = [], owner, retry } = message;
   if (typeof message.jobId !== 'string' || message.jobId.length > 80) throw new Error(T('pg_invalid_job_id'));
-  const checked = MLProviders.settings({ translationProvider: message.config.provider, geminiModel: message.config.model, openrouterModel: message.config.model, ollamaModel: message.config.model,
+  const checked = MLProviders.settings({ translationProvider: message.config.provider, geminiModel: message.config.model, openrouterModel: message.config.model,
     geminiFallback: message.config.geminiFallback,
     contributorConsent: message.config.model.endsWith('-contributor') ? (await chrome.storage.sync.get('contributorConsent')).contributorConsent : false,
     contentType: message.config.contentType, localDetector: message.config.localDetector, seriesName: message.config.series, translationInstructions: message.config.instructions, translationGlossary: message.config.glossary });
@@ -671,7 +646,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       }
       if (message.paused) mlRouterQueue.pause(owner);
       else {
-        if (message.retry !== true) { mlBatchReset('gemini', owner); mlBatchReset('openrouter', owner); mlBatchReset('ollama', owner); }
+        if (message.retry !== true) { mlBatchReset('gemini', owner); mlBatchReset('openrouter', owner); }
         mlRouterQueue.begin(owner, message.retry === true);
       }
       return batching ? {batching} : true;

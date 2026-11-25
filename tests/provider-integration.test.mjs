@@ -182,14 +182,6 @@ test('no matching JSON endpoint is distinguished from data policy and age restri
   assert.equal(context.mlAccessError(config, 404, 'No endpoints found that support all requested parameters').code, 'MODEL_ENDPOINT_UNAVAILABLE');
   assert.equal(context.mlAccessError(config, 404, 'No endpoints matching your data policy').code, 'PROVIDER_DATA_POLICY_BLOCK');
 });
-test('ollama image refusal is actionable and stops the job', () => {
-  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
-  vm.runInContext("MLI18N.__testLang('tr')", context);
-  const error = context.mlAccessError({ provider: 'ollama', model: 'gemma4:31b' }, 400, 'this model does not support image input');
-  assert.equal(error.code, 'MODEL_VISION_UNSUPPORTED'); assert.equal(error.stopJob, true);
-  assert.ok(error.message.includes('başka model'));
-});
-
 test('streamed upstream error preserves its explanation, redacts key and stops without a retry', async () => {
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   vm.runInContext("MLI18N.__testLang('tr')", context);
@@ -322,68 +314,16 @@ test('gemma requests disable thinking and omit the JSON mime type',async()=>{
   assert.equal(body.generationConfig.thinkingConfig.thinkingLevel, 'minimal');
   assert.ok(calls.at(-1).url.includes('gemma-4-26b-a4b-it'));
 });
-test('ollama sends native chat bodies and reads message content',async()=>{
-  const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
-  vm.runInContext("MLI18N.__testLang('tr')", context);
-  context.MLKeys = { active: async () => 'O', all: async () => [{ id: 'o1', key: 'O' }] };
-  context.fetch = async (url, options) => {
-    calls.push({ url, options, body: JSON.parse(options.body) });
-    assert.equal(url, 'https://ollama.com/api/chat');
-    assert.equal(options.headers.Authorization, 'Bearer O');
-    const body = JSON.parse(options.body);
-    assert.equal(body.model, 'gemma4:31b'); assert.equal(body.stream, false); assert.equal(body.format, 'json');
-    assert.deepEqual(body.messages[0].images, ['AAAA']);
-    assert.ok(body.messages[0].content.includes('regionId=r'));
-    return { ok: true, json: async () => ({ message: { content: 'OK' }, done_reason: 'stop' }) };
-  };
-  assert.equal(await context.mlProviderCall({ provider: 'ollama', model: 'gemma4:31b' }, 'Hi', [{ regionId: 'r', dataUrl: 'data:image/png;base64,AAAA' }]), 'OK');
-  assert.equal((await context.mlCapabilities({ provider: 'ollama', model: 'gemma4:31b' })).maxRegions, 12);
-});
-test('ollama keys rotate and a 429 key is skipped',async()=>{
-  const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
-  vm.runInContext("MLI18N.__testLang('tr')", context);
-  vm.runInContext('mlRetryTuning = {delays:[1,1],maxWait:5}; mlGeminiGapMs = 5;', context);
-  context.MLKeys = { active: async () => 'A', all: async () => [{ id: 'a', key: 'A' }, { id: 'b', key: 'B' }] };
-  const config = { provider: 'ollama', model: 'gemma4:31b' };
-  context.fetch = async (url, options) => { calls.push({ url, options });
-    return { ok: true, json: async () => ({ message: { content: 'OK' }, done_reason: 'stop' }) }; };
-  for (let i = 0; i < 4; i++) await context.mlProviderCall(config, 'Hi', [], undefined, 'jobO');
-  assert.deepEqual(calls.map(c => c.options.headers.Authorization), ['Bearer A', 'Bearer B', 'Bearer A', 'Bearer B']);
-  context.fetch = async (url, options) => { calls.push({ url, options });
-    if (options.headers.Authorization.includes('A'))
-      return { ok: false, status: 429, json: async () => ({ error: { message: 'too many', metadata: { provider_name: 'Ollama' } } }) };
-    return { ok: true, json: async () => ({ message: { content: 'OK' }, done_reason: 'stop' }) }; };
-  assert.equal(await context.mlProviderCall({ provider: 'ollama', model: 'gemma4:31b' }, 'Hi', [], undefined, 'jobO'), 'OK');
-  assert.deepEqual(calls.slice(-2).map(c => c.options.headers.Authorization), ['Bearer A', 'Bearer B']);
-});
-test('ollama allows one in-flight request per key and waits for the slot',async()=>{
-  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
-  vm.runInContext("MLI18N.__testLang('tr')", context);
-  context.MLKeys = { active: async () => 'O', all: async () => [{ id: 'o1', key: 'O' }] };
-  const first = await context.mlPickOllamaKey('jobS');
-  const second = context.mlPickOllamaKey('jobS', { maxWaitMs: 5000 });
-  setTimeout(() => first.release(), 100);
-  assert.equal((await second).key, 'O');
-});
-test('ollama overflow still goes out after the wait cap',async()=>{
-  const { context } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
-  vm.runInContext("MLI18N.__testLang('tr')", context);
-  context.MLKeys = { active: async () => 'O', all: async () => [{ id: 'o1', key: 'O' }] };
-  await context.mlPickOllamaKey('jobT');
-  const started = Date.now();
-  assert.equal((await context.mlPickOllamaKey('jobT', { maxWaitMs: 250 })).key, 'O');
-  assert.ok(Date.now() - started < 5000);
-});
 test('string provider errors surface their real message',async()=>{
   const { context, calls } = fixture(); scripts.forEach(source => vm.runInContext(source, context));
   vm.runInContext("MLI18N.__testLang('tr')", context);
   context.MLKeys = { active: async () => 'O', all: async () => [{ id: 'o1', key: 'O' }] };
   context.fetch = async (url, options) => { calls.push({ url, options });
     return { ok: false, status: 400, json: async () => ({ error: 'model requires vision input' }) }; };
-  await assert.rejects(context.mlProviderCall({ provider: 'ollama', model: 'gemma4:31b' }, 'Hi', []),
+  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'openai/gpt-6-luna' }, 'Hi', []),
     e => e.message.includes('HTTP 400') && e.message.includes('model requires vision input'));
   context.fetch = async () => ({ ok: false, status: 400, json: async () => ({ status: 'bad request' }) });
-  await assert.rejects(context.mlProviderCall({ provider: 'ollama', model: 'gemma4:31b' }, 'Hi', []),
+  await assert.rejects(context.mlProviderCall({ provider: 'openrouter', model: 'openai/gpt-6-luna' }, 'Hi', []),
     e => e.message.includes('HTTP 400') && e.message.includes('bad request'));
   assert.equal(calls.length, 1);
 });

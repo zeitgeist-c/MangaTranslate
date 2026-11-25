@@ -4,7 +4,7 @@
 
 **Read manga in Turkish. Select a region, or translate the whole chapter.**
 
-MangaLens TR is a Brave/Chromium Manifest V3 extension that finds the English text in manga, manhwa and manhua pages, translates it to Turkish through Gemini, OpenRouter or Ollama, and paints the Turkish text back into the bubble.
+MangaLens TR is a Brave/Chromium Manifest V3 extension that finds the English text in manga, manhwa and manhua pages, translates it to Turkish through Gemini or OpenRouter, and paints the Turkish text back into the bubble.
 
 Text detection runs locally. Only the crops you choose are sent to the provider you selected.
 
@@ -38,7 +38,7 @@ Text detection runs locally. Only the crops you choose are sent to the provider 
 | **Region select** | drag a box over any text and get the Turkish version in place |
 | **Auto translate** | detect the page's text blocks and translate them in one pass |
 | **Whole chapter** | scan the reader page, translate every bubble, place the result inside the safe area |
-| **Three providers** | Gemini (direct), OpenRouter, or Ollama Cloud — per-provider key lists |
+| **Two providers** | Gemini (direct) or OpenRouter — per-provider key lists |
 | **Key rotation** | requests walk the saved keys in order; a key that returns 429 or hits its quota is rested and the next one is used |
 | **Provider failover** | on Gemini 429/503 the next model in the list is tried automatically; other transient errors chain only when you opt in |
 | **Term dictionary** | your own names and terms keep their Turkish spelling across pages |
@@ -57,7 +57,7 @@ The toolbar popup, 360 px wide.
 
 **Header** — logo and name, the on/off switch for the extension, and the gear that opens Settings.
 
-**Provider tabs** — `Gemini`, `OpenRouter`, `Ollama`. Each tab keeps its own model and key list; switching provider does not lose the others.
+**Provider tabs** — `Gemini`, `OpenRouter`. Each tab keeps its own model and key list; switching provider does not lose the others.
 
 **Translation model** — the model list for the selected provider, with the active choice highlighted. Under it, a key summary shows how many keys are registered and whether the active one is usable (`2 keys saved`).
 
@@ -78,7 +78,6 @@ The same popup with the OpenRouter tab active. The model list changes to OpenRou
 
 Each provider is independent: a Gemini key never appears under OpenRouter and vice versa.
 
-Ollama uses Ollama Cloud (`https://ollama.com/api/chat`) with your own API key — crops are sent to Ollama's cloud like any other provider.
 
 ### 3. Settings — API keys
 
@@ -131,7 +130,7 @@ It also states the data flow plainly:
 
 ## Install
 
-Release package: `release/MangaLensTR-3.9.9.zip`.
+Release package: `release/MangaLensTR-3.9.10.zip`.
 
 The extension is loaded unpacked from `dist/` (live test copy):
 
@@ -157,7 +156,6 @@ Parallelism adapts: Gemini opens one lane per key (max 4) with 2.5 s spacing per
 |---|---|---|
 | **Gemini** | a Google AI Studio key | direct path, no aggregator in between |
 | **OpenRouter** | an OpenRouter key | one key reaches many model families |
-| **Ollama** | Ollama Cloud API key | crops are sent to Ollama Cloud |
 
 Keys per provider are stored as a list. Requests walk the list in order, each key serving up to its concurrency limit, then wrap around. A key that returns 429 or burns its quota is rested for a while and skipped.
 
