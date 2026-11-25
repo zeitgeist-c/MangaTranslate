@@ -81,7 +81,7 @@ Each provider is independent: a Gemini key never appears under OpenRouter and vi
 
 ### 3. Settings — API keys
 
-![Settings · API keys](./docs/screenshots/03-ayarlar-anahtarlar.png)
+![Settings · API keys](./docs/screenshots/03-settings-keys.png)
 
 Three sections in the left rail: **API Keys**, **Translation Preferences**, **About**.
 
@@ -95,7 +95,7 @@ Under API keys, one tab per provider, each with its own key ring:
 
 ### 4. Settings — Translation preferences
 
-![Settings · Translation preferences](./docs/screenshots/04-ceviri-tercihleri.png)
+![Settings · Translation preferences](./docs/screenshots/04-translation-preferences.png)
 
 **Reading and scanning**
 - **Content type** — `Auto / unknown`, `Manga`, `Manhwa`, `Manhua`. It tunes how bubbles are expected to look.
@@ -114,7 +114,7 @@ Under API keys, one tab per provider, each with its own key ring:
 
 ### 5. Settings — About
 
-![Settings · About](./docs/screenshots/05-hakkinda.png)
+![Settings · About](./docs/screenshots/05-about.png)
 
 The version, what the extension does, and the honest note about whole-chapter being a preview whose text recall is not yet verified against human labels.
 

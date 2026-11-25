@@ -59,9 +59,6 @@ export function transform(tile, modelWidth, modelHeight, resize = 'stretch') {
 export function toSource(point, t) {
   return [(point[0] - t.padX) / t.scaleX + t.tile.x, (point[1] - t.padY) / t.scaleY + t.tile.y];
 }
-export function toModel(point, t) {
-  return [(point[0] - t.tile.x) * t.scaleX + t.padX, (point[1] - t.tile.y) * t.scaleY + t.padY];
-}
 export function modelBoxToSource(value, t, width, height) {
   const b = box(value), a = toSource(b.slice(0, 2), t), c = toSource(b.slice(2), t);
   // First clip to the tile: padded detections must not leak into an adjacent tile.
